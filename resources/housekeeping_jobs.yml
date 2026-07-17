@@ -40,3 +40,9 @@ resources:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters: ["housekeeping", "orphaned-jobs"]
+        - task_key: jobs_on_all_purpose
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters: ["housekeeping", "jobs-on-all-purpose"]

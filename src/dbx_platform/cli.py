@@ -101,6 +101,43 @@ def cmd_cost_top_jobs(args) -> int:
     return 0
 
 
+def cmd_cost_cluster_utilization(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    cpu = args.cpu_threshold if args.cpu_threshold is not None else s.util_cpu_threshold_pct
+    mem = args.mem_threshold if args.mem_threshold is not None else s.util_mem_threshold_pct
+    rows = cost.cluster_utilization(w, _warehouse_id(args, s), days)
+    findings = cost.classify_cluster_utilization(rows, cpu, mem)
+    emit(args, f"Under-utilized clusters — last {days}d (ranked by cost)", findings,
+         ["Report only — right-sizing is applied by the cluster owner "
+          "(see docs/runbook.md)."])
+    return 0
+
+
+def cmd_cost_failed_run_waste(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = cost.failed_run_waste(w, _warehouse_id(args, s), days, args.limit)
+    emit(args, f"List cost burned on failed job runs — last {days}d", rows)
+    return 0
+
+
+def cmd_cost_warehouse_utilization(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = cost.warehouse_utilization(w, _warehouse_id(args, s), days)
+    findings = cost.classify_warehouse_utilization(
+        rows, s.warehouse_min_queries, s.warehouse_queue_warn_seconds
+    )
+    emit(args, f"Mis-sized SQL warehouses — last {days}d", findings,
+         ["Report only — includes both directions: idle spend and sustained "
+          "queueing."])
+    return 0
+
+
 # --- housekeeping -------------------------------------------------------------
 
 def cmd_stale_clusters(args) -> int:
@@ -136,6 +173,18 @@ def cmd_orphaned_jobs(args) -> int:
         for o in orphans:
             if o.get("has_schedule") and housekeeping.pause_job(w, o["job_id"]):
                 print(f"  applied: paused job {o['job_id']} ({o['name']})")
+    return 0
+
+
+def cmd_jobs_on_all_purpose(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    findings = housekeeping.find_jobs_on_all_purpose(
+        housekeeping.fetch_jobs_with_clusters(w), s.allpurpose_fixed_workers_max
+    )
+    emit(args, "Jobs on all-purpose compute / oversized fixed clusters", findings,
+         ["Report only — moving a task to a job cluster is a job-spec change "
+          "owned by the job's team."])
     return 0
 
 
@@ -391,6 +440,21 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--days", type=int, default=None)
     x.add_argument("--limit", type=int, default=20)
     x.set_defaults(func=cmd_cost_top_jobs)
+    x = pc.add_parser("cluster-utilization", parents=[common],
+                      help="Under-utilized clusters (CPU/memory vs size, by cost)")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--cpu-threshold", type=int, default=None, help="p95 CPU %% floor")
+    x.add_argument("--mem-threshold", type=int, default=None, help="avg memory %% floor")
+    x.set_defaults(func=cmd_cost_cluster_utilization)
+    x = pc.add_parser("failed-run-waste", parents=[common],
+                      help="$ burned on failed/timed-out job runs")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--limit", type=int, default=20)
+    x.set_defaults(func=cmd_cost_failed_run_waste)
+    x = pc.add_parser("warehouse-utilization", parents=[common],
+                      help="SQL warehouses: idle spend or sustained queueing")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_cost_warehouse_utilization)
 
     # housekeeping
     ph = sub.add_parser("housekeeping", help="Cleanup reports").add_subparsers(dest="command")
@@ -402,6 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
     x = ph.add_parser("orphaned-jobs", parents=[common, mutating],
                       help="Jobs owned by missing principals")
     x.set_defaults(func=cmd_orphaned_jobs)
+    x = ph.add_parser("jobs-on-all-purpose", parents=[common],
+                      help="Jobs paying the all-purpose premium or pinning "
+                           "large fixed clusters")
+    x.set_defaults(func=cmd_jobs_on_all_purpose)
 
     # security
     ps = sub.add_parser("security", help="Security & audit").add_subparsers(dest="command")

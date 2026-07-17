@@ -34,6 +34,12 @@ class Settings:
     ml_max_models: int = 500
     gpu_max_uptime_hours: int = 8
     vector_search_grace_hours: int = 24
+    # Right-sizing
+    util_cpu_threshold_pct: int = 30
+    util_mem_threshold_pct: int = 50
+    allpurpose_fixed_workers_max: int = 10
+    warehouse_min_queries: int = 50
+    warehouse_queue_warn_seconds: int = 5
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30

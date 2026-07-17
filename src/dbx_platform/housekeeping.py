@@ -142,6 +142,78 @@ def find_orphaned_jobs(jobs: list[dict], active_principals: set[str]) -> list[di
     return orphans
 
 
+# --- jobs on all-purpose compute -----------------------------------------
+
+def fetch_jobs_with_clusters(w: WorkspaceClient) -> list[dict]:
+    out = []
+    for j in w.jobs.list(expand_tasks=True):
+        s = j.settings
+        tasks = []
+        for t in (s.tasks if s else None) or []:
+            nc = t.new_cluster
+            tasks.append(
+                {
+                    "task_key": t.task_key or "",
+                    "existing_cluster_id": t.existing_cluster_id or "",
+                    "fixed_workers": (nc.num_workers or 0) if nc and not nc.autoscale else 0,
+                }
+            )
+        job_clusters = []
+        for jc in (s.job_clusters if s else None) or []:
+            nc = jc.new_cluster
+            job_clusters.append(
+                {
+                    "key": jc.job_cluster_key or "",
+                    "fixed_workers": (nc.num_workers or 0) if nc and not nc.autoscale else 0,
+                }
+            )
+        out.append(
+            {
+                "job_id": j.job_id,
+                "name": s.name if s else "",
+                "creator": j.creator_user_name or "",
+                "tasks": tasks,
+                "job_clusters": job_clusters,
+            }
+        )
+    return out
+
+
+def find_jobs_on_all_purpose(jobs: list[dict], fixed_workers_max: int) -> list[dict]:
+    """Pure decision logic: jobs paying the all-purpose premium or pinning
+    large fixed-size clusters.
+
+    - Tasks bound to an all-purpose cluster (existing_cluster_id) pay roughly
+      double the job-compute DBU rate.
+    - Task/job clusters with autoscale disabled and more than
+      ``fixed_workers_max`` workers hold capacity whether used or not.
+    """
+    findings = []
+
+    def flag(j: dict, reason: str, action: str) -> None:
+        findings.append(
+            {"job_id": j["job_id"], "name": j["name"], "creator": j["creator"],
+             "reason": reason, "action": action}
+        )
+
+    for j in jobs:
+        for t in j.get("tasks", []):
+            if t.get("existing_cluster_id"):
+                flag(j, f"task '{t['task_key']}' runs on all-purpose cluster "
+                        f"{t['existing_cluster_id']} (~2x job-compute DBU rate)",
+                     "move-to-job-cluster")
+            elif t.get("fixed_workers", 0) > fixed_workers_max:
+                flag(j, f"task '{t['task_key']}' pins {t['fixed_workers']} fixed workers "
+                        f"without autoscale (threshold {fixed_workers_max})",
+                     "enable-autoscale")
+        for jc in j.get("job_clusters", []):
+            if jc.get("fixed_workers", 0) > fixed_workers_max:
+                flag(j, f"job cluster '{jc['key']}' pins {jc['fixed_workers']} fixed "
+                        f"workers without autoscale (threshold {fixed_workers_max})",
+                     "enable-autoscale")
+    return findings
+
+
 def pause_job(w: WorkspaceClient, job_id: int) -> bool:
     """Pause a job's schedule/trigger/continuous run. Never deletes. Returns
     True if anything was changed."""
