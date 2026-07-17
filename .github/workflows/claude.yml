@@ -22,11 +22,15 @@ on:
 jobs:
   claude:
     runs-on: ubuntu-latest
+    # actions: read lets Claude inspect failing CI runs. It must be granted here
+    # *and* requested via additional_permissions below — the GITHUB_TOKEN can only
+    # ever carry what this block grants. (No id-token: write — that is only for
+    # Workload Identity Federation, and this workflow authenticates by API key.)
     permissions:
       contents: write
       pull-requests: write
       issues: write
-      id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +45,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Read-only access to Actions so Claude can inspect failing CI runs.
           additional_permissions: |
             actions: read
           # Base file + GitHub tools are always included; this adds the project
