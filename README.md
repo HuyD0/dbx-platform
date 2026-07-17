@@ -23,6 +23,9 @@ dbx-platform housekeeping stale-clusters        # first report, REST-only
 
 Full setup (system tables, warehouse, dashboards): **[docs/setup.md](docs/setup.md)**.
 
+Prefer not to use a local machine at all? **[docs/cloud-setup.md](docs/cloud-setup.md)**
+wires up the browser-only loop: comment `@claude` on an issue → PR → CI → merge → deploy.
+
 ## What you get
 
 ### CLI / scheduled jobs

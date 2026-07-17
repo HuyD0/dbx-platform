@@ -1,0 +1,52 @@
+name: Claude
+
+# Mention @claude in an issue, an issue comment, or a PR review comment and
+# Claude will pick up the task and push a branch / open a PR. This is what makes
+# the repo drivable from any device — no laptop, no local toolchain.
+#
+# Requires one repo secret:
+#   ANTHROPIC_API_KEY   https://console.anthropic.com → API keys
+#
+# The action itself detects the @claude trigger phrase, so no `if:` filter here.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned, labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: databricks/setup-cli@main
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Read-only access to Actions so Claude can inspect failing CI runs.
+          additional_permissions: |
+            actions: read
+          # Base file + GitHub tools are always included; this adds the project
+          # toolchain so Claude can lint, test, and validate the bundle before
+          # opening a PR. Bundle commands are validate-only on purpose — no
+          # deploy from a comment; deploys go through the reviewed main branch.
+          claude_args: |
+            --allowedTools "Bash(pip install:*),Bash(ruff:*),Bash(pytest:*),Bash(python -m build:*),Bash(databricks bundle validate:*)"
