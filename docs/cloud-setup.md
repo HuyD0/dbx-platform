@@ -8,69 +8,100 @@ Once this checklist is done, the loop is:
 > comment `@claude ...` on an issue → Claude opens a PR → CI lints/tests/validates the
 > bundle → you merge to `main` → `deploy.yml` deploys to the `prod` target.
 
-Everything here is a **one-time** setup. Steps 1–5 must be done by a human, because
-they mint credentials.
+## Auth model: keyless OIDC
+
+There is **no Databricks service-principal secret**, and no client secret exists for the
+app registration at all. GitHub Actions authenticates like this:
+
+```
+GitHub OIDC token  →  azure/login@v2 (federated credential)  →  az token
+                   →  Databricks CLI (DATABRICKS_AUTH_TYPE=azure-cli)  →  workspace
+```
+
+The federated credential is bound to the subject
+`repo:HuyD0/dbx-platform:environment:production`. That is why every workspace-touching
+job declares `environment: production` — **without it GitHub mints a token with a
+different subject and Azure refuses the exchange.** It is also the security boundary:
+`pull_request` runs never get a credential, so untrusted PR-branch code cannot reach the
+workspace.
+
+Same pattern as `agent-eval`, but a **separate identity** (`github-actions-dbx-platform`)
+so a compromise here cannot touch agent-eval's SP — which holds Contributor at
+subscription scope.
 
 ---
 
-## 1. Set `main` as the default branch
+## Already provisioned
 
-Repo → **Settings** → **General** → *Default branch* → switch to `main`.
+These exist; nothing to do.
+
+| Thing | Value |
+|---|---|
+| Entra app / SP | `github-actions-dbx-platform` — appId `b74a6820-d0ac-454f-8c32-02141cba3c8a` |
+| Federated credential | `repo:HuyD0/dbx-platform:environment:production` |
+| Workspace registration | registered via SCIM, member of the `admins` group |
+| Workspace | `dbx-dev` — `https://adb-7405609799238491.11.azuredatabricks.net` |
+| SQL warehouse | `09c77e5867b64a0d` (Serverless Starter Warehouse) |
+
+Workspace **admin** is required because the security job calls the token-management and
+SCIM APIs. To avoid granting it, strip the security job from the deployment.
+
+---
+
+## What still needs you
+
+All of it is in the GitHub web UI — no laptop, no CLI.
+
+### 1. Set `main` as the default branch
+
+Repo → **Settings** → **General** → *Default branch* → `main`.
 
 This matters more than it looks:
 
-- `ci.yml` and `deploy.yml` trigger on `push: branches: [main]`. If the default branch
-  is something else, a merged PR lands there and **the deploy never fires.**
-- GitHub runs `issue_comment`-triggered workflows **only from the default branch's copy
-  of the file.** `claude.yml` will not respond to `@claude` until it is on the default
-  branch.
+- `ci.yml` / `deploy.yml` trigger on `push: branches: [main]`. If the default branch is
+  something else, a merged PR lands there and **the deploy never fires.**
+- GitHub runs `issue_comment` workflows **only from the default branch's copy of the
+  file**, so `@claude` will not respond until `claude.yml` is on the default branch.
 
-## 2. Create the Databricks service principal
+### 2. Create the `production` environment
 
-Account console (<https://accounts.azuredatabricks.net>) → **User management** →
-**Service principals** → **Add service principal**, e.g. `dbx-platform-ci`.
+Repo → **Settings** → **Environments** → **New environment** → name it exactly
+`production`.
 
-Then grant it workspace **Admin** (workspace admin console → *Identity and access* →
-*Service principals*). Admin is required because the security job calls the
-token-management and SCIM APIs. See [service-principal.md](service-principal.md) for the
-non-admin variant.
+Not cosmetic: the federated credential's subject embeds this name. Skip it and every
+Azure login fails with a subject-mismatch error.
 
-## 3. Generate an OAuth secret
+### 3. Add the repository secrets
 
-Account console → the service principal → **Secrets** → **Generate secret**.
-Record the **client ID** (application ID) and the **secret** — the secret is shown once.
+Repo → **Settings** → **Secrets and variables** → **Actions**:
 
-## 4. Get a SQL warehouse ID
+| Secret | Value |
+|---|---|
+| `DATABRICKS_HOST` | `https://adb-7405609799238491.11.azuredatabricks.net` |
+| `DATABRICKS_WAREHOUSE_ID` | `09c77e5867b64a0d` |
+| `AZURE_CLIENT_ID` | `b74a6820-d0ac-454f-8c32-02141cba3c8a` |
+| `AZURE_TENANT_ID` | `7f6a2cf9-5e4e-46ae-95d4-74016c1df1a6` |
+| `AZURE_SUBSCRIPTION_ID` | `ea936670-dda1-4884-8467-49c225bf3e83` |
+| `ANTHROPIC_API_KEY` | <https://console.anthropic.com> → API keys |
 
-Workspace → **SQL Warehouses** → pick one → the ID is in the URL / *Connection details*.
-The dashboards and system-table job tasks need it; the bundle has no default.
+The four `AZURE_*`/`DATABRICKS_*` values are identifiers, not credentials — none of them
+grant access on their own. They live in secrets to match the `agent-eval` convention.
+`ANTHROPIC_API_KEY` is the one real secret; the Claude action also supports keyless WIF
+if you want to remove it later.
 
-## 5. Add the repository secrets
+### 4. Verify (do not skip)
 
-Repo → **Settings** → **Secrets and variables** → **Actions** → *New repository secret*:
-
-| Secret | Value | Used by |
-|---|---|---|
-| `DATABRICKS_HOST` | `https://adb-7405609799238491.11.azuredatabricks.net` | ci, deploy |
-| `DATABRICKS_CLIENT_ID` | service principal application ID | ci, deploy |
-| `DATABRICKS_CLIENT_SECRET` | the OAuth secret from step 3 | ci, deploy |
-| `DATABRICKS_WAREHOUSE_ID` | warehouse ID from step 4 | ci, deploy |
-| `ANTHROPIC_API_KEY` | <https://console.anthropic.com> → API keys | claude |
-
-`ci.yml` and `deploy.yml` self-skip while `DATABRICKS_HOST` is unset, so they go green
-without ever touching the workspace. **A green CI run does not prove the workspace
-connection works** — that only starts being tested once these secrets exist.
-
-## 6. Verify (do not skip)
-
-1. Actions tab → **Deploy** → *Run workflow* on `main`.
-2. Confirm the run does **not** print `Deploy skipped:` — that string means the secrets
-   aren't being read.
+1. Actions → **Deploy** → *Run workflow* on `main`.
+2. The **Confirm the authenticated identity** step should print
+   `github-actions-dbx-platform`. That is the proof OIDC → Databricks works.
 3. Confirm `databricks bundle deploy -t prod` succeeds.
 4. Open an issue, comment `@claude say hello and list the repo's CLI commands`, and
    confirm Claude replies.
 
-## 7. Optional but recommended: run prod jobs as the service principal
+The workflows no longer self-skip when unconfigured — a deploy that cannot authenticate
+now fails loudly instead of exiting green having done nothing.
+
+### 5. Optional: run prod jobs as the service principal
 
 Add to the `prod` target in `databricks.yml` so scheduled jobs stop running as a human:
 
@@ -78,10 +109,10 @@ Add to the `prod` target in `databricks.yml` so scheduled jobs stop running as a
   prod:
     mode: production
     run_as:
-      service_principal_name: <application-id>
+      service_principal_name: b74a6820-d0ac-454f-8c32-02141cba3c8a
 ```
 
-Do this only after step 6 passes, so a failure is unambiguous.
+Do this only after step 4 passes, so a failure is unambiguous.
 
 ---
 
@@ -95,10 +126,12 @@ Do this only after step 6 passes, so a failure is unambiguous.
 | Ad-hoc admin command | Run the job in the Databricks UI, or add a `workflow_dispatch` job |
 | Inspect a failing run | `@claude` on the PR — it has `actions: read` |
 
-## Note on local CLI failures
+## Note on local CLI use
 
-On some machines `gh` and the `databricks` CLI fail with
-`tls: failed to verify certificate: x509: OSStatus -26276`. That is a local macOS
-cert-store problem affecting Go binaries; plain `git` is unaffected. It has no bearing
-on CI — GitHub's runners have a clean cert store. It's a reason to prefer this cloud
-path, not something that needs fixing first.
+Use `gh` and the `databricks` CLI locally as normal — the cloud path exists so you
+*don't have to*, not because anything is wrong with your machine.
+
+(For agents: inside Claude Code's Bash sandbox both CLIs fail with
+`tls: failed to verify certificate: x509: OSStatus -26276`. That is the sandbox blocking
+the macOS trust daemon — `errSecInternalComponent`, not an untrusted cert — and it does
+not reproduce in a normal terminal. `az`, Python, and `git` are unaffected.)

@@ -1,4 +1,10 @@
-# CI/CD with a service principal
+# CI/CD with a service principal (client-secret variant)
+
+> **Not the current setup.** CI/CD now authenticates with **keyless GitHub OIDC** — no
+> client secret exists — see **[cloud-setup.md](cloud-setup.md)**. The workflows no
+> longer read `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`, so following the
+> steps below will not activate them. Kept for the non-admin SP guidance in §2 and as
+> a reference for the client-secret approach.
 
 Local use runs under your interactive OAuth login. CI cannot log in interactively,
 so the GitHub Actions workflows stay in "skip" mode until you configure a service

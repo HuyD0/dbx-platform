@@ -5,18 +5,18 @@ on:
   push:
     branches: [main]
 
-# Secrets are optional: lint/test/build run without any. The bundle-validate
-# job authenticates to the workspace, so it is skipped (with a notice) until
-# the secrets below are configured — see docs/service-principal.md.
-env:
-  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-  BUNDLE_VAR_warehouse_id: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+# Auth: keyless. No secrets are needed for lint/test/build — that job stays
+# credential-free so it is safe to run on PR branches. The workspace-touching
+# job (bundle validate) uses azure/login OIDC + the Databricks CLI's azure-cli
+# auth type, and deliberately does NOT run on pull_request: a federated
+# credential must never be reachable from untrusted PR-branch code.
+# See docs/cloud-setup.md.
 
 jobs:
   lint-test-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,16 +36,34 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
 
   bundle-validate:
+    # Push/dispatch only — never on pull_request. The `production` environment
+    # is what the federated credential's subject is scoped to
+    # (repo:HuyD0/dbx-platform:environment:production), so a PR fork cannot
+    # mint a token even if it could reach this job.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # OIDC federated login to Azure (→ Databricks azure-cli auth)
+      contents: read
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_AUTH_TYPE: azure-cli
+      BUNDLE_VAR_warehouse_id: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
     steps:
       - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
+      - name: Azure login (OIDC, keyless)
+        # No standing client secret exists for this app registration by design.
+        # Requires the federated credential on github-actions-dbx-platform for
+        # subject repo:HuyD0/dbx-platform:environment:production.
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Install the Databricks CLI
+        # Pinned to an immutable commit SHA rather than a floating tag/@main, so a
+        # retagged or force-pushed upstream cannot silently change what runs here.
+        uses: databricks/setup-cli@71b5fa6b2b94c9a543658f65ebb6b477913f8626 # v1.6.0
       - name: Validate bundle
-        if: env.DATABRICKS_HOST != ''
         run: databricks bundle validate -t prod
-      - name: Skipped (no workspace credentials configured)
-        if: env.DATABRICKS_HOST == ''
-        run: |
-          echo "bundle validate skipped: DATABRICKS_HOST secret not set."
-          echo "Configure DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET"
-          echo "to enable workspace validation — see docs/service-principal.md."

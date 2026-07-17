@@ -66,12 +66,20 @@ stay that way so CI runs without secrets.
 
 ## CI/CD
 
-- `ci.yml` — lint, test, build wheel, verify packaged data, on PR and push to `main`.
-  The `bundle-validate` job self-skips when `DATABRICKS_HOST` is unset.
-- `deploy.yml` — `bundle deploy -t prod` on push to `main`. Self-skips without secrets.
+- `ci.yml` — `lint-test-build` (credential-free, runs on PRs); `bundle-validate`
+  (push only, needs the workspace).
+- `deploy.yml` — `bundle deploy -t prod` on push to `main` or manual dispatch.
 - `claude.yml` — `@claude` mentions on issues/PRs.
 
-Workspace credentials come from repo secrets (`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`,
-`DATABRICKS_CLIENT_SECRET`, `DATABRICKS_WAREHOUSE_ID`) — see `docs/service-principal.md`.
-Never commit a credential; the deploy path authenticates as a service principal via
-OAuth M2M.
+**Auth is keyless OIDC** — no Databricks client secret exists. `azure/login@v2` exchanges
+a GitHub OIDC token for an Azure token, and the Databricks CLI consumes it via
+`DATABRICKS_AUTH_TYPE=azure-cli`. Two rules follow, and breaking either is silent:
+
+- Any workspace-touching job **must** declare `environment: production` and
+  `permissions: id-token: write`. The federated credential's subject is
+  `repo:HuyD0/dbx-platform:environment:production`; without the environment the token
+  carries a different subject and Azure refuses the exchange.
+- Never put `azure/login` on a `pull_request` trigger — that would expose a
+  workspace credential to untrusted PR-branch code.
+
+Never commit a credential. Full setup and the provisioned IDs: `docs/cloud-setup.md`.

@@ -106,8 +106,10 @@ databricks bundle validate -t dev
 databricks bundle deploy   -t dev # "[dev <you>]"-prefixed resources, schedules paused
 ```
 
-CI deploys to prod on merge to `main` once a service principal is configured —
-**[docs/service-principal.md](docs/service-principal.md)**.
+CI deploys to prod on merge to `main`, authenticating with keyless GitHub OIDC (no
+service-principal secret) — **[docs/cloud-setup.md](docs/cloud-setup.md)**.
+[docs/service-principal.md](docs/service-principal.md) covers the older
+client-secret setup and the non-admin variant.
 
 ## Future work
 

@@ -48,9 +48,10 @@ targets:
       host: ${var.workspace_host}
 
   # Production: real names, active schedules, shared root path.
-  # For CI/CD with a service principal, add (see docs/service-principal.md):
+  # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
+  # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:
-  #     service_principal_name: <application-id>
+  #     service_principal_name: b74a6820-d0ac-454f-8c32-02141cba3c8a
   prod:
     mode: production
     workspace:
