@@ -1,0 +1,43 @@
+# Weekly governance check. Policy sync runs as a DRIFT REPORT (dry run) —
+# applying policy changes is a deliberate local action:
+#   dbx-platform governance policy-sync --apply --yes
+resources:
+  jobs:
+    governance_check:
+      name: "[dbx-platform] governance-check"
+      description: >
+        Weekly cluster-policy drift report (policies/*.json in git is the
+        source of truth) and tag-compliance report including the share of
+        spend with no cost-attribution tags.
+      schedule:
+        quartz_cron_expression: "0 30 6 ? * MON"  # weekly Monday 06:30 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: policy_drift
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters: ["governance", "policy-sync"]
+        - task_key: tag_compliance
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["governance", "tag-compliance", "--days", "30",
+               "--warehouse-id", "${var.warehouse_id}"]

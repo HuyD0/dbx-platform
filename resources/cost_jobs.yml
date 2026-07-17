@@ -1,0 +1,43 @@
+# Daily cost & usage report. Tasks run the same CLI you use locally:
+#   dbx-platform cost report / dbx-platform cost top-jobs
+resources:
+  jobs:
+    cost_usage_report:
+      name: "[dbx-platform] cost-usage-report"
+      description: >
+        Daily DBU/list-cost report by SKU and workspace, plus the most
+        expensive jobs. Read-only; results appear in the task run output.
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"  # daily 07:00 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: usage_by_sku
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["cost", "report", "--days", "30",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: top_jobs_by_cost
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["cost", "top-jobs", "--days", "30", "--limit", "20",
+               "--warehouse-id", "${var.warehouse_id}"]

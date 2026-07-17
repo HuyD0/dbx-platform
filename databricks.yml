@@ -1,0 +1,58 @@
+# Databricks Asset Bundle for the platform-management toolkit.
+# Docs: https://docs.databricks.com/dev-tools/bundles/
+#
+# Workspace swappability: the workspace URL exists in exactly ONE place — the
+# default value of the workspace_host variable below. Point this bundle at a
+# different workspace with either of:
+#   databricks bundle deploy --var workspace_host=https://adb-<id>.<n>.azuredatabricks.net
+#   BUNDLE_VAR_workspace_host=https://... databricks bundle deploy
+# or add another target below.
+
+bundle:
+  name: dbx-platform
+
+include:
+  - resources/*.yml
+
+artifacts:
+  default:
+    type: whl
+    path: .
+    build: python3 -m build --wheel
+
+variables:
+  workspace_host:
+    description: >
+      Workspace URL. The only place a workspace URL appears in this repo.
+      Override with --var workspace_host=... or BUNDLE_VAR_workspace_host.
+    default: https://adb-7405609799238491.11.azuredatabricks.net
+
+  warehouse_id:
+    description: >
+      SQL warehouse ID used by the dashboards and system-table job tasks.
+      Find one with: databricks warehouses list. Set via
+      BUNDLE_VAR_warehouse_id or --var warehouse_id=...
+    default: ""
+
+  notification_email:
+    description: Recipient for job failure notifications.
+    default: huyydo@gmail.com
+
+targets:
+  # Development: resources prefixed with "[dev <user>]", all schedules paused,
+  # deployed under your user folder. Safe to iterate.
+  dev:
+    default: true
+    mode: development
+    workspace:
+      host: ${var.workspace_host}
+
+  # Production: real names, active schedules, shared root path.
+  # For CI/CD with a service principal, add (see docs/service-principal.md):
+  #   run_as:
+  #     service_principal_name: <application-id>
+  prod:
+    mode: production
+    workspace:
+      host: ${var.workspace_host}
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}

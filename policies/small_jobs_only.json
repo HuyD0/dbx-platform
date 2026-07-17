@@ -1,0 +1,33 @@
+{
+  "name": "small-jobs-only",
+  "description": "Job compute limited to small node types with bounded autoscale. Managed by dbx-platform (policies/small_jobs_only.json) - edit in git, not in the UI.",
+  "definition": {
+    "cluster_type": {
+      "type": "fixed",
+      "value": "job"
+    },
+    "node_type_id": {
+      "type": "allowlist",
+      "values": ["Standard_DS3_v2", "Standard_D4ds_v5", "Standard_D8ds_v5"],
+      "defaultValue": "Standard_D4ds_v5"
+    },
+    "autoscale.min_workers": {
+      "type": "range",
+      "maxValue": 2,
+      "defaultValue": 1
+    },
+    "autoscale.max_workers": {
+      "type": "range",
+      "maxValue": 8,
+      "defaultValue": 4
+    },
+    "custom_tags.team": {
+      "type": "unlimited",
+      "isOptional": false
+    },
+    "custom_tags.project": {
+      "type": "unlimited",
+      "isOptional": false
+    }
+  }
+}

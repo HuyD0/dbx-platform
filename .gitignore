@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Databricks
+.databricks/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local env / secrets — never commit credentials
+.env
+*.pem

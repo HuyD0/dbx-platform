@@ -1,0 +1,43 @@
+# Weekly security audit. REPORT-ONLY on schedule: no --apply here.
+# Token revocation is a manual, local action:
+#   dbx-platform security token-audit --apply --yes
+resources:
+  jobs:
+    security_audit:
+      name: "[dbx-platform] security-audit"
+      description: >
+        Weekly PAT audit (no-expiry / over-age / expiring-soon tokens) and
+        inactive-user report from system.access.audit. Report-only.
+        Requires the job to run as a workspace admin (token audit API).
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"  # weekly Monday 06:00 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: token_audit
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters: ["security", "token-audit", "--max-age-days", "90"]
+        - task_key: inactive_users
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["security", "inactive-users", "--days", "90",
+               "--warehouse-id", "${var.warehouse_id}"]

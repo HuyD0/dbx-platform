@@ -1,0 +1,25 @@
+{
+  "name": "autotermination-required",
+  "description": "All-purpose compute must autoterminate within 60 minutes and carry cost-attribution tags. Managed by dbx-platform (policies/autotermination_required.json) - edit in git, not in the UI.",
+  "max_clusters_per_user": 2,
+  "definition": {
+    "cluster_type": {
+      "type": "fixed",
+      "value": "all-purpose"
+    },
+    "autotermination_minutes": {
+      "type": "range",
+      "minValue": 10,
+      "maxValue": 60,
+      "defaultValue": 30
+    },
+    "custom_tags.team": {
+      "type": "unlimited",
+      "isOptional": false
+    },
+    "custom_tags.project": {
+      "type": "unlimited",
+      "isOptional": false
+    }
+  }
+}

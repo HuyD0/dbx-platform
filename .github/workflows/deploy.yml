@@ -1,0 +1,51 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: bundle-deploy
+  cancel-in-progress: false
+
+# Requires repo secrets (see docs/service-principal.md):
+#   DATABRICKS_HOST            https://adb-<id>.<n>.azuredatabricks.net
+#   DATABRICKS_CLIENT_ID       service principal application ID
+#   DATABRICKS_CLIENT_SECRET   service principal OAuth secret
+#   DATABRICKS_WAREHOUSE_ID    SQL warehouse for dashboards + system-table tasks
+# Until they exist, this workflow exits successfully with a notice.
+env:
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+  BUNDLE_VAR_warehouse_id: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Secrets not configured — skipping deploy
+        if: env.DATABRICKS_HOST == ''
+        run: |
+          echo "Deploy skipped: workspace secrets are not configured."
+          echo "Set DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET"
+          echo "and DATABRICKS_WAREHOUSE_ID as repository secrets."
+          echo "Setup guide: docs/service-principal.md"
+      - uses: actions/checkout@v4
+        if: env.DATABRICKS_HOST != ''
+      - uses: actions/setup-python@v5
+        if: env.DATABRICKS_HOST != ''
+        with:
+          python-version: "3.11"
+      - name: Install build tooling (bundle builds the wheel on deploy)
+        if: env.DATABRICKS_HOST != ''
+        run: pip install build
+      - uses: databricks/setup-cli@main
+        if: env.DATABRICKS_HOST != ''
+      - name: Validate
+        if: env.DATABRICKS_HOST != ''
+        run: databricks bundle validate -t prod
+      - name: Deploy
+        if: env.DATABRICKS_HOST != ''
+        run: databricks bundle deploy -t prod
