@@ -50,7 +50,7 @@ wires up the browser-only loop: comment `@claude` on an issue → PR → CI → 
 | ML | `ml gpu-audit` | 〃 | Interactive GPU clusters + GPU spend share |
 | ML | `ml vector-search-audit` | 〃 | Vector search endpoints with no indexes / unhealthy |
 | Report | `report ai-digest` | `platform-digest` (weekly) | AI-summarized digest of all checks via `ai_query()`, stored to UC tables |
-| Dashboards | `dashboards setup` / `render` | — | Provision dashboard helper objects / re-render templates |
+| Dashboards | `dashboards setup` / `render` | `dashboards-setup` (daily) | Provision dashboard helper objects / re-render templates |
 | Release | `release publish-wheel` | — | Upload the wheel to a UC Volume for notebook reuse |
 
 All ML and right-sizing checks are report-only by design (endpoint config
@@ -68,8 +68,11 @@ Adapted from the community
 [databricks-dashboard-suite](https://github.com/mohanab89/databricks-dashboard-suite)
 by mohanab89 (system-table dashboards, provided as-is; the upstream repo has
 **no license file** — JSON is vendored under `dashboards/templates/` with this
-attribution). One-time provisioning of their helper functions/tables:
-`dbx-platform dashboards setup` (see [docs/setup.md](docs/setup.md) §6).
+attribution). Their helper functions/tables are provisioned automatically by the
+`dashboards-setup` job (`resources/dashboards_jobs.yml`) — daily and once per prod
+deploy — so a fresh deploy works without a manual step. Run `dbx-platform dashboards
+setup` yourself only to provision immediately or for a custom catalog/schema (see
+[docs/setup.md](docs/setup.md) §6).
 
 ### Platform Console app
 

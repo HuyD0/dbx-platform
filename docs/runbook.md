@@ -168,9 +168,18 @@ and on each task swap `environment_key: default` for:
 
 ## Updating dashboards
 
+The dashboards' helper functions/reference tables are kept provisioned by the
+`dashboards-setup` job (`resources/dashboards_jobs.yml`) — it runs daily and once per
+prod deploy, so you normally never run setup by hand. If a dashboard shows
+`TABLE_OR_VIEW_NOT_FOUND` for `main.dbx_platform.*`, that job either has not run yet
+(deploy hasn't happened, or dev schedules are paused) or lacks grants — trigger it with
+`databricks bundle run dashboards_setup` (or run `dbx-platform dashboards setup
+--warehouse-id <id>`), and check the SP's grants in docs/cloud-setup.md.
+
 Upstream templates live in `dashboards/templates/` (pristine, with
 `{catalog}.{schema}` placeholders). Rendered, deployable copies live in
-`dashboards/`. To move helper objects to a different catalog/schema:
+`dashboards/`. To move helper objects to a different catalog/schema (also update the
+`--catalog/--schema` in `resources/dashboards_jobs.yml` to match):
 
 ```bash
 dbx-platform dashboards render --catalog analytics --schema platform_obs

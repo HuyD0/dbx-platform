@@ -1,10 +1,12 @@
 # AI/BI (Lakeview) dashboards, adapted from the community suite
 # github.com/mohanab89/databricks-dashboard-suite (see README attribution).
 #
-# Before first use, provision the helper functions/tables the dashboards
-# query (defaults to main.dbx_platform):
-#   dbx-platform dashboards setup --warehouse-id <id>
-# If you change the catalog/schema, re-render and commit:
+# The helper functions/tables these dashboards query (in main.dbx_platform) are
+# provisioned by the `dashboards_setup` job (resources/dashboards_jobs.yml): it
+# runs daily and once per prod deploy, so a fresh deploy resolves without a
+# manual step. Run `dbx-platform dashboards setup --warehouse-id <id>` yourself
+# only to provision immediately (e.g. in dev). If you change the catalog/schema,
+# re-render and commit, and update dashboards_jobs.yml to match:
 #   dbx-platform dashboards render --catalog <c> --schema <s>
 resources:
   dashboards:

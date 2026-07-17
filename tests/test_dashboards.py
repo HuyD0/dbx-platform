@@ -1,7 +1,9 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from dbx_platform.dashboards import (
     TEMPLATE_NAMES,
@@ -11,6 +13,9 @@ from dbx_platform.dashboards import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Objects the dashboards reference are written as `<catalog>.<schema>.<name>`.
+_HELPER_OBJECT = re.compile(r"main\.dbx_platform\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def test_render_replaces_all_placeholders():
@@ -67,4 +72,56 @@ def test_committed_rendered_dashboards_match_templates():
         assert data.get("datasets") and data.get("pages"), name
         assert "{catalog}" not in rendered_file.read_text(), (
             f"{name} has unrendered placeholders — run: dbx-platform dashboards render"
+        )
+
+
+def _wheel_task_parameters():
+    """Every python_wheel_task parameter list across resources/*.yml."""
+    for resource_file in (REPO_ROOT / "resources").glob("*.yml"):
+        data = yaml.safe_load(resource_file.read_text()) or {}
+        for job in (data.get("resources", {}).get("jobs") or {}).values():
+            for task in job.get("tasks") or []:
+                pw = task.get("python_wheel_task")
+                if pw and pw.get("parameters"):
+                    yield resource_file.name, pw["parameters"]
+
+
+def test_dashboards_setup_runs_on_a_schedule():
+    """The invariant: dashboards setup must be a scheduled job, not CLI-only.
+
+    Guards against the deploy-time failure where the bundle ships dashboards that
+    query helper tables nothing ever provisions.
+    """
+    setup_params = [
+        params
+        for _, params in _wheel_task_parameters()
+        if params[:2] == ["dashboards", "setup"]
+    ]
+    assert setup_params, (
+        "No scheduled job runs `dashboards setup` — the dashboards' helper tables "
+        "(main.dbx_platform.workspace_reference, etc.) would never be provisioned. "
+        "Add the task to resources/dashboards_jobs.yml."
+    )
+    for params in setup_params:
+        assert "--warehouse-id" in params, "dashboards setup job needs --warehouse-id"
+
+
+def test_rendered_dashboards_only_reference_objects_setup_creates():
+    """Every main.dbx_platform.<obj> a dashboard queries must be created by setup.
+
+    Catches the class of bug where a dashboard references a helper object that
+    setup_statements() does not provision (the reverse of the current failure).
+    """
+    created = set(
+        _HELPER_OBJECT.findall(
+            "\n".join(sql for _, sql in setup_statements("main", "dbx_platform", ["team"]))
+        )
+    )
+    for name in TEMPLATE_NAMES:
+        text = (REPO_ROOT / "dashboards" / f"{name}.lvdash.json").read_text()
+        referenced = set(_HELPER_OBJECT.findall(text))
+        missing = referenced - created
+        assert not missing, (
+            f"{name} references {sorted(missing)} which dashboards setup does not "
+            f"create — extend setup_statements() in src/dbx_platform/dashboards.py"
         )
