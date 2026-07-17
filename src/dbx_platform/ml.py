@@ -137,6 +137,90 @@ def find_stale_endpoints(
     return stale
 
 
+# --- model registry hygiene -------------------------------------------------
+
+def fetch_registered_models(
+    w: WorkspaceClient, catalog: str | None, schema: str | None, max_models: int
+) -> tuple[list[dict], bool]:
+    """UC registered models with versions and aliases. Returns (models,
+    truncated) — truncated is True when max_models capped the listing."""
+    models = []
+    truncated = False
+    for m in w.registered_models.list(catalog_name=catalog, schema_name=schema):
+        if len(models) >= max_models:
+            truncated = True
+            break
+        detail = w.registered_models.get(m.full_name, include_aliases=True)
+        versions = [
+            {"version": v.version, "created_ms": v.created_at or 0}
+            for v in w.model_versions.list(m.full_name)
+        ]
+        models.append(
+            {
+                "full_name": m.full_name,
+                "owner": detail.owner or "",
+                "created_ms": detail.created_at or 0,
+                "updated_ms": detail.updated_at or 0,
+                "aliases": [a.alias_name for a in detail.aliases or [] if a.alias_name],
+                "versions": versions,
+            }
+        )
+    return models, truncated
+
+
+def classify_models(
+    models: list[dict],
+    served_entity_names: set[str],
+    now_ms: int,
+    stale_days: int,
+    unaliased_days: int,
+) -> list[dict]:
+    """Pure decision logic. One finding row per issue on a registered model.
+
+    - Models with zero versions (empty shells).
+    - Models with no owner.
+    - Models not updated in stale_days: archive candidates.
+    - Models whose versions carry no alias (no champion/challenger
+      discipline) once the newest version is unaliased_days old.
+    - Models never referenced by a serving endpoint (informational).
+    """
+    findings = []
+
+    def flag(m: dict, reason: str, action: str) -> None:
+        findings.append(
+            {"full_name": m["full_name"], "owner": m["owner"],
+             "reason": reason, "action": action}
+        )
+
+    for m in models:
+        if not m.get("versions"):
+            flag(m, "registered model has no versions", "delete-or-populate (manual)")
+        if not m.get("owner"):
+            flag(m, "no owner recorded", "assign-owner")
+        updated = m.get("updated_ms") or m.get("created_ms") or 0
+        if updated and (now_ms - updated) / MS_PER_DAY >= stale_days:
+            flag(m, f"not updated in {stale_days}d", "archive-candidate")
+        if m.get("versions") and not m.get("aliases"):
+            newest = max(v.get("created_ms") or 0 for v in m["versions"])
+            if newest and (now_ms - newest) / MS_PER_DAY >= unaliased_days:
+                flag(m, f"no alias (champion/challenger) {unaliased_days}d after "
+                        "the newest version", "set-champion-alias")
+        if m["full_name"] not in served_entity_names:
+            flag(m, "not referenced by any serving endpoint", "never-served (info)")
+    return findings
+
+
+def served_entity_names(endpoints: list[dict]) -> set[str]:
+    """Entity names referenced by serving endpoints (from
+    fetch_serving_endpoints output)."""
+    names: set[str] = set()
+    for e in endpoints:
+        for se in e.get("served_entities", []):
+            if se.get("entity_name"):
+                names.add(se["entity_name"])
+    return names
+
+
 # --- serving & AI/ML spend --------------------------------------------------
 
 def serving_cost(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:

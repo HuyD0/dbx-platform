@@ -1,8 +1,10 @@
 from conftest import days_ago, hours_ago
 
 from dbx_platform.ml import (
+    classify_models,
     classify_serving_endpoints,
     find_stale_endpoints,
+    served_entity_names,
 )
 
 
@@ -119,3 +121,70 @@ def test_endpoint_with_usage_not_stale(now_ms):
 def test_young_endpoint_without_usage_not_stale(now_ms):
     e = _endpoint(created_ms=days_ago(3))
     assert find_stale_endpoints([e], [], now_ms, stale_days=30) == []
+
+
+# --- classify_models -----------------------------------------------------------
+
+def _model(**overrides) -> dict:
+    base = {
+        "full_name": "main.prod.churn",
+        "owner": "someone@example.com",
+        "created_ms": days_ago(20),
+        "updated_ms": days_ago(5),
+        "aliases": ["champion"],
+        "versions": [{"version": 1, "created_ms": days_ago(5)}],
+    }
+    return {**base, **overrides}
+
+
+SERVED = {"main.prod.churn"}
+
+
+def _actions(findings: list[dict]) -> list[str]:
+    return sorted(f["action"] for f in findings)
+
+
+def test_healthy_served_model_has_no_findings(now_ms):
+    assert classify_models([_model()], SERVED, now_ms, 90, 30) == []
+
+
+def test_model_without_versions_flagged(now_ms):
+    m = _model(versions=[], aliases=[])
+    assert "delete-or-populate (manual)" in _actions(
+        classify_models([m], SERVED, now_ms, 90, 30)
+    )
+
+
+def test_model_without_owner_flagged(now_ms):
+    m = _model(owner="")
+    assert "assign-owner" in _actions(classify_models([m], SERVED, now_ms, 90, 30))
+
+
+def test_stale_model_flagged_at_boundary(now_ms):
+    m = _model(updated_ms=days_ago(90))
+    assert "archive-candidate" in _actions(classify_models([m], SERVED, now_ms, 90, 30))
+
+
+def test_recently_updated_model_not_stale(now_ms):
+    m = _model(updated_ms=days_ago(89.5))
+    assert "archive-candidate" not in _actions(classify_models([m], SERVED, now_ms, 90, 30))
+
+
+def test_old_unaliased_versions_flagged(now_ms):
+    m = _model(aliases=[], versions=[{"version": 1, "created_ms": days_ago(31)}])
+    assert "set-champion-alias" in _actions(classify_models([m], SERVED, now_ms, 90, 30))
+
+
+def test_fresh_unaliased_versions_not_flagged(now_ms):
+    m = _model(aliases=[], versions=[{"version": 1, "created_ms": days_ago(2)}])
+    assert "set-champion-alias" not in _actions(classify_models([m], SERVED, now_ms, 90, 30))
+
+
+def test_never_served_model_flagged_as_info(now_ms):
+    findings = classify_models([_model()], set(), now_ms, 90, 30)
+    assert _actions(findings) == ["never-served (info)"]
+
+
+def test_served_entity_names_collects_from_endpoints():
+    endpoints = [_endpoint(served_entities=[_entity(entity_name="main.prod.churn")])]
+    assert served_entity_names(endpoints) == {"main.prod.churn"}

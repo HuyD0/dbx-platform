@@ -244,6 +244,24 @@ def cmd_ml_endpoint_audit(args) -> int:
     return 0
 
 
+def cmd_ml_model_hygiene(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    stale = args.stale_days if args.stale_days is not None else s.model_stale_days
+    unaliased = (
+        args.unaliased_days if args.unaliased_days is not None else s.model_unaliased_days
+    )
+    models, truncated = ml.fetch_registered_models(w, args.catalog, args.schema, s.ml_max_models)
+    served = ml.served_entity_names(ml.fetch_serving_endpoints(w))
+    findings = ml.classify_models(models, served, _now_ms(), stale, unaliased)
+    notes = ["Report only — archiving/deleting models stays a human decision."]
+    if truncated:
+        notes.append(f"listing truncated at {s.ml_max_models} models — "
+                     "narrow with --catalog/--schema for full coverage.")
+    emit(args, f"Model registry hygiene ({len(models)} models checked)", findings, notes)
+    return 0
+
+
 def cmd_ml_serving_cost(args) -> int:
     s = Settings.from_env()
     w = get_client(args.profile)
@@ -380,6 +398,13 @@ def build_parser() -> argparse.ArgumentParser:
                            "inference tables, AI Gateway")
     x.add_argument("--stale-days", type=int, default=None)
     x.set_defaults(func=cmd_ml_endpoint_audit)
+    x = pm.add_parser("model-hygiene", parents=[common],
+                      help="UC registered models: stale, ownerless, unaliased, never served")
+    x.add_argument("--catalog", default=None, help="Limit to one catalog")
+    x.add_argument("--schema", default=None, help="Limit to one schema (needs --catalog)")
+    x.add_argument("--stale-days", type=int, default=None)
+    x.add_argument("--unaliased-days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_model_hygiene)
     x = pm.add_parser("serving-cost", parents=[common],
                       help="Serving/vector-search/AI spend and token usage")
     x.add_argument("--days", type=int, default=None)

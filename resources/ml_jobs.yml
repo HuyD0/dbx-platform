@@ -43,3 +43,35 @@ resources:
             parameters:
               ["ml", "serving-cost", "--days", "30",
                "--warehouse-id", "${var.warehouse_id}"]
+
+    ml_hygiene_report:
+      name: "[dbx-platform] ml-hygiene-report"
+      description: >
+        Weekly AI/ML hygiene: model registry (stale/ownerless/unaliased
+        models). Read-only; results appear in the task run output.
+      schedule:
+        quartz_cron_expression: "0 0 7 ? * MON"  # weekly Monday 07:00 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: model_hygiene
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ml", "model-hygiene", "--stale-days", "90",
+               "--unaliased-days", "30"]

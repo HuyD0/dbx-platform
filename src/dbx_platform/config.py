@@ -29,6 +29,9 @@ class Settings:
     # ML / AI workloads
     serving_stale_days: int = 30
     serving_failed_grace_hours: int = 24
+    model_stale_days: int = 90
+    model_unaliased_days: int = 30
+    ml_max_models: int = 500
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30
