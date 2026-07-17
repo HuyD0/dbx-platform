@@ -26,6 +26,8 @@ class Settings:
     inactive_user_days: int = 90
     # Governance
     required_tags: str = "team,project"
+    tag_suggestion_min_ratio_pct: int = 80  # difflib ratio floor for typo near-matches
+    tag_owner_keys: str = "owner,email,contact"  # keys inferred from resource creator
     # ML / AI workloads
     serving_stale_days: int = 30
     serving_failed_grace_hours: int = 24
@@ -65,3 +67,6 @@ class Settings:
 
     def required_tag_list(self) -> list[str]:
         return [t.strip() for t in self.required_tags.split(",") if t.strip()]
+
+    def tag_owner_key_list(self) -> list[str]:
+        return [t.strip() for t in self.tag_owner_keys.split(",") if t.strip()]

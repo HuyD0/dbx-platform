@@ -40,6 +40,7 @@ wires up the browser-only loop: comment `@claude` on an issue → PR → CI → 
 | Security | `security inactive-users` | 〃 | Active users with zero audited activity (`system.access.audit`) |
 | Governance | `governance policy-sync` | `governance-check` (weekly, drift report) | `policies/*.json` vs workspace. `--apply` creates/updates; never deletes unmanaged |
 | Governance | `governance tag-compliance` | 〃 | Resources missing required tags + % of spend untagged |
+| Governance | `governance tag-recommendations` | 〃 | Suggests fixes for missing tags: typo/format near-match key renames + inferred values (report-only) |
 | Cost | `cost cluster-utilization` | `cost-usage-report` (daily) | Under-utilized clusters (CPU/memory vs size, `system.compute.node_timeline`), ranked by cost |
 | Cost | `cost failed-run-waste` | 〃 | $ burned on failed/timed-out job runs |
 | Cost | `cost warehouse-utilization` | 〃 | SQL warehouses: idle spend or sustained queueing |
