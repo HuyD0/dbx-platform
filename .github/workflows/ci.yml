@@ -54,13 +54,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Azure login (OIDC, keyless)
         # No standing client secret exists for this app registration by design.
-        # Requires the federated credential on github-actions-dbx-platform for
-        # subject repo:HuyD0/dbx-platform:environment:production.
+        # Requires the federated credential on github-actions-dbx-platform whose
+        # subject matches this repo's immutable OIDC prefix — see docs/cloud-setup.md.
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # No subscription-id / allow-no-subscriptions: true — this SP holds no
+          # Azure RBAC by design. We only need an Entra token for the Databricks
+          # resource; authorization comes from the SP's workspace membership
+          # (SCIM + admins group), not from ARM. Without this, az login fails
+          # with "No subscriptions found" before it can mint that token.
+          allow-no-subscriptions: true
       - name: Install the Databricks CLI
         # Pinned to an immutable commit SHA rather than a floating tag/@main, so a
         # retagged or force-pushed upstream cannot silently change what runs here.

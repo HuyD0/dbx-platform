@@ -46,7 +46,12 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # No subscription-id / allow-no-subscriptions: true — this SP holds no
+          # Azure RBAC by design. We only need an Entra token for the Databricks
+          # resource; authorization comes from the SP's workspace membership
+          # (SCIM + admins group), not from ARM. Without this, az login fails
+          # with "No subscriptions found" before it can mint that token.
+          allow-no-subscriptions: true
       - name: Install the Databricks CLI
         # Pinned to an immutable commit SHA (see ci.yml).
         uses: databricks/setup-cli@71b5fa6b2b94c9a543658f65ebb6b477913f8626 # v1.6.0
