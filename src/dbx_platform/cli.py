@@ -393,6 +393,42 @@ def cmd_dashboards_setup(args) -> int:
     return 0
 
 
+# --- report ------------------------------------------------------------------------
+
+def cmd_report_ai_digest(args) -> int:
+    from dbx_platform import digest
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    model = args.model or s.digest_model
+    warehouse = _warehouse_id(args, s)
+    findings, skipped = digest.collect_findings(w, s, warehouse, _now_ms(), days)
+    counts = [
+        {"check": k, "findings": len(v)} for k, v in sorted(findings.items())
+    ]
+    notes = [f"skipped {k}: {v}" for k, v in sorted(skipped.items())]
+    emit(args, f"Digest inputs — last {days}d", counts, notes)
+    prompt = digest.build_digest_prompt(findings, skipped, days)
+    try:
+        summary = digest.summarize(w, warehouse, model, prompt)
+        emit(args, f"AI digest ({model})", [{"digest": summary}])
+    except (SystemTablesUnavailableError, RuntimeError, ValueError) as e:
+        summary = ""
+        emit(args, "AI digest", [], [f"skipped: ai summary unavailable ({e})"])
+    if not args.no_store:
+        try:
+            digest.store_digest(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema,
+                days, model, summary, findings,
+            )
+            print(f"  stored: {s.dashboard_catalog}.{s.dashboard_schema}."
+                  "platform_digest/platform_findings")
+        except (SystemTablesUnavailableError, RuntimeError, ValueError) as e:
+            print(f"  note: not stored ({e}) — run 'dbx-platform dashboards setup' first.")
+    return 0
+
+
 # --- release ----------------------------------------------------------------------
 
 def cmd_publish_wheel(args) -> int:
@@ -538,6 +574,18 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--workspace-name", default=None,
                    help="Friendly name for the current workspace in cost dashboards")
     x.set_defaults(func=cmd_dashboards_setup)
+
+    # report
+    pp = sub.add_parser("report", help="Cross-area reports").add_subparsers(dest="command")
+    x = pp.add_parser("ai-digest", parents=[common],
+                      help="AI-summarized digest of all checks (ai_query on the "
+                           "warehouse)")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--model", default=None,
+                   help="Foundation-model serving endpoint (default: settings)")
+    x.add_argument("--no-store", action="store_true",
+                   help="Skip writing to the platform_digest/platform_findings tables")
+    x.set_defaults(func=cmd_report_ai_digest)
 
     # release
     pr = sub.add_parser("release", help="Distribution helpers").add_subparsers(dest="command")

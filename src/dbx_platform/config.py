@@ -46,6 +46,8 @@ class Settings:
     # Dashboards (see dashboards.py): where helper functions/tables live
     dashboard_catalog: str = "main"
     dashboard_schema: str = "dbx_platform"
+    # AI digest: a pay-per-token foundation-model serving endpoint name
+    digest_model: str = "databricks-claude-sonnet-4-5"
     # Azure secrets helper
     service_credential: str = ""
     # Wheel distribution
