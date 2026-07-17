@@ -47,7 +47,12 @@ databricks system-schemas enable <metastore-id> billing -p dbx-platform
 databricks system-schemas enable <metastore-id> access -p dbx-platform
 databricks system-schemas enable <metastore-id> lakeflow -p dbx-platform
 databricks system-schemas enable <metastore-id> compute -p dbx-platform
+databricks system-schemas enable <metastore-id> query -p dbx-platform
+databricks system-schemas enable <metastore-id> serving -p dbx-platform  # only if using the ml commands
 ```
+
+`system-schemas list` shows the current state — some schemas (e.g. `query`) may already
+be `ENABLE_COMPLETED` or auto-enabled; enabling again is harmless.
 
 Grants (run in a SQL editor as an admin):
 
