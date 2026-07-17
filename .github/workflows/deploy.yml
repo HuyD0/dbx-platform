@@ -79,6 +79,12 @@ jobs:
         run: databricks bundle validate -t prod
       - name: Deploy
         run: databricks bundle deploy -t prod
+      - name: Provision dashboard helper objects
+        # bundle deploy uploads the dashboards but does NOT create the schema,
+        # functions, and reference tables their queries read. Run the setup job
+        # once now so the dashboards resolve immediately instead of waiting for
+        # its daily schedule (resources/dashboards_jobs.yml). Idempotent.
+        run: databricks bundle run dashboards_setup -t prod
       - name: Deploy and start the Platform Console app
         # bundle deploy only creates the app resource and uploads its source;
         # bundle run pushes the source into the app and starts it. First run

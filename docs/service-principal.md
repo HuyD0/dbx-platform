@@ -83,7 +83,9 @@ GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `<application-id>`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `<application-id>`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `<application-id>`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `<application-id>`;
--- dashboards' helper schema:
+-- dashboards' helper schema (CREATE SCHEMA lets the dashboards-setup job create
+-- main.dbx_platform on first run; ALL PRIVILEGES covers the objects inside):
 GRANT USE CATALOG ON CATALOG main TO `<application-id>`;
+GRANT CREATE SCHEMA ON CATALOG main TO `<application-id>`;
 GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `<application-id>`;
 ```

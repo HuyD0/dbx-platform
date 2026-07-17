@@ -133,14 +133,19 @@ GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `b74a6820-d0ac-454f-8c32-0
 GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
--- dashboards' helper schema:
+-- dashboards' helper schema. CREATE SCHEMA lets the dashboards-setup job create
+-- main.dbx_platform on first run (it becomes owner, so it can then create the
+-- functions/reference tables inside). If an admin pre-creates the schema instead,
+-- the ALL PRIVILEGES grant covers those creates and CREATE SCHEMA is unnecessary.
 GRANT USE CATALOG ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT CREATE SCHEMA ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 ```
 
 The schema list matches what the jobs read (see the job table in runbook.md):
 billing/lakeflow/compute/query for `cost-usage-report`, access for `security-audit`,
-serving for `ml-serving-report`.
+serving for `ml-serving-report`. The `dashboards-setup` job reads billing + access to
+refresh its `workspace_reference` / `warehouse_reference` tables.
 
 ### Optional: run prod jobs as the service principal
 

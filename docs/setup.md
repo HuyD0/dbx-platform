@@ -81,10 +81,17 @@ dbx-platform housekeeping stale-clusters --profile dbx-platform
 dbx-platform cost report --days 7 --profile dbx-platform
 ```
 
-## 6. Dashboards: one-time provisioning
+## 6. Dashboards: provisioning
 
 The four dashboards query helper functions and reference tables (default location
-`main.dbx_platform` — override with `--catalog/--schema`, then re-render, see README):
+`main.dbx_platform`). These are provisioned automatically by the `dashboards-setup`
+job (`resources/dashboards_jobs.yml`), which runs daily and once per prod deploy
+(deploy.yml runs `databricks bundle run dashboards_setup -t prod`), so you do not have
+to provision them by hand before deploying.
+
+Run setup yourself only to provision immediately — e.g. in `dev` (schedules are paused),
+or to attach a friendly workspace name, or for a non-default catalog/schema (override
+with `--catalog/--schema`, then re-render and update `dashboards_jobs.yml`, see README):
 
 ```bash
 dbx-platform dashboards setup --profile dbx-platform \
