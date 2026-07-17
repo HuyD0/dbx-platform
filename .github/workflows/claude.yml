@@ -27,15 +27,18 @@ on:
 jobs:
   claude:
     runs-on: ubuntu-latest
-    # actions: read lets Claude inspect failing CI runs. It must be granted here
+    # id-token: write is REQUIRED — claude-code-action@v1 fetches a GitHub OIDC
+    # token for its own token exchange, independent of how Claude itself is
+    # authenticated (it fails "Could not fetch an OIDC token" without it).
+    # actions: read lets Claude inspect failing CI runs, and must be granted here
     # *and* requested via additional_permissions below — the GITHUB_TOKEN can only
-    # ever carry what this block grants. (No id-token: write — that is only for
-    # Workload Identity Federation, and this workflow authenticates by API key.)
+    # ever carry what this block grants.
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
