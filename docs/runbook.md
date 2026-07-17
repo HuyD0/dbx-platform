@@ -13,10 +13,13 @@ not failures), `1` runtime error, `2` refused `--apply` without confirmation,
 
 | Job | Schedule (UTC) | Tasks | Needs |
 |---|---|---|---|
-| `cost-usage-report` | daily 07:00 | `cost report`, `cost top-jobs` | warehouse + system.billing/lakeflow |
-| `housekeeping-report` | daily 05:30 | `stale-clusters`, `orphaned-jobs` | REST APIs only |
+| `cost-usage-report` | daily 07:00 | `cost report`, `cost top-jobs`, `cluster-utilization`, `failed-run-waste`, `warehouse-utilization` | warehouse + system.billing/lakeflow/compute/query |
+| `housekeeping-report` | daily 05:30 | `stale-clusters`, `orphaned-jobs`, `jobs-on-all-purpose` | REST APIs only |
 | `security-audit` | weekly Mon 06:00 | `token-audit`, `inactive-users` | admin; warehouse + system.access |
 | `governance-check` | weekly Mon 06:30 | `policy-sync` (drift), `tag-compliance` | warehouse + system.billing |
+| `ml-serving-report` | daily 07:30 | `endpoint-audit`, `serving-cost` | warehouse + system.billing (+ system.serving where enabled) |
+| `ml-hygiene-report` | weekly Mon 07:00 | `model-hygiene`, `gpu-audit`, `vector-search-audit` | REST APIs (+ warehouse for GPU spend) |
+| `platform-digest` | weekly Mon 08:00 | `ai-digest` | warehouse + an `ai_query`-capable foundation-model endpoint |
 
 Thresholds are task parameters in `resources/*.yml` — change them in git, not
 in the Jobs UI, so the config stays reviewable.
@@ -72,6 +75,65 @@ re-run the drift report, confirm "unchanged".
 Fix by adding `custom_tags` (clusters) / `tags` (jobs). The cluster policies in
 `policies/` make `team` and `project` mandatory for new compute, so the list
 should shrink over time.
+
+### Serving endpoints (ml endpoint-audit)
+
+Report-only on purpose: any `update_config` call redeploys the endpoint, and
+`environment_vars` with secret references do not round-trip through a GET.
+Act via the Serving UI or an IaC change, endpoint by endpoint:
+
+- **enable-scale-to-zero** — small CPU workloads idling between calls.
+- **enable-inference-table** — without it there is no payload/audit trail;
+  required before any quality monitoring.
+- **add-ai-gateway-rate-limits / enable-usage-tracking** — external and
+  foundation-model endpoints are pay-per-token; unlimited callers are an
+  unbounded bill.
+- GPU endpoints are exempt from the scale-to-zero flag (cold starts).
+
+### Model hygiene / GPU / vector search
+
+All report-only: archiving models, terminating someone's GPU cluster, and
+deleting a vector search endpoint are owner decisions. GPU terminations can
+reuse `housekeeping stale-clusters --apply` once confirmed. Note:
+`system.compute.node_timeline` has no GPU metrics, so GPU right-sizing stays
+at the spend/idle level.
+
+### Right-sizing (cluster/warehouse utilization, jobs on all-purpose)
+
+Findings are ranked by list cost — work top-down. `downsize-node-or-workers`
+and `lower-autoscale-max` are cluster-spec changes owned by the cluster's
+team; `move-to-job-cluster` is a job-spec change (all-purpose compute costs
+roughly double the job-compute DBU rate). Warehouse findings cut both ways:
+idle spend → shorter auto-stop or smaller size; sustained queueing →
+undersized.
+
+### AI digest & triage loop
+
+`report ai-digest` needs the `platform_digest`/`platform_findings` tables —
+created by `dbx-platform dashboards setup` — and a pay-per-token
+foundation-model endpoint (`DBX_PLATFORM_DIGEST_MODEL`, default
+`databricks-claude-sonnet-4-5`; list candidates under Serving → built-in).
+If `ai_query` is unavailable the digest degrades to raw findings and still
+exits 0. The weekly `platform-triage.yml` workflow files findings into a
+rolling `platform-triage` GitHub issue and asks `@claude` for fixes **as
+pull requests** — never workspace mutations.
+
+### Platform Console app
+
+Deployed by the bundle (`resources/app.yml`). After the first deploy, grant
+the app's service principal CAN_MANAGE_RUN on the `[dbx-platform]` jobs so
+the Actions page can trigger them. The deploy workflow stages the wheel into
+`apps/platform-console/wheels/` (git-ignored) before `bundle deploy`; for a
+manual deploy run the same copy step first. Note: apps are currently
+prod-target resources — if `bundle deploy -t dev` rejects the app name
+prefix, deploy the app from prod only.
+
+### Served agent (optional)
+
+`pip install -e ".[agent]"`, then `python agents/platform_agent/deploy_agent.py`
+with workspace credentials. The agent's tools are read-only by construction;
+verify the mlflow `ResponsesAgent` interface matches your workspace's mlflow
+version at deploy time. Chat via AI Playground or the endpoint review app.
 
 ## Serverless fallback
 

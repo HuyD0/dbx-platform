@@ -1,0 +1,38 @@
+# Weekly AI digest: collects every area's findings and summarizes them with
+# ai_query() on the SQL warehouse, storing digest + findings for the Platform
+# Console app. Runs after the Monday hygiene/security/governance reports.
+# Read-only against workspace resources; writes only its own UC tables.
+resources:
+  jobs:
+    platform_digest:
+      name: "[dbx-platform] platform-digest"
+      description: >
+        Weekly AI-summarized platform health digest across housekeeping,
+        security, governance, ml and cost checks. Results appear in the task
+        run output and in the platform_digest/platform_findings tables.
+      schedule:
+        quartz_cron_expression: "0 0 8 ? * MON"  # weekly Monday 08:00 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: ai_digest
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["report", "ai-digest", "--days", "30",
+               "--warehouse-id", "${var.warehouse_id}"]

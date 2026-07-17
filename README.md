@@ -40,8 +40,21 @@ wires up the browser-only loop: comment `@claude` on an issue → PR → CI → 
 | Security | `security inactive-users` | 〃 | Active users with zero audited activity (`system.access.audit`) |
 | Governance | `governance policy-sync` | `governance-check` (weekly, drift report) | `policies/*.json` vs workspace. `--apply` creates/updates; never deletes unmanaged |
 | Governance | `governance tag-compliance` | 〃 | Resources missing required tags + % of spend untagged |
+| Cost | `cost cluster-utilization` | `cost-usage-report` (daily) | Under-utilized clusters (CPU/memory vs size, `system.compute.node_timeline`), ranked by cost |
+| Cost | `cost failed-run-waste` | 〃 | $ burned on failed/timed-out job runs |
+| Cost | `cost warehouse-utilization` | 〃 | SQL warehouses: idle spend or sustained queueing |
+| Housekeeping | `housekeeping jobs-on-all-purpose` | `housekeeping-report` (daily) | Jobs paying the all-purpose premium / pinning large fixed clusters |
+| ML | `ml endpoint-audit` | `ml-serving-report` (daily) | Serving endpoints: failed state, scale-to-zero, inference tables, AI Gateway, no traffic |
+| ML | `ml serving-cost` | 〃 | AI/ML spend by product/SKU/endpoint + token usage (`system.serving`) |
+| ML | `ml model-hygiene` | `ml-hygiene-report` (weekly) | UC models: stale, ownerless, unaliased, never served |
+| ML | `ml gpu-audit` | 〃 | Interactive GPU clusters + GPU spend share |
+| ML | `ml vector-search-audit` | 〃 | Vector search endpoints with no indexes / unhealthy |
+| Report | `report ai-digest` | `platform-digest` (weekly) | AI-summarized digest of all checks via `ai_query()`, stored to UC tables |
 | Dashboards | `dashboards setup` / `render` | — | Provision dashboard helper objects / re-render templates |
 | Release | `release publish-wheel` | — | Upload the wheel to a UC Volume for notebook reuse |
+
+All ML and right-sizing checks are report-only by design (endpoint config
+changes redeploy the endpoint; model/endpoint deletion is irreversible).
 
 Operational details, thresholds, and how to act on findings: **[docs/runbook.md](docs/runbook.md)**.
 
@@ -57,6 +70,31 @@ by mohanab89 (system-table dashboards, provided as-is; the upstream repo has
 **no license file** — JSON is vendored under `dashboards/templates/` with this
 attribution). One-time provisioning of their helper functions/tables:
 `dbx-platform dashboards setup` (see [docs/setup.md](docs/setup.md) §6).
+
+### Platform Console app
+
+A Databricks App (`apps/platform-console`, Streamlit) deployed by the bundle
+(`resources/app.yml`) — the third surface of the same code path. It shows
+stored findings and AI digests, runs checks live, charts AI/ML spend, and can
+kick off the report jobs. Deliberately report-only: nothing in the app can
+pass `--apply`.
+
+### AI layer
+
+- **`report ai-digest`** summarizes every area's findings with one
+  `ai_query()` call to a Databricks-hosted foundation model on your SQL
+  warehouse — no extra credentials. Digest + findings persist to
+  `platform_digest` / `platform_findings` (created by `dashboards setup`).
+- **Triage loop**: `.github/workflows/platform-triage.yml` runs the checks
+  weekly and upserts a rolling GitHub issue mentioning `@claude`, which
+  proposes fixes as pull requests (policy drift → `policies/*.json`, job
+  right-sizing → job specs). The agent only proposes git changes; `--apply`
+  stays human-invoked.
+- **Served agent** (`agents/platform_agent`, optional `[agent]` extra): a
+  read-only LangGraph agent over the same checks, deployed to model serving
+  via the Mosaic AI Agent Framework (`python agents/platform_agent/deploy_agent.py`).
+  Its tool set wraps no mutating function, so it can diagnose and recommend
+  but never change the workspace.
 
 ### Secrets helper
 

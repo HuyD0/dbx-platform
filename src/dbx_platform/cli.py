@@ -20,7 +20,7 @@ import sys
 import time
 from importlib import resources
 
-from dbx_platform import __version__, cost, governance, housekeeping, security
+from dbx_platform import __version__, cost, governance, housekeeping, ml, security
 from dbx_platform.client import get_client
 from dbx_platform.config import Settings
 from dbx_platform.system_tables import SystemTablesUnavailableError
@@ -101,6 +101,43 @@ def cmd_cost_top_jobs(args) -> int:
     return 0
 
 
+def cmd_cost_cluster_utilization(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    cpu = args.cpu_threshold if args.cpu_threshold is not None else s.util_cpu_threshold_pct
+    mem = args.mem_threshold if args.mem_threshold is not None else s.util_mem_threshold_pct
+    rows = cost.cluster_utilization(w, _warehouse_id(args, s), days)
+    findings = cost.classify_cluster_utilization(rows, cpu, mem)
+    emit(args, f"Under-utilized clusters — last {days}d (ranked by cost)", findings,
+         ["Report only — right-sizing is applied by the cluster owner "
+          "(see docs/runbook.md)."])
+    return 0
+
+
+def cmd_cost_failed_run_waste(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = cost.failed_run_waste(w, _warehouse_id(args, s), days, args.limit)
+    emit(args, f"List cost burned on failed job runs — last {days}d", rows)
+    return 0
+
+
+def cmd_cost_warehouse_utilization(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = cost.warehouse_utilization(w, _warehouse_id(args, s), days)
+    findings = cost.classify_warehouse_utilization(
+        rows, s.warehouse_min_queries, s.warehouse_queue_warn_seconds
+    )
+    emit(args, f"Mis-sized SQL warehouses — last {days}d", findings,
+         ["Report only — includes both directions: idle spend and sustained "
+          "queueing."])
+    return 0
+
+
 # --- housekeeping -------------------------------------------------------------
 
 def cmd_stale_clusters(args) -> int:
@@ -136,6 +173,18 @@ def cmd_orphaned_jobs(args) -> int:
         for o in orphans:
             if o.get("has_schedule") and housekeeping.pause_job(w, o["job_id"]):
                 print(f"  applied: paused job {o['job_id']} ({o['name']})")
+    return 0
+
+
+def cmd_jobs_on_all_purpose(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    findings = housekeeping.find_jobs_on_all_purpose(
+        housekeeping.fetch_jobs_with_clusters(w), s.allpurpose_fixed_workers_max
+    )
+    emit(args, "Jobs on all-purpose compute / oversized fixed clusters", findings,
+         ["Report only — moving a task to a job cluster is a job-spec change "
+          "owned by the job's team."])
     return 0
 
 
@@ -224,6 +273,91 @@ def cmd_tag_compliance(args) -> int:
     return 0
 
 
+# --- ml ----------------------------------------------------------------------------
+
+def cmd_ml_endpoint_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    endpoints = ml.fetch_serving_endpoints(w)
+    findings = ml.classify_serving_endpoints(endpoints, _now_ms(), s.serving_failed_grace_hours)
+    emit(args, "Model serving endpoint audit", findings,
+         ["Report only — endpoint config changes trigger a redeployment; apply "
+          "manually (see docs/runbook.md)."])
+    days = args.stale_days if args.stale_days is not None else s.serving_stale_days
+    try:
+        usage = ml.endpoint_token_usage(w, _warehouse_id(args, s), days)
+        stale = ml.find_stale_endpoints(endpoints, usage, _now_ms(), days)
+        emit(args, f"Endpoints with no requests in {days}d", stale)
+    except (SystemTablesUnavailableError, ValueError) as e:
+        emit(args, "Endpoints with no requests", [], [f"skipped: {e}"])
+    return 0
+
+
+def cmd_ml_model_hygiene(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    stale = args.stale_days if args.stale_days is not None else s.model_stale_days
+    unaliased = (
+        args.unaliased_days if args.unaliased_days is not None else s.model_unaliased_days
+    )
+    models, truncated = ml.fetch_registered_models(w, args.catalog, args.schema, s.ml_max_models)
+    served = ml.served_entity_names(ml.fetch_serving_endpoints(w))
+    findings = ml.classify_models(models, served, _now_ms(), stale, unaliased)
+    notes = ["Report only — archiving/deleting models stays a human decision."]
+    if truncated:
+        notes.append(f"listing truncated at {s.ml_max_models} models — "
+                     "narrow with --catalog/--schema for full coverage.")
+    emit(args, f"Model registry hygiene ({len(models)} models checked)", findings, notes)
+    return 0
+
+
+def cmd_ml_serving_cost(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = ml.serving_cost(w, _warehouse_id(args, s), days)
+    emit(args, f"AI/ML spend by product/SKU/endpoint — last {days}d", rows)
+    try:
+        tokens = ml.endpoint_token_usage(w, _warehouse_id(args, s), days)
+        emit(args, f"Token usage by endpoint/requester — last {days}d", tokens)
+    except SystemTablesUnavailableError as e:
+        emit(args, "Token usage by endpoint/requester", [], [f"skipped: {e}"])
+    return 0
+
+
+def cmd_ml_gpu_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    max_up = (
+        args.max_uptime_hours if args.max_uptime_hours is not None else s.gpu_max_uptime_hours
+    )
+    findings = ml.classify_gpu_clusters(
+        ml.fetch_clusters_with_node_types(w), ml.fetch_gpu_node_types(w), _now_ms(), max_up
+    )
+    emit(args, f"Interactive GPU clusters (uptime threshold {max_up}h)", findings,
+         ["Report only — terminate via 'housekeeping stale-clusters --apply' "
+          "or the owner."])
+    days = args.days if args.days is not None else s.lookback_days
+    try:
+        spend = ml.gpu_spend(w, _warehouse_id(args, s), days)
+        emit(args, f"GPU spend share — last {days}d", spend)
+    except (SystemTablesUnavailableError, ValueError) as e:
+        emit(args, "GPU spend share", [], [f"skipped: {e}"])
+    return 0
+
+
+def cmd_ml_vector_search_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    findings = ml.find_vector_search_findings(
+        ml.fetch_vector_search(w), _now_ms(), s.vector_search_grace_hours
+    )
+    emit(args, "Vector search endpoint audit", findings,
+         ["Report only — endpoint deletion is irreversible and stays a human "
+          "decision."])
+    return 0
+
+
 # --- dashboards --------------------------------------------------------------------
 
 def cmd_dashboards_render(args) -> int:
@@ -256,6 +390,42 @@ def cmd_dashboards_setup(args) -> int:
     )
     for d in done:
         print(f"  created/updated: {d}")
+    return 0
+
+
+# --- report ------------------------------------------------------------------------
+
+def cmd_report_ai_digest(args) -> int:
+    from dbx_platform import digest
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    model = args.model or s.digest_model
+    warehouse = _warehouse_id(args, s)
+    findings, skipped = digest.collect_findings(w, s, warehouse, _now_ms(), days)
+    counts = [
+        {"check": k, "findings": len(v)} for k, v in sorted(findings.items())
+    ]
+    notes = [f"skipped {k}: {v}" for k, v in sorted(skipped.items())]
+    emit(args, f"Digest inputs — last {days}d", counts, notes)
+    prompt = digest.build_digest_prompt(findings, skipped, days)
+    try:
+        summary = digest.summarize(w, warehouse, model, prompt)
+        emit(args, f"AI digest ({model})", [{"digest": summary}])
+    except (SystemTablesUnavailableError, RuntimeError, ValueError) as e:
+        summary = ""
+        emit(args, "AI digest", [], [f"skipped: ai summary unavailable ({e})"])
+    if not args.no_store:
+        try:
+            digest.store_digest(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema,
+                days, model, summary, findings,
+            )
+            print(f"  stored: {s.dashboard_catalog}.{s.dashboard_schema}."
+                  "platform_digest/platform_findings")
+        except (SystemTablesUnavailableError, RuntimeError, ValueError) as e:
+            print(f"  note: not stored ({e}) — run 'dbx-platform dashboards setup' first.")
     return 0
 
 
@@ -306,6 +476,21 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--days", type=int, default=None)
     x.add_argument("--limit", type=int, default=20)
     x.set_defaults(func=cmd_cost_top_jobs)
+    x = pc.add_parser("cluster-utilization", parents=[common],
+                      help="Under-utilized clusters (CPU/memory vs size, by cost)")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--cpu-threshold", type=int, default=None, help="p95 CPU %% floor")
+    x.add_argument("--mem-threshold", type=int, default=None, help="avg memory %% floor")
+    x.set_defaults(func=cmd_cost_cluster_utilization)
+    x = pc.add_parser("failed-run-waste", parents=[common],
+                      help="$ burned on failed/timed-out job runs")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--limit", type=int, default=20)
+    x.set_defaults(func=cmd_cost_failed_run_waste)
+    x = pc.add_parser("warehouse-utilization", parents=[common],
+                      help="SQL warehouses: idle spend or sustained queueing")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_cost_warehouse_utilization)
 
     # housekeeping
     ph = sub.add_parser("housekeeping", help="Cleanup reports").add_subparsers(dest="command")
@@ -317,6 +502,10 @@ def build_parser() -> argparse.ArgumentParser:
     x = ph.add_parser("orphaned-jobs", parents=[common, mutating],
                       help="Jobs owned by missing principals")
     x.set_defaults(func=cmd_orphaned_jobs)
+    x = ph.add_parser("jobs-on-all-purpose", parents=[common],
+                      help="Jobs paying the all-purpose premium or pinning "
+                           "large fixed clusters")
+    x.set_defaults(func=cmd_jobs_on_all_purpose)
 
     # security
     ps = sub.add_parser("security", help="Security & audit").add_subparsers(dest="command")
@@ -338,6 +527,34 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--days", type=int, default=None)
     x.set_defaults(func=cmd_tag_compliance)
 
+    # ml
+    pm = sub.add_parser("ml", help="AI/ML workloads: serving, models, GPU, vector search"
+                        ).add_subparsers(dest="command")
+    x = pm.add_parser("endpoint-audit", parents=[common],
+                      help="Serving endpoint hygiene: state, scale-to-zero, "
+                           "inference tables, AI Gateway")
+    x.add_argument("--stale-days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_endpoint_audit)
+    x = pm.add_parser("model-hygiene", parents=[common],
+                      help="UC registered models: stale, ownerless, unaliased, never served")
+    x.add_argument("--catalog", default=None, help="Limit to one catalog")
+    x.add_argument("--schema", default=None, help="Limit to one schema (needs --catalog)")
+    x.add_argument("--stale-days", type=int, default=None)
+    x.add_argument("--unaliased-days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_model_hygiene)
+    x = pm.add_parser("serving-cost", parents=[common],
+                      help="Serving/vector-search/AI spend and token usage")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_serving_cost)
+    x = pm.add_parser("gpu-audit", parents=[common],
+                      help="Interactive GPU clusters + GPU spend share")
+    x.add_argument("--max-uptime-hours", type=int, default=None)
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_gpu_audit)
+    x = pm.add_parser("vector-search-audit", parents=[common],
+                      help="Vector search endpoints: no indexes / unhealthy")
+    x.set_defaults(func=cmd_ml_vector_search_audit)
+
     # dashboards
     pd = sub.add_parser("dashboards", help="AI/BI dashboards").add_subparsers(dest="command")
     x = pd.add_parser("render", parents=[common],
@@ -357,6 +574,18 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--workspace-name", default=None,
                    help="Friendly name for the current workspace in cost dashboards")
     x.set_defaults(func=cmd_dashboards_setup)
+
+    # report
+    pp = sub.add_parser("report", help="Cross-area reports").add_subparsers(dest="command")
+    x = pp.add_parser("ai-digest", parents=[common],
+                      help="AI-summarized digest of all checks (ai_query on the "
+                           "warehouse)")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--model", default=None,
+                   help="Foundation-model serving endpoint (default: settings)")
+    x.add_argument("--no-store", action="store_true",
+                   help="Skip writing to the platform_digest/platform_findings tables")
+    x.set_defaults(func=cmd_report_ai_digest)
 
     # release
     pr = sub.add_parser("release", help="Distribution helpers").add_subparsers(dest="command")

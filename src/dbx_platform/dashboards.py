@@ -140,6 +140,18 @@ WHEN NOT MATCHED THEN INSERT (workspace_id, workspace_name)
   VALUES (src.workspace_id, src.workspace_name)""",
         ),
         (
+            f"table {fq}.platform_findings",
+            f"CREATE TABLE IF NOT EXISTS {fq}.platform_findings "
+            f"(run_ts TIMESTAMP, area STRING, check_name STRING, resource STRING, "
+            f"reason STRING, action STRING, details STRING)",
+        ),
+        (
+            f"table {fq}.platform_digest",
+            f"CREATE TABLE IF NOT EXISTS {fq}.platform_digest "
+            f"(run_ts TIMESTAMP, days INT, model STRING, digest STRING, "
+            f"findings_json STRING)",
+        ),
+        (
             f"table {fq}.warehouse_reference",
             f"CREATE TABLE IF NOT EXISTS {fq}.warehouse_reference "
             f"(workspace_id STRING, warehouse_id STRING, warehouse_name STRING)",

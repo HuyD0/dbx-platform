@@ -33,7 +33,9 @@ jobs:
       - name: Verify packaged data (queries + policies ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
+          unzip -l dist/*.whl | grep -q "dbx_platform/queries/serving_cost.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
 
   bundle-validate:
     # Push/dispatch only — never on pull_request. The `production` environment

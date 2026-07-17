@@ -26,12 +26,28 @@ class Settings:
     inactive_user_days: int = 90
     # Governance
     required_tags: str = "team,project"
+    # ML / AI workloads
+    serving_stale_days: int = 30
+    serving_failed_grace_hours: int = 24
+    model_stale_days: int = 90
+    model_unaliased_days: int = 30
+    ml_max_models: int = 500
+    gpu_max_uptime_hours: int = 8
+    vector_search_grace_hours: int = 24
+    # Right-sizing
+    util_cpu_threshold_pct: int = 30
+    util_mem_threshold_pct: int = 50
+    allpurpose_fixed_workers_max: int = 10
+    warehouse_min_queries: int = 50
+    warehouse_queue_warn_seconds: int = 5
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30
     # Dashboards (see dashboards.py): where helper functions/tables live
     dashboard_catalog: str = "main"
     dashboard_schema: str = "dbx_platform"
+    # AI digest: a pay-per-token foundation-model serving endpoint name
+    digest_model: str = "databricks-claude-sonnet-4-5"
     # Azure secrets helper
     service_credential: str = ""
     # Wheel distribution

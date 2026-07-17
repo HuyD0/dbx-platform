@@ -24,6 +24,14 @@ dev = [
     "build>=1.2",
     "pyyaml>=6.0",
 ]
+# The served LangGraph agent (agents/platform_agent) — kept out of the core
+# wheel so scheduled jobs stay lean.
+agent = [
+    "mlflow>=3.0",
+    "langgraph>=0.2",
+    "databricks-langchain>=0.4",
+    "databricks-agents>=1.0",
+]
 
 [project.scripts]
 dbx-platform = "dbx_platform.cli:main"
