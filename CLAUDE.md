@@ -78,8 +78,9 @@ a GitHub OIDC token for an Azure token, and the Databricks CLI consumes it via
 `DATABRICKS_AUTH_TYPE=azure-cli`. Two rules follow, and breaking either is silent:
 
 - Any workspace-touching job **must** declare `environment: production` and
-  `permissions: id-token: write`. The federated credential's subject is
-  `repo:HuyD0/dbx-platform:environment:production`; without the environment the token
+  `permissions: id-token: write`. The federated credential's subject ends in
+  `:environment:production` (using this repo's immutable OIDC prefix, `repo:<owner>@<id>/
+  <repo>@<id>` — not the plain `repo:owner/repo`); without the environment the token
   carries a different subject and Azure refuses the exchange.
 - Never put `azure/login` on a `pull_request` trigger — that would expose a
   workspace credential to untrusted PR-branch code.

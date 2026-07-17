@@ -18,12 +18,12 @@ GitHub OIDC token  →  azure/login@v2 (federated credential)  →  az token
                    →  Databricks CLI (DATABRICKS_AUTH_TYPE=azure-cli)  →  workspace
 ```
 
-The federated credential is bound to the subject
-`repo:HuyD0/dbx-platform:environment:production`. That is why every workspace-touching
-job declares `environment: production` — **without it GitHub mints a token with a
-different subject and Azure refuses the exchange.** It is also the security boundary:
-`pull_request` runs never get a credential, so untrusted PR-branch code cannot reach the
-workspace.
+The federated credential is bound to a subject ending in `:environment:production` (the
+full string uses this repo's immutable OIDC prefix — see the note below). That is why
+every workspace-touching job declares `environment: production` — **without it GitHub
+mints a token with a different subject and Azure refuses the exchange.** It is also the
+security boundary: `pull_request` runs never get a credential, so untrusted PR-branch
+code cannot reach the workspace.
 
 Same pattern as `agent-eval`, but a **separate identity** (`github-actions-dbx-platform`)
 so a compromise here cannot touch agent-eval's SP — which holds Contributor at
@@ -38,93 +38,74 @@ These exist; nothing to do.
 | Thing | Value |
 |---|---|
 | Entra app / SP | `github-actions-dbx-platform` — appId `b74a6820-d0ac-454f-8c32-02141cba3c8a` |
-| Federated credential | `repo:HuyD0/dbx-platform:environment:production` |
+| Federated credential | subject `repo:HuyD0@151226205/dbx-platform@1303537051:environment:production` (see note) |
 | Workspace registration | registered via SCIM, member of the `admins` group |
 | Workspace | `dbx-dev` — `https://adb-7405609799238491.11.azuredatabricks.net` |
 | SQL warehouse | `09c77e5867b64a0d` (Serverless Starter Warehouse) |
+| GitHub default branch | `main` |
+| GitHub `production` environment | created, no protection rules |
+| Repo secrets | `DATABRICKS_HOST`, `DATABRICKS_WAREHOUSE_ID`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
+
+The **Deploy** workflow has run green end-to-end against the workspace, and the four
+`[dbx-platform]` jobs are deployed. The keyless chain is proven, not just wired.
 
 Workspace **admin** is required because the security job calls the token-management and
-SCIM APIs. To avoid granting it, strip the security job from the deployment.
+SCIM APIs — and, as it turned out, is also what authorizes the deploy (see "no Azure
+RBAC" below). To avoid admin, strip the security job from the deployment.
+
+> **Federated subject — immutable form.** This repo was created recently enough that
+> GitHub issues OIDC tokens with the *immutable* subject prefix
+> `repo:<owner>@<owner_id>/<repo>@<repo_id>`, not the plain `repo:<owner>/<repo>`. The
+> federated credential is set to match the immutable subject GitHub actually sends. Older
+> repos (e.g. `agent-eval`) still get the plain form — do not copy their subject string.
+> Confirm what your repo sends with:
+> `GET /repos/HuyD0/dbx-platform/actions/oidc/customization/sub` → `sub_claim_prefix`.
 
 ---
 
 ## What still needs you
 
-All of it is in the GitHub web UI — no laptop, no CLI.
+Only two things remain, both in the GitHub web UI, and both are the `@claude` half — the
+Databricks deploy pipeline is already live.
 
-### 1. Set `main` as the default branch
-
-Repo → **Settings** → **General** → *Default branch* → `main`.
-
-This matters more than it looks:
-
-- `ci.yml` / `deploy.yml` trigger on `push: branches: [main]`. If the default branch is
-  something else, a merged PR lands there and **the deploy never fires.**
-- GitHub runs `issue_comment` workflows **only from the default branch's copy of the
-  file**, so `@claude` will not respond until `claude.yml` is on the default branch.
-
-### 2. Install the Claude GitHub App
+### 1. Install the Claude GitHub App
 
 <https://github.com/apps/claude> → install it on `HuyD0/dbx-platform`.
 
-**Required** — the workflow file alone is not enough. Without the App, `@claude` is
-silently ignored: no run, no error, nothing to debug. It's the first thing Anthropic's
-own troubleshooting tells you to check. It requests read & write on Contents, Issues,
-and Pull requests.
+**Required, and I could not do it for you** — installing a GitHub App needs an interactive
+web authorization. The workflow file alone is not enough: without the App, `@claude` is
+silently ignored — no run, no error, nothing to debug. It's the first thing Anthropic's
+own troubleshooting tells you to check. It requests read & write on Contents, Issues, and
+Pull requests.
 
-### 3. Create the `production` environment
+### 2. Add the `ANTHROPIC_API_KEY` secret
 
-Repo → **Settings** → **Environments** → **New environment** → name it exactly
-`production`. **Add no protection rules** — a required reviewer here would make every
-merge-to-`main` deploy wait for manual approval, which is the opposite of the
-auto-deploy loop.
+Repo → **Settings** → **Secrets and variables** → **Actions** → add `ANTHROPIC_API_KEY`
+from <https://console.anthropic.com> → API keys.
 
-Not cosmetic: the federated credential's subject embeds this name
-(`repo:HuyD0/dbx-platform:environment:production`), and Entra matches it
-**case-sensitively**. Skip it, misname it, or change the repo/org casing and every
-Azure login fails with an opaque "no matching federated identity" error.
+This is the one secret with a value I don't have. Everything else — the five
+`AZURE_*`/`DATABRICKS_*` secrets (identifiers, not credentials), the `production`
+environment, and the default branch — is already set. The Claude action also supports
+keyless WIF if you want to remove even this key later.
 
-### 4. Add the repository secrets
+### Then verify the `@claude` loop
 
-Repo → **Settings** → **Secrets and variables** → **Actions**:
-
-| Secret | Value |
-|---|---|
-| `DATABRICKS_HOST` | `https://adb-7405609799238491.11.azuredatabricks.net` |
-| `DATABRICKS_WAREHOUSE_ID` | `09c77e5867b64a0d` |
-| `AZURE_CLIENT_ID` | `b74a6820-d0ac-454f-8c32-02141cba3c8a` |
-| `AZURE_TENANT_ID` | `7f6a2cf9-5e4e-46ae-95d4-74016c1df1a6` |
-| `AZURE_SUBSCRIPTION_ID` | `ea936670-dda1-4884-8467-49c225bf3e83` |
-| `ANTHROPIC_API_KEY` | <https://console.anthropic.com> → API keys |
-
-The four `AZURE_*`/`DATABRICKS_*` values are identifiers, not credentials — none of them
-grant access on their own. They live in secrets to match the `agent-eval` convention.
-`ANTHROPIC_API_KEY` is the one real secret; the Claude action also supports keyless WIF
-if you want to remove it later.
-
-### 5. Verify (do not skip)
-
-1. Actions → **Deploy** → *Run workflow* on `main`.
-2. The **Confirm the authenticated identity** step should print
-   `github-actions-dbx-platform`. That is the proof OIDC → Databricks works.
-3. Confirm `databricks bundle deploy -t prod` succeeds.
-4. Open an issue, comment `@claude say hello and list the repo's CLI commands`, and
-   confirm Claude replies.
-
-Until then CI and Deploy are **red on `main`, which is expected** — the workflows no
-longer self-skip when unconfigured, so a deploy that cannot authenticate fails loudly
-instead of exiting green having done nothing. They go green once the secrets exist.
+Open an issue, comment `@claude say hello and list the repo's CLI commands`, and confirm
+Claude replies. (The Databricks side is already verified — Deploy #11 ran green through
+every step and the jobs are in the workspace.)
 
 ### Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| `azure/login` → "no matching federated identity record" | The `production` environment is missing/misnamed, or the org/repo casing differs from `repo:HuyD0/dbx-platform:environment:production`. Entra matches the subject case-sensitively. |
-| `current-user me` → 403 / auth denied | The SP is registered via SCIM and is a workspace `admins` member, which *should* be sufficient for the `azure-cli` data-plane path — but this is untestable before the first run (the SP is federated-only; there is no secret to exercise locally). If it fails, grant it Azure RBAC on the workspace resource: `az role assignment create --assignee b74a6820-d0ac-454f-8c32-02141cba3c8a --role Contributor --scope /subscriptions/ea936670-dda1-4884-8467-49c225bf3e83/resourceGroups/rg-databricks-dbx-dev/providers/Microsoft.Databricks/workspaces/dbx-dev` |
-| `@claude` does nothing at all — no run, no error | The Claude GitHub App isn't installed (step 2), or `claude.yml` isn't on the **default** branch. |
+| `azure/login` → "no matching federated identity record" | The federated subject doesn't match the token. Check the repo's `sub_claim_prefix` (immutable vs plain form, above) and that the `production` environment still exists and is named exactly. Entra matches case-sensitively. |
+| `azure/login` → "No subscriptions found" | The SP has no Azure RBAC (by design). The workflow passes `allow-no-subscriptions: true` so login still mints the Entra token; if you removed that, restore it rather than granting a subscription role. |
+| `current-user me` → literal `${var.workspace_host}` host error | A non-bundle CLI command was run from the bundle root, where it reads `databricks.yml` and doesn't interpolate variables. The workflow runs it from `runner.temp` for this reason. |
+| Deploy → `no files match pattern: ./resources/dist/*.whl` | Wheel dependency path regressed. Job specs live in `resources/`, so the wheel (built at the bundle root) must be referenced as `../dist/*.whl`, not `./dist/*.whl`. |
+| `@claude` does nothing at all — no run, no error | The Claude GitHub App isn't installed (step 1), or `claude.yml` isn't on the **default** branch (`main`). |
 | Deploy waits on approval | A protection rule was added to the `production` environment. Remove it. |
 
-### 6. Optional: run prod jobs as the service principal
+### Optional: run prod jobs as the service principal
 
 Add to the `prod` target in `databricks.yml` so scheduled jobs stop running as a human:
 
