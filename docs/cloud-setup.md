@@ -63,15 +63,28 @@ This matters more than it looks:
 - GitHub runs `issue_comment` workflows **only from the default branch's copy of the
   file**, so `@claude` will not respond until `claude.yml` is on the default branch.
 
-### 2. Create the `production` environment
+### 2. Install the Claude GitHub App
+
+<https://github.com/apps/claude> → install it on `HuyD0/dbx-platform`.
+
+**Required** — the workflow file alone is not enough. Without the App, `@claude` is
+silently ignored: no run, no error, nothing to debug. It's the first thing Anthropic's
+own troubleshooting tells you to check. It requests read & write on Contents, Issues,
+and Pull requests.
+
+### 3. Create the `production` environment
 
 Repo → **Settings** → **Environments** → **New environment** → name it exactly
-`production`.
+`production`. **Add no protection rules** — a required reviewer here would make every
+merge-to-`main` deploy wait for manual approval, which is the opposite of the
+auto-deploy loop.
 
-Not cosmetic: the federated credential's subject embeds this name. Skip it and every
-Azure login fails with a subject-mismatch error.
+Not cosmetic: the federated credential's subject embeds this name
+(`repo:HuyD0/dbx-platform:environment:production`), and Entra matches it
+**case-sensitively**. Skip it, misname it, or change the repo/org casing and every
+Azure login fails with an opaque "no matching federated identity" error.
 
-### 3. Add the repository secrets
+### 4. Add the repository secrets
 
 Repo → **Settings** → **Secrets and variables** → **Actions**:
 
@@ -89,7 +102,7 @@ grant access on their own. They live in secrets to match the `agent-eval` conven
 `ANTHROPIC_API_KEY` is the one real secret; the Claude action also supports keyless WIF
 if you want to remove it later.
 
-### 4. Verify (do not skip)
+### 5. Verify (do not skip)
 
 1. Actions → **Deploy** → *Run workflow* on `main`.
 2. The **Confirm the authenticated identity** step should print
@@ -98,10 +111,20 @@ if you want to remove it later.
 4. Open an issue, comment `@claude say hello and list the repo's CLI commands`, and
    confirm Claude replies.
 
-The workflows no longer self-skip when unconfigured — a deploy that cannot authenticate
-now fails loudly instead of exiting green having done nothing.
+Until then CI and Deploy are **red on `main`, which is expected** — the workflows no
+longer self-skip when unconfigured, so a deploy that cannot authenticate fails loudly
+instead of exiting green having done nothing. They go green once the secrets exist.
 
-### 5. Optional: run prod jobs as the service principal
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `azure/login` → "no matching federated identity record" | The `production` environment is missing/misnamed, or the org/repo casing differs from `repo:HuyD0/dbx-platform:environment:production`. Entra matches the subject case-sensitively. |
+| `current-user me` → 403 / auth denied | The SP is registered via SCIM and is a workspace `admins` member, which *should* be sufficient for the `azure-cli` data-plane path — but this is untestable before the first run (the SP is federated-only; there is no secret to exercise locally). If it fails, grant it Azure RBAC on the workspace resource: `az role assignment create --assignee b74a6820-d0ac-454f-8c32-02141cba3c8a --role Contributor --scope /subscriptions/ea936670-dda1-4884-8467-49c225bf3e83/resourceGroups/rg-databricks-dbx-dev/providers/Microsoft.Databricks/workspaces/dbx-dev` |
+| `@claude` does nothing at all — no run, no error | The Claude GitHub App isn't installed (step 2), or `claude.yml` isn't on the **default** branch. |
+| Deploy waits on approval | A protection rule was added to the `production` environment. Remove it. |
+
+### 6. Optional: run prod jobs as the service principal
 
 Add to the `prod` target in `databricks.yml` so scheduled jobs stop running as a human:
 

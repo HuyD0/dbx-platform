@@ -4,8 +4,10 @@ name: Claude
 # Claude will pick up the task and push a branch / open a PR. This is what makes
 # the repo drivable from any device — no laptop, no local toolchain.
 #
-# Requires one repo secret:
-#   ANTHROPIC_API_KEY   https://console.anthropic.com → API keys
+# Two prerequisites — this file alone is NOT enough:
+#   1. The Claude GitHub App installed on the repo: https://github.com/apps/claude
+#      Without it @claude is silently ignored — no run, no error.
+#   2. Repo secret ANTHROPIC_API_KEY (https://console.anthropic.com → API keys).
 #
 # The action itself detects the @claude trigger phrase, so no `if:` filter here.
 
