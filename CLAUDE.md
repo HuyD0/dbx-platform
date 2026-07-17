@@ -9,7 +9,8 @@ Every check is **one code path exposed two ways**: an ad-hoc CLI command, and a
 bundle-deployed job that runs the same code on a schedule via `python_wheel_task`
 against the `dbx-platform` entry point. When you add a check, wire up both — a CLI
 subcommand in `src/dbx_platform/cli.py` and a task in the matching `resources/*.yml`.
-Never let the scheduled path drift into a separate implementation.
+Never let the scheduled path drift into a separate implementation. The **`add-check`
+skill** (`.claude/skills/add-check/`) walks the full procedure end to end — use it.
 
 ## Safety model
 
