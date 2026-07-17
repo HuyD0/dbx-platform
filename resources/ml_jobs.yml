@@ -1,0 +1,45 @@
+# AI/ML workload reports. Tasks run the same CLI you use locally:
+#   dbx-platform ml endpoint-audit / dbx-platform ml serving-cost
+# REPORT-ONLY on a schedule: no --apply here (ml checks have none by design).
+resources:
+  jobs:
+    ml_serving_report:
+      name: "[dbx-platform] ml-serving-report"
+      description: >
+        Daily model-serving endpoint audit (state, scale-to-zero, inference
+        tables, AI Gateway) plus AI/ML spend and token usage. Read-only;
+        results appear in the task run output.
+      schedule:
+        quartz_cron_expression: "0 30 7 * * ?"  # daily 07:30 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: endpoint_audit
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ml", "endpoint-audit", "--stale-days", "30",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: serving_cost
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ml", "serving-cost", "--days", "30",
+               "--warehouse-id", "${var.warehouse_id}"]

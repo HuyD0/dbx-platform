@@ -26,6 +26,9 @@ class Settings:
     inactive_user_days: int = 90
     # Governance
     required_tags: str = "team,project"
+    # ML / AI workloads
+    serving_stale_days: int = 30
+    serving_failed_grace_hours: int = 24
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30

@@ -1,0 +1,29 @@
+{
+  "name": "gpu-training",
+  "description": "GPU training clusters: approved node types only, autotermination and cost-attribution tags required, single-user access mode. Managed by dbx-platform (policies/gpu_training.json) - edit in git, not in the UI.",
+  "max_clusters_per_user": 1,
+  "definition": {
+    "node_type_id": {
+      "type": "allowlist",
+      "values": ["Standard_NC6s_v3", "Standard_NC24ads_A100_v4"]
+    },
+    "autotermination_minutes": {
+      "type": "range",
+      "minValue": 10,
+      "maxValue": 120,
+      "defaultValue": 60
+    },
+    "data_security_mode": {
+      "type": "fixed",
+      "value": "SINGLE_USER"
+    },
+    "custom_tags.team": {
+      "type": "unlimited",
+      "isOptional": false
+    },
+    "custom_tags.project": {
+      "type": "unlimited",
+      "isOptional": false
+    }
+  }
+}

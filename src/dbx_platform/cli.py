@@ -20,7 +20,7 @@ import sys
 import time
 from importlib import resources
 
-from dbx_platform import __version__, cost, governance, housekeeping, security
+from dbx_platform import __version__, cost, governance, housekeeping, ml, security
 from dbx_platform.client import get_client
 from dbx_platform.config import Settings
 from dbx_platform.system_tables import SystemTablesUnavailableError
@@ -224,6 +224,40 @@ def cmd_tag_compliance(args) -> int:
     return 0
 
 
+# --- ml ----------------------------------------------------------------------------
+
+def cmd_ml_endpoint_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    endpoints = ml.fetch_serving_endpoints(w)
+    findings = ml.classify_serving_endpoints(endpoints, _now_ms(), s.serving_failed_grace_hours)
+    emit(args, "Model serving endpoint audit", findings,
+         ["Report only — endpoint config changes trigger a redeployment; apply "
+          "manually (see docs/runbook.md)."])
+    days = args.stale_days if args.stale_days is not None else s.serving_stale_days
+    try:
+        usage = ml.endpoint_token_usage(w, _warehouse_id(args, s), days)
+        stale = ml.find_stale_endpoints(endpoints, usage, _now_ms(), days)
+        emit(args, f"Endpoints with no requests in {days}d", stale)
+    except (SystemTablesUnavailableError, ValueError) as e:
+        emit(args, "Endpoints with no requests", [], [f"skipped: {e}"])
+    return 0
+
+
+def cmd_ml_serving_cost(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = ml.serving_cost(w, _warehouse_id(args, s), days)
+    emit(args, f"AI/ML spend by product/SKU/endpoint — last {days}d", rows)
+    try:
+        tokens = ml.endpoint_token_usage(w, _warehouse_id(args, s), days)
+        emit(args, f"Token usage by endpoint/requester — last {days}d", tokens)
+    except SystemTablesUnavailableError as e:
+        emit(args, "Token usage by endpoint/requester", [], [f"skipped: {e}"])
+    return 0
+
+
 # --- dashboards --------------------------------------------------------------------
 
 def cmd_dashboards_render(args) -> int:
@@ -337,6 +371,19 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--required-tags", default=None, help="Comma-separated tag keys")
     x.add_argument("--days", type=int, default=None)
     x.set_defaults(func=cmd_tag_compliance)
+
+    # ml
+    pm = sub.add_parser("ml", help="AI/ML workloads: serving, models, GPU, vector search"
+                        ).add_subparsers(dest="command")
+    x = pm.add_parser("endpoint-audit", parents=[common],
+                      help="Serving endpoint hygiene: state, scale-to-zero, "
+                           "inference tables, AI Gateway")
+    x.add_argument("--stale-days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_endpoint_audit)
+    x = pm.add_parser("serving-cost", parents=[common],
+                      help="Serving/vector-search/AI spend and token usage")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_serving_cost)
 
     # dashboards
     pd = sub.add_parser("dashboards", help="AI/BI dashboards").add_subparsers(dest="command")
