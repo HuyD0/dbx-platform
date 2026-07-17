@@ -79,3 +79,8 @@ jobs:
         run: databricks bundle validate -t prod
       - name: Deploy
         run: databricks bundle deploy -t prod
+      - name: Deploy and start the Platform Console app
+        # bundle deploy only creates the app resource and uploads its source;
+        # bundle run pushes the source into the app and starts it. First run
+        # provisions app compute (takes a few minutes); idempotent afterwards.
+        run: databricks bundle run platform_console -t prod

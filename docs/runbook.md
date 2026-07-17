@@ -120,13 +120,17 @@ pull requests** — never workspace mutations.
 
 ### Platform Console app
 
-Deployed by the bundle (`resources/app.yml`). After the first deploy, grant
-the app's service principal CAN_MANAGE_RUN on the `[dbx-platform]` jobs so
-the Actions page can trigger them. The deploy workflow stages the wheel into
-`apps/platform-console/wheels/` (git-ignored) before `bundle deploy`; for a
-manual deploy run the same copy step first. Note: apps are currently
-prod-target resources — if `bundle deploy -t dev` rejects the app name
-prefix, deploy the app from prod only.
+Deployed by the bundle (`resources/app.yml`) and found under **Compute →
+Apps** (not the workspace file tree). Two steps are required and CI runs
+both: `bundle deploy` creates the app and uploads its source, then
+`databricks bundle run platform_console` pushes the source into the app and
+starts it — without the run step the app sits stopped with no URL. For a
+manual deploy, first stage the wheel (`python -m build --wheel && cp
+dist/*.whl apps/platform-console/wheels/` — git-ignored), then run both
+commands. After the first deploy, grant the app's service principal
+CAN_MANAGE_RUN on the `[dbx-platform]` jobs so the Actions page can trigger
+them. Note: apps are currently prod-target resources — if `bundle deploy -t
+dev` rejects the app name prefix, deploy the app from prod only.
 
 ### Served agent (optional)
 
