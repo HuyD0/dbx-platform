@@ -16,7 +16,7 @@ not failures), `1` runtime error, `2` refused `--apply` without confirmation,
 | `cost-usage-report` | daily 07:00 | `cost report`, `cost top-jobs`, `cluster-utilization`, `failed-run-waste`, `warehouse-utilization` | warehouse + system.billing/lakeflow/compute/query |
 | `housekeeping-report` | daily 05:30 | `stale-clusters`, `orphaned-jobs`, `jobs-on-all-purpose` | REST APIs only |
 | `security-audit` | weekly Mon 06:00 | `token-audit`, `inactive-users` | admin; warehouse + system.access |
-| `governance-check` | weekly Mon 06:30 | `policy-sync` (drift), `tag-compliance` | warehouse + system.billing |
+| `governance-check` | weekly Mon 06:30 | `policy-sync` (drift), `tag-compliance`, `tag-recommendations` | warehouse + system.billing |
 | `ml-serving-report` | daily 07:30 | `endpoint-audit`, `serving-cost` | warehouse + system.billing (+ system.serving where enabled) |
 | `ml-hygiene-report` | weekly Mon 07:00 | `model-hygiene`, `gpu-audit`, `vector-search-audit` | REST APIs (+ warehouse for GPU spend) |
 | `platform-digest` | weekly Mon 08:00 | `ai-digest` | warehouse + an `ai_query`-capable foundation-model endpoint |
@@ -75,6 +75,21 @@ re-run the drift report, confirm "unchanged".
 Fix by adding `custom_tags` (clusters) / `tags` (jobs). The cluster policies in
 `policies/` make `team` and `project` mandatory for new compute, so the list
 should shrink over time.
+
+### Tag recommendations
+
+```bash
+dbx-platform governance tag-recommendations   # advisory, report-only
+```
+
+For each resource missing a required tag, suggests a concrete fix from three
+offline signals (no AI/ML): a **near-match key** rename when the value is already
+present under a typo/differently-formatted key (`costcenter` -> `cost_center`),
+an **inferred value** when a value already used elsewhere for that key appears in
+the resource name (cluster `atlas-nightly` -> `project=atlas`), and the resource
+**creator** for ownership-type keys (`owner`/`email`/`contact`). Suggestions are
+advisory — apply them by editing the resource's tags. Tune the typo threshold
+with `DBX_PLATFORM_TAG_SUGGESTION_MIN_RATIO_PCT` (default 80).
 
 ### Serving endpoints (ml endpoint-audit)
 

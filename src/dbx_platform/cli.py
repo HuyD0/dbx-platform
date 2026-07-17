@@ -273,6 +273,25 @@ def cmd_tag_compliance(args) -> int:
     return 0
 
 
+def cmd_tag_recommendations(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    required = (
+        [t.strip() for t in args.required_tags.split(",") if t.strip()]
+        if args.required_tags
+        else s.required_tag_list()
+    )
+    recs = governance.recommend_tags(
+        governance.fetch_taggable_resources(w),
+        required,
+        min_ratio=s.tag_suggestion_min_ratio_pct / 100,
+        owner_keys=tuple(s.tag_owner_key_list()),
+    )
+    emit(args, f"Tag recommendations for {required}", recs,
+         ["Suggestions only — apply tag changes manually."])
+    return 0
+
+
 # --- ml ----------------------------------------------------------------------------
 
 def cmd_ml_endpoint_audit(args) -> int:
@@ -526,6 +545,10 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--required-tags", default=None, help="Comma-separated tag keys")
     x.add_argument("--days", type=int, default=None)
     x.set_defaults(func=cmd_tag_compliance)
+    x = pg.add_parser("tag-recommendations", parents=[common],
+                      help="Suggest fixes for missing tags (typo/near-match + inferred values)")
+    x.add_argument("--required-tags", default=None, help="Comma-separated tag keys")
+    x.set_defaults(func=cmd_tag_recommendations)
 
     # ml
     pm = sub.add_parser("ml", help="AI/ML workloads: serving, models, GPU, vector search"
