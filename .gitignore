@@ -18,6 +18,9 @@ build/
 .idea/
 .DS_Store
 
+# Claude Code — commit shared config (settings.json, hooks, skills); keep personal overrides local
+.claude/settings.local.json
+
 # Local env / secrets — never commit credentials
 .env
 *.pem
