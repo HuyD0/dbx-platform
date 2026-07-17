@@ -78,15 +78,24 @@ silently ignored — no run, no error, nothing to debug. It's the first thing An
 own troubleshooting tells you to check. It requests read & write on Contents, Issues, and
 Pull requests.
 
-### 2. Add the `ANTHROPIC_API_KEY` secret
+### 2. Add the `CLAUDE_CODE_OAUTH_TOKEN` secret
 
-Repo → **Settings** → **Secrets and variables** → **Actions** → add `ANTHROPIC_API_KEY`
-from <https://console.anthropic.com> → API keys.
+You do **not** need an Anthropic API key or a console.anthropic.com account. Generate a
+token from your existing Claude Pro/Max subscription instead:
 
-This is the one secret with a value I don't have. Everything else — the five
-`AZURE_*`/`DATABRICKS_*` secrets (identifiers, not credentials), the `production`
-environment, and the default branch — is already set. The Claude action also supports
-keyless WIF if you want to remove even this key later.
+```bash
+claude setup-token      # in the Claude Code CLI — prints a long-lived OAuth token
+```
+
+Then repo → **Settings** → **Secrets and variables** → **Actions** → add
+`CLAUDE_CODE_OAUTH_TOKEN` with that value. This bills `@claude` usage against your Claude
+subscription, not a pay-per-use API bill.
+
+(Prefer an API key anyway? Add `ANTHROPIC_API_KEY` instead and change the input in
+`.github/workflows/claude.yml` from `claude_code_oauth_token` to `anthropic_api_key`.)
+
+Everything else — the five `AZURE_*`/`DATABRICKS_*` secrets (identifiers, not
+credentials), the `production` environment, and the default branch — is already set.
 
 ### Then verify the `@claude` loop
 

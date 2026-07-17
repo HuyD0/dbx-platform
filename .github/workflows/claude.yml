@@ -7,7 +7,10 @@ name: Claude
 # Two prerequisites — this file alone is NOT enough:
 #   1. The Claude GitHub App installed on the repo: https://github.com/apps/claude
 #      Without it @claude is silently ignored — no run, no error.
-#   2. Repo secret ANTHROPIC_API_KEY (https://console.anthropic.com → API keys).
+#   2. Repo secret CLAUDE_CODE_OAUTH_TOKEN — generated from a Claude Pro/Max
+#      subscription with `claude setup-token` (no API key / no API billing).
+#      To use a pay-per-use API key instead, swap the input below for
+#      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}.
 #
 # The action itself detects the @claude trigger phrase, so no `if:` filter here.
 
@@ -46,7 +49,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
           # Base file + GitHub tools are always included; this adds the project
