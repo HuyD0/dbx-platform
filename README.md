@@ -70,13 +70,15 @@ Setup and the decision table Databricks-vs-Azure constructs: **[docs/secrets.md]
 
 ## Swapping workspaces
 
-The workspace URL exists in **exactly one place**: the `workspace_host`
-variable default in [databricks.yml](databricks.yml) (convention: `adb-`
-appears in no other file). To target another workspace:
+The workspace URL exists in **exactly one place**: `workspace.host` in
+[databricks.yml](databricks.yml) (convention: `adb-` appears in no other file).
+It cannot be a bundle variable — the CLI rejects interpolation for fields that
+configure authentication — so override it at runtime instead:
 
 ```bash
-# bundle:
-databricks bundle deploy --var workspace_host=https://adb-<other>.azuredatabricks.net
+# bundle: env var or profile (the CLI's documented overrides)
+DATABRICKS_HOST=https://adb-<other>.azuredatabricks.net databricks bundle deploy
+databricks bundle deploy -p other
 # CLI: one profile per workspace
 databricks auth login --host https://adb-<other>... --profile other
 dbx-platform cost report --profile other
@@ -88,14 +90,14 @@ credentials — nothing to configure.
 ## Repo layout
 
 ```
-databricks.yml          bundle: variables (workspace_host, warehouse_id), dev/prod targets
+databricks.yml          bundle: workspace.host, variables (warehouse_id), dev/prod targets
 resources/              job + dashboard definitions (schedules/thresholds live here, in git)
 dashboards/             rendered .lvdash.json (deployed) + templates/ (upstream, pristine)
 policies/               cluster policies as code — git is the source of truth
 src/dbx_platform/       the package: cli, client, config, area modules, queries/*.sql
 tests/                  offline unit tests for all decision logic
 docs/                   setup, runbook, secrets, service-principal (CI) guides
-.github/workflows/      ci.yml (lint/test/build always; validate when secrets set), deploy.yml
+.github/workflows/      ci.yml (lint/test/build on PRs; bundle validate on push), deploy.yml, claude.yml
 ```
 
 ## Development

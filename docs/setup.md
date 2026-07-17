@@ -23,8 +23,8 @@ This creates a named profile in `~/.databrickscfg`. Every `dbx-platform` command
 
 **Multiple workspaces**: create one profile per workspace
 (`databricks auth login --host ... --profile other-workspace`) and switch with
-`--profile`. The bundle side is switched with `--var workspace_host=...` or
-`BUNDLE_VAR_workspace_host` — no code changes anywhere.
+`--profile`. The bundle side is switched with the `DATABRICKS_HOST` env var or
+`-p <profile>` — no code changes anywhere.
 
 ## 3. Pick a SQL warehouse
 

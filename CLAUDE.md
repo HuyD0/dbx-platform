@@ -39,9 +39,11 @@ runtime, add it there and extend that CI check.
 
 ## Workspace configuration
 
-The workspace URL lives in **exactly one place**: the `workspace_host` variable default
-in `databricks.yml`. Do not hardcode a workspace URL anywhere else. Override with
-`--var workspace_host=...` or `BUNDLE_VAR_workspace_host`.
+The workspace URL lives in **exactly one place**: `workspace.host` in `databricks.yml`.
+Do not hardcode a workspace URL anywhere else, and do **not** try to make it a
+`${var.…}` reference — the CLI rejects interpolation for fields that configure
+authentication, which silently breaks every bundle command. Override it at runtime with
+the `DATABRICKS_HOST` env var or a profile.
 
 `warehouse_id` has no default and must be supplied (`BUNDLE_VAR_warehouse_id`); the
 dashboards and system-table tasks need it.

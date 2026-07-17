@@ -2,14 +2,20 @@
 # Docs: https://docs.databricks.com/dev-tools/bundles/
 #
 # Workspace swappability: the workspace URL exists in exactly ONE place — the
-# default value of the workspace_host variable below. Point this bundle at a
-# different workspace with either of:
-#   databricks bundle deploy --var workspace_host=https://adb-<id>.<n>.azuredatabricks.net
-#   BUNDLE_VAR_workspace_host=https://... databricks bundle deploy
+# workspace.host below. It CANNOT be a ${var.…} reference: the CLI rejects
+# interpolation for fields that configure authentication ("Variable
+# interpolation is not supported for fields that configure authentication").
+# Point this bundle at a different workspace with the CLI's documented runtime
+# override instead — an env var or a profile:
+#   DATABRICKS_HOST=https://adb-<id>.<n>.azuredatabricks.net databricks bundle deploy
+#   databricks bundle deploy -p <profile>
 # or add another target below.
 
 bundle:
   name: dbx-platform
+
+workspace:
+  host: https://adb-7405609799238491.11.azuredatabricks.net
 
 include:
   - resources/*.yml
@@ -21,12 +27,6 @@ artifacts:
     build: python3 -m build --wheel
 
 variables:
-  workspace_host:
-    description: >
-      Workspace URL. The only place a workspace URL appears in this repo.
-      Override with --var workspace_host=... or BUNDLE_VAR_workspace_host.
-    default: https://adb-7405609799238491.11.azuredatabricks.net
-
   warehouse_id:
     description: >
       SQL warehouse ID used by the dashboards and system-table job tasks.
@@ -44,8 +44,6 @@ targets:
   dev:
     default: true
     mode: development
-    workspace:
-      host: ${var.workspace_host}
 
   # Production: real names, active schedules, shared root path.
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
@@ -55,5 +53,4 @@ targets:
   prod:
     mode: production
     workspace:
-      host: ${var.workspace_host}
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
