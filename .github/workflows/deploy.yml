@@ -59,6 +59,13 @@ jobs:
         # Cheap, explicit proof that OIDC → Databricks actually worked, so a
         # failure here is unambiguous rather than surfacing later as a
         # confusing permissions error mid-deploy.
+        #
+        # Runs outside the repo on purpose: non-bundle commands do NOT interpolate
+        # bundle variables, so from the bundle root the CLI reads databricks.yml
+        # and takes the host literally as "${var.workspace_host}" and dies. From
+        # elsewhere it uses DATABRICKS_HOST. `bundle validate/deploy` below are
+        # unaffected — they resolve variables properly.
+        working-directory: ${{ runner.temp }}
         run: databricks current-user me
       - name: Validate
         run: databricks bundle validate -t prod
