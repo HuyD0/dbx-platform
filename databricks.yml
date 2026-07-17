@@ -20,6 +20,13 @@ workspace:
 include:
   - resources/*.yml
 
+# Bundle sync respects .gitignore, but the Platform Console app installs
+# dbx-platform from wheels the deploy workflow stages into its (git-ignored)
+# source dir. Re-include them or the app's pip install fails on deploy.
+sync:
+  include:
+    - apps/platform-console/wheels/*.whl
+
 artifacts:
   default:
     type: whl
