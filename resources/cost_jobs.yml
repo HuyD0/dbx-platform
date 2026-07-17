@@ -23,7 +23,7 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - ./dist/*.whl
+              - ../dist/*.whl
       tasks:
         - task_key: usage_by_sku
           environment_key: default

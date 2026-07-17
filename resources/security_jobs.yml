@@ -25,7 +25,7 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - ./dist/*.whl
+              - ../dist/*.whl
       tasks:
         - task_key: token_audit
           environment_key: default

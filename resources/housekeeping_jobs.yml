@@ -24,7 +24,7 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - ./dist/*.whl
+              - ../dist/*.whl
       tasks:
         - task_key: stale_clusters
           environment_key: default

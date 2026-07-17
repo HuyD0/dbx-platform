@@ -25,7 +25,7 @@ resources:
           spec:
             client: "2"
             dependencies:
-              - ./dist/*.whl
+              - ../dist/*.whl
       tasks:
         - task_key: policy_drift
           environment_key: default
