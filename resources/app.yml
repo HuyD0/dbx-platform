@@ -1,0 +1,19 @@
+# Platform Console — Databricks App (third surface of the same code path:
+# CLI, scheduled jobs, app). Report-only: the app's identity gets CAN_USE on
+# the warehouse here; grant CAN_MANAGE_RUN on the report jobs after the first
+# deploy (see docs/runbook.md) so the Actions page can kick them off.
+#
+# The app installs dbx-platform from a wheel staged into
+# apps/platform-console/wheels/ by the deploy workflow.
+resources:
+  apps:
+    platform_console:
+      name: "platform-console"
+      description: "dbx-platform findings, AI/ML cost, digests, job kick-off"
+      source_code_path: ../apps/platform-console
+      resources:
+        - name: sql-warehouse
+          description: Warehouse for system-table queries and findings tables
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE

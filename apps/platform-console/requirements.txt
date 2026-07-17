@@ -1,0 +1,7 @@
+# dbx-platform resolves from the wheel staged into ./wheels by the deploy
+# workflow (see .github/workflows/deploy.yml) — the app reuses the exact
+# package the CLI and jobs run, zero duplicated logic.
+--find-links wheels
+dbx-platform
+streamlit
+pandas

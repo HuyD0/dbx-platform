@@ -1,0 +1,8 @@
+# Databricks App runtime config for the Platform Console.
+# The sql-warehouse entry in resources/app.yml injects the warehouse ID here.
+command: ["streamlit", "run", "app.py"]
+env:
+  - name: DBX_PLATFORM_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"

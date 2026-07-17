@@ -12,6 +12,8 @@ build/
 
 # Databricks
 .databricks/
+# Wheel staged into the app source dir by the deploy workflow — never commit
+apps/platform-console/wheels/
 
 # Editors / OS
 .vscode/
