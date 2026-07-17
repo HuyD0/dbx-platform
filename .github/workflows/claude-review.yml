@@ -1,0 +1,85 @@
+name: Claude PR Review
+
+# Automatic review on every PR, checked against THIS repo's safety invariants
+# rather than a generic checklist. Same auth as claude.yml: the Claude Pro/Max
+# subscription OAuth token (CLAUDE_CODE_OAUTH_TOKEN), no API key.
+#
+# This workflow reviews code only — it needs no Databricks/Azure credentials and
+# deliberately has none, so it is safe to run on PR branches.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+# One review per PR head at a time; a new push cancels an in-flight review.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Same-repo PRs only. A fork PR must not be handed the review token, and
+    # GitHub withholds secrets from fork-triggered runs anyway — this makes that
+    # explicit and skips cleanly rather than failing on an empty token.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write # claude-code-action@v1 fetches its own OIDC token
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this PR for a Databricks platform-management toolkit. Read
+            CLAUDE.md first — it states the invariants below. Prioritize these
+            repo-specific risks over generic style feedback, and flag any
+            violation with an inline comment on the offending line:
+
+            1. SAFETY MODEL (most important). Everything is read-only by default.
+               Any mutating action must be dry-run unless given `--apply`, and
+               `--apply` must additionally require `--yes` (or
+               DBX_PLATFORM_CONFIRM=true). Existing mutations are deliberately
+               conservative — orphaned-jobs only PAUSES (never deletes), and
+               policy-sync creates/updates but NEVER deletes unmanaged policies.
+               Flag any new code that deletes, that mutates without the
+               apply/yes gate, or that loosens these guarantees.
+
+            2. "ONE CODE PATH, TWO WAYS." Every check is a CLI subcommand AND a
+               matching bundle job task running the same code via
+               python_wheel_task. If a PR adds or changes a check, verify BOTH
+               sides moved together — a new area-module function wired into
+               cli.py, and a corresponding task in resources/<area>_jobs.yml.
+               Flag a check that is wired to only one surface.
+
+            3. OFFLINE TESTS. Tests mock the Databricks SDK and must not require
+               workspace credentials or network — CI runs them without secrets.
+               Flag any test that would make a live API/network call.
+
+            4. WHEEL-PACKAGED DATA. Scheduled jobs have no repo checkout — they
+               only have the wheel. Any data file a job reads at runtime must be
+               force-included in pyproject.toml ([tool.hatch...force-include])
+               and asserted present by the CI packaged-data check. Flag a new
+               runtime-read data directory that isn't force-included.
+
+            5. BUNDLE FOOTGUNS. workspace.host must be a literal, never a
+               `${var.…}` reference (the CLI forbids interpolation on auth
+               fields). Job wheel dependencies resolve relative to resources/, so
+               they must be `../dist/*.whl`. No credential may be committed.
+
+            Use inline comments for specific issues and a top-level comment for
+            the overall summary. If the PR is clean against these invariants, say
+            so plainly rather than inventing nitpicks.
+
+          # Review tools only — read the diff and post comments. No build/deploy.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
