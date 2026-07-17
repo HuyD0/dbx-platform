@@ -52,10 +52,16 @@ databricks system-schemas enable <metastore-id> compute -p dbx-platform
 Grants (run in a SQL editor as an admin):
 
 ```sql
-GRANT USESCHEMA, SELECT ON SCHEMA system.billing  TO `account users`;  -- or a tighter group
-GRANT USESCHEMA, SELECT ON SCHEMA system.access   TO `platform-admins`;
-GRANT USESCHEMA, SELECT ON SCHEMA system.lakeflow TO `platform-admins`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `account users`;  -- or a tighter group
+GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `platform-admins`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `platform-admins`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `platform-admins`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `platform-admins`;
 ```
+
+These grants cover *you* running ad-hoc commands. The scheduled prod jobs run as the
+CI service principal, which needs the same grants — see the system-table grants
+section in [cloud-setup.md](cloud-setup.md).
 
 Commands that need system tables fail with an actionable message (exit code 3)
 if the schemas aren't enabled; REST-only commands are unaffected.

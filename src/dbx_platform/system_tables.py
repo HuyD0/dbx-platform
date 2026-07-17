@@ -83,10 +83,13 @@ def run_query(
         if "system." in sql and any(m in message for m in _UNAVAILABLE_MARKERS):
             raise SystemTablesUnavailableError(
                 f"Query against system tables failed: {message}\n"
-                "System tables are likely not enabled for this metastore, or you lack SELECT.\n"
+                "System tables are likely not enabled for this metastore, or the running "
+                "principal lacks USE SCHEMA + SELECT.\n"
                 "Fix: enable schemas with 'databricks system-schemas enable <metastore-id> "
                 "<schema>' (billing, access, lakeflow, compute) and grant e.g. "
-                "'GRANT SELECT ON SCHEMA system.billing TO `you`'. See docs/setup.md."
+                "'GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `<principal>`'. "
+                "For scheduled jobs, <principal> is the job's run-as identity — in prod, "
+                "the CI service principal. See docs/setup.md and docs/cloud-setup.md."
             )
         raise RuntimeError(f"Statement failed ({resp.status.state if resp.status else '?'}): "
                            f"{message}")

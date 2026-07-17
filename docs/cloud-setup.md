@@ -113,6 +113,34 @@ every step and the jobs are in the workspace.)
 | Deploy → `no files match pattern: ./resources/dist/*.whl` | Wheel dependency path regressed. Job specs live in `resources/`, so the wheel (built at the bundle root) must be referenced as `../dist/*.whl`, not `./dist/*.whl`. |
 | `@claude` does nothing at all — no run, no error | The Claude GitHub App isn't installed (step 1), or `claude.yml` isn't on the **default** branch (`main`). |
 | Deploy waits on approval | A protection rule was added to the `production` environment. Remove it. |
+| Scheduled job fails with `INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.<x>'` (exit 3) | The job's run-as principal — the service principal, since CI deployed the bundle — has no grant on that system schema. Workspace admin does not confer it. Run the grants below. |
+
+### Required: grant system-table access to the service principal
+
+The prod jobs are deployed by CI, so they **run as the service principal** (production
+mode's default run-as is the deploying identity — with or without the explicit `run_as`
+below). Workspace admin does **not** include Unity Catalog access to `system.*` schemas,
+so without these grants every system-table task fails with
+`INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.…'`.
+
+Run as a metastore admin in a SQL editor (schemas must also be *enabled* on the
+metastore first — setup.md §4):
+
+```sql
+GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+-- dashboards' helper schema:
+GRANT USE CATALOG ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+```
+
+The schema list matches what the jobs read (see the job table in runbook.md):
+billing/lakeflow/compute/query for `cost-usage-report`, access for `security-audit`,
+serving for `ml-serving-report`.
 
 ### Optional: run prod jobs as the service principal
 

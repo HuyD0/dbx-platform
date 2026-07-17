@@ -78,9 +78,11 @@ The Databricks CLI/SDK unified auth picks either pair up automatically.
 For system-table tasks running as the SP:
 
 ```sql
-GRANT USESCHEMA, SELECT ON SCHEMA system.billing  TO `<application-id>`;
-GRANT USESCHEMA, SELECT ON SCHEMA system.access   TO `<application-id>`;
-GRANT USESCHEMA, SELECT ON SCHEMA system.lakeflow TO `<application-id>`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `<application-id>`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `<application-id>`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `<application-id>`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `<application-id>`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `<application-id>`;
 -- dashboards' helper schema:
 GRANT USE CATALOG ON CATALOG main TO `<application-id>`;
 GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `<application-id>`;
