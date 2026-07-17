@@ -1,9 +1,11 @@
 from conftest import days_ago, hours_ago
 
 from dbx_platform.ml import (
+    classify_gpu_clusters,
     classify_models,
     classify_serving_endpoints,
     find_stale_endpoints,
+    find_vector_search_findings,
     served_entity_names,
 )
 
@@ -188,3 +190,113 @@ def test_never_served_model_flagged_as_info(now_ms):
 def test_served_entity_names_collects_from_endpoints():
     endpoints = [_endpoint(served_entities=[_entity(entity_name="main.prod.churn")])]
     assert served_entity_names(endpoints) == {"main.prod.churn"}
+
+
+# --- classify_gpu_clusters -----------------------------------------------------
+
+GPU_TYPES = {"Standard_NC6s_v3", "Standard_NC24ads_A100_v4"}
+
+
+def _gpu_cluster(**overrides) -> dict:
+    base = {
+        "cluster_id": "c-gpu",
+        "cluster_name": "training",
+        "state": "RUNNING",
+        "source": "UI",
+        "node_type_id": "Standard_NC6s_v3",
+        "driver_node_type_id": "Standard_DS3_v2",
+        "start_time": hours_ago(2),
+        "autotermination_minutes": 60,
+        "creator": "someone@example.com",
+    }
+    return {**base, **overrides}
+
+
+def test_gpu_cluster_within_limits_not_flagged(now_ms):
+    assert classify_gpu_clusters([_gpu_cluster()], GPU_TYPES, now_ms, 8) == []
+
+
+def test_non_gpu_cluster_ignored(now_ms):
+    c = _gpu_cluster(node_type_id="Standard_DS3_v2", autotermination_minutes=0)
+    assert classify_gpu_clusters([c], GPU_TYPES, now_ms, 8) == []
+
+
+def test_job_source_gpu_cluster_ignored(now_ms):
+    c = _gpu_cluster(source="JOB", autotermination_minutes=0)
+    assert classify_gpu_clusters([c], GPU_TYPES, now_ms, 8) == []
+
+
+def test_gpu_cluster_without_autotermination_flagged(now_ms):
+    findings = classify_gpu_clusters(
+        [_gpu_cluster(autotermination_minutes=0)], GPU_TYPES, now_ms, 8
+    )
+    assert [f["action"] for f in findings] == ["terminate (manual)"]
+
+
+def test_gpu_cluster_over_uptime_boundary_flagged(now_ms):
+    findings = classify_gpu_clusters(
+        [_gpu_cluster(start_time=hours_ago(8))], GPU_TYPES, now_ms, 8
+    )
+    assert len(findings) == 1
+
+
+def test_gpu_driver_only_counts_as_gpu(now_ms):
+    c = _gpu_cluster(
+        node_type_id="Standard_DS3_v2",
+        driver_node_type_id="Standard_NC6s_v3",
+        autotermination_minutes=0,
+    )
+    assert len(classify_gpu_clusters([c], GPU_TYPES, now_ms, 8)) == 1
+
+
+def test_terminated_gpu_cluster_not_flagged(now_ms):
+    c = _gpu_cluster(state="TERMINATED", autotermination_minutes=0)
+    assert classify_gpu_clusters([c], GPU_TYPES, now_ms, 8) == []
+
+
+# --- find_vector_search_findings -----------------------------------------------
+
+def _vs_endpoint(**overrides) -> dict:
+    base = {
+        "name": "vs-main",
+        "creator": "someone@example.com",
+        "status": "ONLINE",
+        "created_ms": days_ago(10),
+        "num_indexes": 3,
+    }
+    return {**base, **overrides}
+
+
+def test_healthy_vector_search_endpoint_not_flagged(now_ms):
+    assert find_vector_search_findings([_vs_endpoint()], now_ms, grace_hours=24) == []
+
+
+def test_old_endpoint_with_zero_indexes_flagged(now_ms):
+    findings = find_vector_search_findings(
+        [_vs_endpoint(num_indexes=0)], now_ms, grace_hours=24
+    )
+    assert [f["action"] for f in findings] == ["delete-endpoint (manual)"]
+
+
+def test_young_endpoint_with_zero_indexes_not_flagged(now_ms):
+    e = _vs_endpoint(num_indexes=0, created_ms=hours_ago(2))
+    assert find_vector_search_findings([e], now_ms, grace_hours=24) == []
+
+
+def test_unhealthy_endpoint_flagged_for_review(now_ms):
+    findings = find_vector_search_findings(
+        [_vs_endpoint(status="RED_STATE")], now_ms, grace_hours=24
+    )
+    assert [f["action"] for f in findings] == ["review"]
+
+
+# --- gpu_training policy file --------------------------------------------------
+
+def test_gpu_training_policy_ships_with_required_tags():
+    from dbx_platform.governance import load_local_policies
+
+    policies = {p["name"]: p for p in load_local_policies("policies")}
+    gpu = policies["gpu-training"]
+    assert gpu["definition"]["custom_tags.team"]["isOptional"] is False
+    assert gpu["definition"]["custom_tags.project"]["isOptional"] is False
+    assert gpu["definition"]["node_type_id"]["type"] == "allowlist"

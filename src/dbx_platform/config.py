@@ -32,6 +32,8 @@ class Settings:
     model_stale_days: int = 90
     model_unaliased_days: int = 30
     ml_max_models: int = 500
+    gpu_max_uptime_hours: int = 8
+    vector_search_grace_hours: int = 24
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30

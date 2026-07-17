@@ -221,6 +221,140 @@ def served_entity_names(endpoints: list[dict]) -> set[str]:
     return names
 
 
+# --- GPU compute -------------------------------------------------------------
+
+def fetch_gpu_node_types(w: WorkspaceClient) -> set[str]:
+    """Node type IDs with at least one GPU (cloud-agnostic — from the
+    workspace's own node-type catalog, not name patterns)."""
+    listing = w.clusters.list_node_types()
+    return {
+        nt.node_type_id
+        for nt in listing.node_types or []
+        if nt.node_type_id and (nt.num_gpus or 0) > 0
+    }
+
+
+def fetch_clusters_with_node_types(w: WorkspaceClient) -> list[dict]:
+    out = []
+    for c in w.clusters.list():
+        out.append(
+            {
+                "cluster_id": c.cluster_id,
+                "cluster_name": c.cluster_name,
+                "state": c.state.value if c.state else "",
+                "source": c.cluster_source.value if c.cluster_source else "",
+                "node_type_id": c.node_type_id or "",
+                "driver_node_type_id": c.driver_node_type_id or "",
+                "start_time": c.start_time or 0,
+                "autotermination_minutes": c.autotermination_minutes or 0,
+                "creator": c.creator_user_name or "",
+            }
+        )
+    return out
+
+
+def classify_gpu_clusters(
+    clusters: list[dict], gpu_node_types: set[str], now_ms: int, max_uptime_hours: int
+) -> list[dict]:
+    """Pure decision logic: interactive GPU clusters burning money.
+
+    Job clusters are skipped (ephemeral, managed by the jobs service). A
+    cluster counts as GPU when its worker or driver node type has GPUs.
+    Flagged when RUNNING with autotermination disabled or uptime past the
+    (deliberately tight) GPU threshold. Report-only — terminate actions stay
+    with 'housekeeping stale-clusters --apply'.
+    """
+    findings = []
+    for c in clusters:
+        if c.get("source") == "JOB":
+            continue
+        is_gpu = (
+            c.get("node_type_id") in gpu_node_types
+            or c.get("driver_node_type_id") in gpu_node_types
+        )
+        if not is_gpu or c.get("state") != "RUNNING":
+            continue
+        reasons = []
+        if c.get("autotermination_minutes", 0) == 0:
+            reasons.append("autotermination disabled")
+        if c.get("start_time"):
+            uptime_h = (now_ms - c["start_time"]) / MS_PER_HOUR
+            if uptime_h >= max_uptime_hours:
+                reasons.append(f"running {uptime_h:.0f}h (GPU threshold {max_uptime_hours}h)")
+        if reasons:
+            findings.append(
+                {
+                    "cluster_id": c["cluster_id"],
+                    "cluster_name": c["cluster_name"],
+                    "node_type_id": c["node_type_id"],
+                    "creator": c["creator"],
+                    "reason": "; ".join(reasons),
+                    "action": "terminate (manual)",
+                }
+            )
+    return findings
+
+
+def gpu_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+    """GPU vs total classic-compute list cost over the last N days."""
+    return run_query(w, load_query("gpu_spend"), warehouse_id, {"days": days})
+
+
+# --- vector search ------------------------------------------------------------
+
+def fetch_vector_search(w: WorkspaceClient) -> list[dict]:
+    out = []
+    for e in w.vector_search_endpoints.list_endpoints():
+        num_indexes = e.num_indexes
+        if num_indexes is None:
+            num_indexes = sum(1 for _ in w.vector_search_indexes.list_indexes(e.name))
+        out.append(
+            {
+                "name": e.name,
+                "creator": e.creator or "",
+                "status": (
+                    e.endpoint_status.state.value
+                    if e.endpoint_status and e.endpoint_status.state
+                    else ""
+                ),
+                "created_ms": e.creation_timestamp or 0,
+                "num_indexes": num_indexes,
+            }
+        )
+    return out
+
+
+def find_vector_search_findings(
+    endpoints: list[dict], now_ms: int, grace_hours: int
+) -> list[dict]:
+    """Pure decision logic: vector search endpoints billing while idle or
+    unhealthy. Endpoints younger than grace_hours are never flagged."""
+    findings = []
+    for e in endpoints:
+        age_h = (now_ms - e["created_ms"]) / MS_PER_HOUR if e.get("created_ms") else 0
+        if age_h < grace_hours:
+            continue
+        if not e.get("num_indexes"):
+            findings.append(
+                {
+                    "name": e["name"],
+                    "creator": e["creator"],
+                    "reason": "endpoint has no indexes but bills while provisioned",
+                    "action": "delete-endpoint (manual)",
+                }
+            )
+        elif e.get("status") not in ("ONLINE", ""):
+            findings.append(
+                {
+                    "name": e["name"],
+                    "creator": e["creator"],
+                    "reason": f"endpoint status {e['status']}",
+                    "action": "review",
+                }
+            )
+    return findings
+
+
 # --- serving & AI/ML spend --------------------------------------------------
 
 def serving_cost(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:

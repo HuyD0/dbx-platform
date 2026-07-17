@@ -276,6 +276,39 @@ def cmd_ml_serving_cost(args) -> int:
     return 0
 
 
+def cmd_ml_gpu_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    max_up = (
+        args.max_uptime_hours if args.max_uptime_hours is not None else s.gpu_max_uptime_hours
+    )
+    findings = ml.classify_gpu_clusters(
+        ml.fetch_clusters_with_node_types(w), ml.fetch_gpu_node_types(w), _now_ms(), max_up
+    )
+    emit(args, f"Interactive GPU clusters (uptime threshold {max_up}h)", findings,
+         ["Report only — terminate via 'housekeeping stale-clusters --apply' "
+          "or the owner."])
+    days = args.days if args.days is not None else s.lookback_days
+    try:
+        spend = ml.gpu_spend(w, _warehouse_id(args, s), days)
+        emit(args, f"GPU spend share — last {days}d", spend)
+    except (SystemTablesUnavailableError, ValueError) as e:
+        emit(args, "GPU spend share", [], [f"skipped: {e}"])
+    return 0
+
+
+def cmd_ml_vector_search_audit(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    findings = ml.find_vector_search_findings(
+        ml.fetch_vector_search(w), _now_ms(), s.vector_search_grace_hours
+    )
+    emit(args, "Vector search endpoint audit", findings,
+         ["Report only — endpoint deletion is irreversible and stays a human "
+          "decision."])
+    return 0
+
+
 # --- dashboards --------------------------------------------------------------------
 
 def cmd_dashboards_render(args) -> int:
@@ -409,6 +442,14 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Serving/vector-search/AI spend and token usage")
     x.add_argument("--days", type=int, default=None)
     x.set_defaults(func=cmd_ml_serving_cost)
+    x = pm.add_parser("gpu-audit", parents=[common],
+                      help="Interactive GPU clusters + GPU spend share")
+    x.add_argument("--max-uptime-hours", type=int, default=None)
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_ml_gpu_audit)
+    x = pm.add_parser("vector-search-audit", parents=[common],
+                      help="Vector search endpoints: no indexes / unhealthy")
+    x.set_defaults(func=cmd_ml_vector_search_audit)
 
     # dashboards
     pd = sub.add_parser("dashboards", help="AI/BI dashboards").add_subparsers(dest="command")

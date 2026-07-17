@@ -48,7 +48,8 @@ resources:
       name: "[dbx-platform] ml-hygiene-report"
       description: >
         Weekly AI/ML hygiene: model registry (stale/ownerless/unaliased
-        models). Read-only; results appear in the task run output.
+        models), interactive GPU clusters, and vector search endpoints.
+        Read-only; results appear in the task run output.
       schedule:
         quartz_cron_expression: "0 0 7 ? * MON"  # weekly Monday 07:00 UTC
         timezone_id: UTC
@@ -75,3 +76,18 @@ resources:
             parameters:
               ["ml", "model-hygiene", "--stale-days", "90",
                "--unaliased-days", "30"]
+        - task_key: gpu_audit
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ml", "gpu-audit", "--max-uptime-hours", "8",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: vector_search_audit
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ml", "vector-search-audit"]
