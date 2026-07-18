@@ -92,6 +92,12 @@ export interface ChatResponse {
   endpoint: string;
 }
 
+export interface DashboardInfo {
+  name: string;
+  url: string;
+  embed_url: string;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;

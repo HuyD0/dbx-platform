@@ -281,3 +281,19 @@ databricks bundle deploy
 If you customize a dashboard in the UI, export its JSON back into
 `dashboards/templates/` (re-inserting `{catalog}.{schema}` where applicable) so
 git stays the source of truth.
+
+### Embedded dashboards in the console
+
+The console's Dashboards page embeds each `[dbx-platform]` dashboard in an
+iframe (`<host>/embed/dashboardsv3/<id>`). Two prerequisites, both manual:
+
+- A workspace admin must add the app's domain to the workspace's **approved
+  domains for dashboard embedding** (Settings → Security → embedding approved
+  domains) — the specific app URL, or `*.databricksapps.com`. Until then the
+  iframe renders blank/refused; the page's "Open in workspace" link is the
+  fallback. Local dev (`npm run dev`) won't embed unless localhost is also
+  approved.
+- `resources/dashboards.yml` publishes with `embed_credentials: false`, so
+  each viewer authenticates as themselves: they need an active workspace
+  session, CAN_VIEW on the dashboard, and access to the warehouse. The app
+  never proxies its own credentials into the iframe.

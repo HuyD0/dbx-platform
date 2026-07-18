@@ -58,6 +58,9 @@ def dashboards(refresh: bool = False) -> dict:
                     out.append({
                         "name": name,
                         "url": f"{host}/sql/dashboardsv3/{d.dashboard_id}",
+                        # Iframe-embeddable only after a workspace admin approves
+                        # the app's domain for embedding (docs/runbook.md).
+                        "embed_url": f"{host}/embed/dashboardsv3/{d.dashboard_id}",
                     })
         except Exception:  # noqa: BLE001 — links are garnish, never break the page
             return []
