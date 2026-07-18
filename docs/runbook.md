@@ -135,24 +135,72 @@ pull requests** — never workspace mutations.
 
 ### Platform Console app
 
-Deployed by the bundle (`resources/app.yml`) and found under **Compute →
-Apps** (not the workspace file tree). Two steps are required and CI runs
-both: `bundle deploy` creates the app and uploads its source, then
-`databricks bundle run platform_console` pushes the source into the app and
-starts it — without the run step the app sits stopped with no URL. For a
-manual deploy, first stage the wheel (`python -m build --wheel && cp
-dist/*.whl apps/platform-console/wheels/` — git-ignored), then run both
-commands. After the first deploy, grant the app's service principal
-CAN_MANAGE_RUN on the `[dbx-platform]` jobs so the Actions page can trigger
-them. Note: apps are currently prod-target resources — if `bundle deploy -t
-dev` rejects the app name prefix, deploy the app from prod only.
+A FastAPI backend + React SPA, deployed by the bundle (`resources/app.yml`)
+and found under **Compute → Apps** (not the workspace file tree). Two steps
+are required and CI runs both: `bundle deploy` creates the app and uploads
+its source, then `databricks bundle run platform_console` pushes the source
+into the app and starts it — without the run step the app sits stopped with
+no URL. For a manual deploy, stage **both** build artifacts first (each is
+git-ignored, re-included by `databricks.yml` sync):
+
+```bash
+python -m build --wheel && cp dist/*.whl apps/platform-console/wheels/
+cd apps/platform-console/frontend && npm ci && npm run build && cd -
+databricks bundle deploy -t prod && databricks bundle run platform_console -t prod
+```
+
+After the first deploy, grant the app's service principal CAN_MANAGE_RUN on
+the `[dbx-platform]` jobs so the Jobs page can trigger them. Note: apps are
+currently prod-target resources — if `bundle deploy -t dev` rejects the app
+name prefix, deploy the app from prod only.
+
+Local development: `uvicorn` serves the API (`cd apps/platform-console &&
+python main.py`), `npm run dev` in `frontend/` proxies `/api` to it.
+
+#### Remediation actions (off by default)
+
+The console ships four remediation actions — stale-cluster cleanup,
+orphaned-job **pause**, over-age token revoke, and policy sync — but a fresh
+deployment is report-only: the apply endpoint refuses until
+`DBX_PLATFORM_CONSOLE_ACTIONS=true` is uncommented in
+`apps/platform-console/app.yaml` (a git-reviewed change). Even then every
+apply requires a server-side dry-run plan (single-use, 15-minute expiry) and
+a typed confirm phrase, mirroring the CLI's `--apply --yes`. Plans and
+applies are logged with the clicking user's forwarded identity.
+
+Enabling actions has real permission implications for the app's service
+principal — in practice these amount to workspace admin, which is why the
+gate defaults to off:
+
+| Action | APIs used | Realistic grant |
+|---|---|---|
+| stale-clusters | `clusters/delete`, `permanent-delete` | CAN_MANAGE on the clusters — practically admin |
+| orphaned-jobs (pause) | `jobs/get`, `jobs/update` | IS_OWNER or CAN_MANAGE per job (CAN_MANAGE_RUN is not enough) |
+| token-revoke | `token-management/delete` | workspace admin |
+| policy-sync | `cluster-policies/create`, `edit` | workspace admin |
+
+If you don't want to grant that, leave the gate off: the console still plans
+(dry-runs) everything and the CLI keeps the apply path.
+
+#### Agent chat
+
+The Chat page calls the served platform agent. Deploy it first (below),
+grant the app's SP **CAN_QUERY** on the resulting serving endpoint, and set
+`DBX_PLATFORM_AGENT_ENDPOINT` in `app.yaml` if the endpoint name differs
+from `agents_<catalog>-<schema>-platform_agent`. Until then the Chat page
+shows a setup hint instead of a conversation. The agent is read-only by
+construction — its `propose_*` tools are dry-runs whose proposals the
+console turns into the same confirm-gated plan dialog.
 
 ### Served agent (optional)
 
 `pip install -e ".[agent]"`, then `python agents/platform_agent/deploy_agent.py`
 with workspace credentials. The agent's tools are read-only by construction;
 verify the mlflow `ResponsesAgent` interface matches your workspace's mlflow
-version at deploy time. Chat via AI Playground or the endpoint review app.
+version at deploy time. Chat via the Platform Console's Chat page, the AI
+Playground, or the endpoint review app. Re-run the deploy script after
+changing `tools.py`/`formatting.py` — the console talks to the deployed
+endpoint, not the repo copy.
 
 ## Serverless fallback
 

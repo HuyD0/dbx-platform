@@ -20,6 +20,16 @@ for non-interactive contexts). Preserve this for any new mutating command. Exist
 `--apply` actions are deliberately conservative: orphaned jobs are *paused, never
 deleted*, and policy sync *never deletes* unmanaged policies.
 
+The Platform Console app mirrors these gates rather than bypassing them: its four
+remediation actions reuse the same package mutators and require (1) the
+off-by-default `DBX_PLATFORM_CONSOLE_ACTIONS` env gate in `app.yaml`, (2) a
+server-side dry-run plan (single-use, 15-minute expiry), and (3) a typed confirm
+phrase. `tests/test_app.py` enforces this structurally: mutators may be referenced
+only in `backend/routers/actions.py`, mutating routes are POST-only, and no module
+touches the workspace at import time. The served agent stays read-only by
+construction (`tests/test_agent.py`) — its `propose_*` tools are dry-runs whose
+markers the console turns into human-confirmed plans.
+
 ## Layout
 
 | Path | Contents |
