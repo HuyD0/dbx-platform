@@ -166,6 +166,7 @@ def test_llm_cost_routes_are_registered(client):
         "/api/llm-cost/timeseries",
         "/api/llm-cost/breakdown",
         "/api/llm-cost/efficiency",
+        "/api/llm-cost/tokenomics",
         "/api/llm-cost/data-health",
     }.issubset(paths)
 
