@@ -3,5 +3,5 @@
 # package the CLI and jobs run, zero duplicated logic.
 --find-links wheels
 dbx-platform
-streamlit
-pandas
+fastapi
+uvicorn

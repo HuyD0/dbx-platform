@@ -1,8 +1,16 @@
 # Databricks App runtime config for the Platform Console.
 # The sql-warehouse entry in resources/app.yml injects the warehouse ID here.
-command: ["streamlit", "run", "app.py"]
+# main.py binds 0.0.0.0:$DATABRICKS_APP_PORT (argv arrays get no shell expansion).
+command: ["python", "main.py"]
 env:
   - name: DBX_PLATFORM_WAREHOUSE_ID
     valueFrom: sql-warehouse
-  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
-    value: "false"
+  # Guarded remediation actions are OFF by default (report-only deployment).
+  # Enabling them is a git-reviewed decision with real permission implications —
+  # read docs/runbook.md before uncommenting.
+  # - name: DBX_PLATFORM_CONSOLE_ACTIONS
+  #   value: "true"
+  # Override when the platform agent's serving endpoint name differs from the
+  # default agents_<catalog>-<schema>-platform_agent.
+  # - name: DBX_PLATFORM_AGENT_ENDPOINT
+  #   value: "agents_main-dbx_platform-platform_agent"
