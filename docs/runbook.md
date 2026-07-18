@@ -1,8 +1,10 @@
 # Runbook
 
-Every check runs two ways from the same code: ad-hoc via the CLI and on a
-schedule via the bundle-deployed jobs. Scheduled jobs are **report-only**;
-destructive actions are deliberate local commands with `--apply --yes`.
+Every check runs two ways from the same code: ad-hoc via the CLI and as a
+bundle-deployed job. Job schedules are committed **paused** — the cron only
+documents intended cadence, and every run is human-initiated (see "Running
+jobs" below). Bundle jobs are **report-only**; destructive actions are
+deliberate local commands with `--apply --yes`.
 
 Reports print to the task's run output (Jobs UI → run → task output). A failed
 task emails `${var.notification_email}`. Exit codes: `0` success (findings are
@@ -11,7 +13,7 @@ not failures), `1` runtime error, `2` refused `--apply` without confirmation,
 
 ## Job catalog
 
-| Job | Schedule (UTC) | Tasks | Needs |
+| Job | Cadence (paused — run manually) | Tasks | Needs |
 |---|---|---|---|
 | `cost-usage-report` | daily 07:00 | `cost report`, `cost top-jobs`, `cluster-utilization`, `failed-run-waste`, `warehouse-utilization` | warehouse + system.billing/lakeflow/compute/query |
 | `housekeeping-report` | daily 05:30 | `stale-clusters`, `orphaned-jobs`, `jobs-on-all-purpose` | REST APIs only |
@@ -27,6 +29,28 @@ not failures), `1` runtime error, `2` refused `--apply` without confirmation,
 Thresholds are task parameters in `resources/*.yml` — change them in git, not
 in the Jobs UI, so the config stays reviewable.
 
+## Running jobs
+
+All schedules ship `pause_status: PAUSED`, so nothing runs until you trigger
+it. Three equivalent ways:
+
+- **Console Jobs page** — per-job "Run now", or "Run all" to kick off every
+  `[dbx-platform]` job in one click.
+- **Agent chat** — ask for a run in plain language ("run the security audit",
+  "run all jobs"); the agent proposes, you confirm on the card.
+- **CLI** — `databricks bundle run <resource_key> -t prod` (e.g.
+  `dashboards_setup`), or the underlying command directly
+  (`dbx-platform security token-audit`).
+
+Ordering: on a fresh workspace run `dashboards-setup` first — it creates the
+`main.dbx_platform` helper objects and the `platform_findings`/`platform_digest`
+tables the digest and forecast jobs write to. Run `cost-forecast-train` once
+before `cost-forecast-daily` has a model to predict with. "Run all" submits
+`dashboards-setup` and `cost-forecast-train` first, but does not wait for them
+to finish — on a first-ever run, re-run `platform-digest` if it raced setup.
+The one automatic run left: the deploy workflow triggers `dashboards_setup`
+once per prod deploy.
+
 ## Acting on findings
 
 ### Stale / long-running clusters
@@ -39,7 +63,7 @@ dbx-platform housekeeping stale-clusters --apply --yes    # terminate/permanentl
 - Terminated ≥ 30d (non-pinned) → **permanent delete**; running ≥ 24h or
   autotermination disabled → **terminate** (recoverable).
 - The pinned check relies on the API exposing `pinned_by_user_name`. Review the
-  dry-run list before your first `--apply`, and keep the scheduled job
+  dry-run list before your first `--apply`, and keep the bundle job
   report-only.
 
 ### Orphaned jobs
@@ -234,13 +258,13 @@ and on each task swap `environment_key: default` for:
 
 ## Updating dashboards
 
-The dashboards' helper functions/reference tables are kept provisioned by the
-`dashboards-setup` job (`resources/dashboards_jobs.yml`) — it runs daily and once per
-prod deploy, so you normally never run setup by hand. If a dashboard shows
+The dashboards' helper functions/reference tables are provisioned by the
+`dashboards-setup` job (`resources/dashboards_jobs.yml`) — the deploy workflow runs it
+once per prod deploy (its cron is committed paused). If a dashboard shows
 `TABLE_OR_VIEW_NOT_FOUND` for `main.dbx_platform.*`, that job either has not run yet
-(deploy hasn't happened, or dev schedules are paused) or lacks grants — trigger it with
-`databricks bundle run dashboards_setup` (or run `dbx-platform dashboards setup
---warehouse-id <id>`), and check the SP's grants in docs/cloud-setup.md.
+(deploy hasn't happened) or lacks grants — trigger it from the console Jobs page, with
+`databricks bundle run dashboards_setup`, or run `dbx-platform dashboards setup
+--warehouse-id <id>`, and check the SP's grants in docs/cloud-setup.md.
 
 Upstream templates live in `dashboards/templates/` (pristine, with
 `{catalog}.{schema}` placeholders). Rendered, deployable copies live in
@@ -257,3 +281,19 @@ databricks bundle deploy
 If you customize a dashboard in the UI, export its JSON back into
 `dashboards/templates/` (re-inserting `{catalog}.{schema}` where applicable) so
 git stays the source of truth.
+
+### Embedded dashboards in the console
+
+The console's Dashboards page embeds each `[dbx-platform]` dashboard in an
+iframe (`<host>/embed/dashboardsv3/<id>`). Two prerequisites, both manual:
+
+- A workspace admin must add the app's domain to the workspace's **approved
+  domains for dashboard embedding** (Settings → Security → embedding approved
+  domains) — the specific app URL, or `*.databricksapps.com`. Until then the
+  iframe renders blank/refused; the page's "Open in workspace" link is the
+  fallback. Local dev (`npm run dev`) won't embed unless localhost is also
+  approved.
+- `resources/dashboards.yml` publishes with `embed_credentials: false`, so
+  each viewer authenticates as themselves: they need an active workspace
+  session, CAN_VIEW on the dashboard, and access to the warehouse. The app
+  never proxies its own credentials into the iframe.

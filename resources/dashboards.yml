@@ -3,9 +3,9 @@
 #
 # The helper functions/tables these dashboards query (in main.dbx_platform) are
 # provisioned by the `dashboards_setup` job (resources/dashboards_jobs.yml): it
-# runs daily and once per prod deploy, so a fresh deploy resolves without a
-# manual step. Run `dbx-platform dashboards setup --warehouse-id <id>` yourself
-# only to provision immediately (e.g. in dev). If you change the catalog/schema,
+# runs once per prod deploy (its cron is committed paused), so a fresh deploy
+# resolves without a manual step. Run `dbx-platform dashboards setup
+# --warehouse-id <id>` yourself to provision immediately (e.g. in dev). If you change the catalog/schema,
 # re-render and commit, and update dashboards_jobs.yml to match:
 #   dbx-platform dashboards render --catalog <c> --schema <s>
 resources:

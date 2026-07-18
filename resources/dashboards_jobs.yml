@@ -1,10 +1,11 @@
 # Provisions the helper functions and reference tables the AI/BI dashboards
-# query (see resources/dashboards.yml). This is the scheduled second surface of
+# query (see resources/dashboards.yml). This is the bundle-job second surface of
 # the `dbx-platform dashboards setup` CLI command, per the repo's "one code path,
 # two ways" invariant: the bundle deploys dashboards that read
 # main.dbx_platform.{workspace_reference,warehouse_reference,job_type_from_sku,
 # sql_type_from_sku,team_name_from_tags}, and this job creates/refreshes them so
-# they exist on a fresh deploy instead of relying on a manual setup step.
+# they exist on a fresh deploy instead of relying on a manual setup step (the
+# deploy workflow runs it once per prod deploy; its cron is committed paused).
 #
 # Idempotent: CREATE OR REPLACE FUNCTION / CREATE TABLE IF NOT EXISTS, plus MERGEs
 # that pick up new workspaces/warehouses over time. The --catalog/--schema below
@@ -22,6 +23,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 5 ? * *"  # daily 05:00 UTC
         timezone_id: UTC
+        pause_status: PAUSED  # run manually; cron above documents intended cadence
       tags:
         team: platform
         project: dbx-platform

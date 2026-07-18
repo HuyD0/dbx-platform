@@ -22,6 +22,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 5 ? * MON"  # weekly, Monday 05:00 UTC
         timezone_id: UTC
+        pause_status: PAUSED  # run manually; cron above documents intended cadence
       tags:
         team: platform
         project: dbx-platform
@@ -58,6 +59,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 15 7 * * ?"  # daily 07:15 UTC
         timezone_id: UTC
+        pause_status: PAUSED  # run manually; cron above documents intended cadence
       tags:
         team: platform
         project: dbx-platform

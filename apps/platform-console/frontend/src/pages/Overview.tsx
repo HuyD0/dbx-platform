@@ -2,14 +2,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
-import type { Envelope, OverviewData } from "../lib/types";
+import type { DashboardInfo, Envelope, OverviewData } from "../lib/types";
 import { BarList } from "../components/BarList";
 import { AsOf, Card, ErrorState, SectionTitle, Skeleton, StatTile } from "../components/ui";
-
-interface DashboardLink {
-  name: string;
-  url: string;
-}
 
 export function Overview() {
   const queryClient = useQueryClient();
@@ -21,7 +16,7 @@ export function Overview() {
   });
   const dashboards = useQuery({
     queryKey: ["dashboards"],
-    queryFn: () => apiGet<Envelope<DashboardLink[]>>("/api/dashboards"),
+    queryFn: () => apiGet<Envelope<DashboardInfo[]>>("/api/dashboards"),
     staleTime: 300_000,
     retry: false,
   });
@@ -50,7 +45,7 @@ export function Overview() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted">
-          Findings from the scheduled checks; run any check fresh from its area page.
+          Findings from stored check runs; run any check fresh from its area page.
         </p>
         <AsOf
           asOf={query.data.as_of}
@@ -93,7 +88,7 @@ export function Overview() {
         <Card>
           <SectionTitle
             title="Findings by area"
-            subtitle="Latest stored run of the scheduled checks"
+            subtitle="Latest stored run of the platform checks"
           />
           {findings ? (
             Object.keys(findings.by_area).length > 0 ? (

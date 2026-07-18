@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter
 
 import dbx_platform
@@ -12,12 +15,24 @@ router = APIRouter()
 
 DASHBOARD_MARKER = "[dbx-platform]"
 
+# Written by the deploy workflow next to app.yaml; absent in local dev.
+_BUILD_INFO = Path(__file__).resolve().parents[2] / "build_info.json"
+
+
+def _build_info() -> dict | None:
+    try:
+        info = json.loads(_BUILD_INFO.read_text())
+    except (OSError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
 
 @router.get("/api/health")
 def health() -> dict:
     return {
         "status": "ok",
         "version": dbx_platform.__version__,
+        "build": _build_info(),
         "actions_enabled": deps.actions_enabled(),
     }
 
@@ -58,6 +73,9 @@ def dashboards(refresh: bool = False) -> dict:
                     out.append({
                         "name": name,
                         "url": f"{host}/sql/dashboardsv3/{d.dashboard_id}",
+                        # Iframe-embeddable only after a workspace admin approves
+                        # the app's domain for embedding (docs/runbook.md).
+                        "embed_url": f"{host}/embed/dashboardsv3/{d.dashboard_id}",
                     })
         except Exception:  # noqa: BLE001 — links are garnish, never break the page
             return []

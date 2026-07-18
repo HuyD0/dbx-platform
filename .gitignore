@@ -17,6 +17,8 @@ apps/platform-console/wheels/
 # Frontend build output (CI builds it; bundle sync re-includes it) — never commit
 apps/platform-console/static/
 apps/platform-console/frontend/node_modules/
+# Deploy-time build stamp (bundle sync re-includes it) — never commit
+apps/platform-console/build_info.json
 
 # Editors / OS
 .vscode/

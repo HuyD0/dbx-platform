@@ -28,6 +28,7 @@ sync:
   include:
     - apps/platform-console/wheels/*.whl
     - apps/platform-console/static/**
+    - apps/platform-console/build_info.json
 
 artifacts:
   default:
@@ -69,7 +70,9 @@ targets:
     default: true
     mode: development
 
-  # Production: real names, active schedules, shared root path.
+  # Production: real names, shared root path. Schedules are committed PAUSED —
+  # jobs run when a human triggers them (console Jobs page, agent proposal, or
+  # `databricks bundle run <resource_key> -t prod`).
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
   # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:

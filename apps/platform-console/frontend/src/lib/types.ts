@@ -63,6 +63,12 @@ export interface JobInfo {
   name: string;
 }
 
+export interface RunAllResponse {
+  runs: (JobInfo & { run_id: number })[];
+  failed: (JobInfo & { error: string })[];
+  count: number;
+}
+
 export interface RunInfo {
   run_id: number;
   state: string;
@@ -77,6 +83,7 @@ export interface Proposal {
   count?: number;
   job_id?: number;
   name?: string;
+  all?: boolean;
 }
 
 export interface ChatResponse {
@@ -85,8 +92,15 @@ export interface ChatResponse {
   endpoint: string;
 }
 
+export interface DashboardInfo {
+  name: string;
+  url: string;
+  embed_url: string;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
+  build?: { sha: string; built_at: string } | null;
   actions_enabled: boolean;
 }

@@ -86,11 +86,12 @@ def _wheel_task_parameters():
                     yield resource_file.name, pw["parameters"]
 
 
-def test_dashboards_setup_runs_on_a_schedule():
-    """The invariant: dashboards setup must be a scheduled job, not CLI-only.
+def test_dashboards_setup_is_wired_as_a_bundle_job():
+    """The invariant: dashboards setup must be a bundle job, not CLI-only.
 
     Guards against the deploy-time failure where the bundle ships dashboards that
-    query helper tables nothing ever provisions.
+    query helper tables nothing ever provisions (the deploy workflow triggers this
+    job once per prod deploy; its cron is committed paused).
     """
     setup_params = [
         params
@@ -98,7 +99,7 @@ def test_dashboards_setup_runs_on_a_schedule():
         if params[:2] == ["dashboards", "setup"]
     ]
     assert setup_params, (
-        "No scheduled job runs `dashboards setup` — the dashboards' helper tables "
+        "No bundle job runs `dashboards setup` — the dashboards' helper tables "
         "(main.dbx_platform.workspace_reference, etc.) would never be provisioned. "
         "Add the task to resources/dashboards_jobs.yml."
     )

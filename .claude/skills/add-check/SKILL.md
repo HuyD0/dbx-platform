@@ -2,15 +2,15 @@
 name: add-check
 description: >
   Add a new check to the dbx-platform toolkit, correctly wired to BOTH surfaces
-  (CLI subcommand + scheduled bundle job) with an offline test. Use whenever
-  adding or extending a cost/housekeeping/security/governance check, a system-table
-  query, or any capability that should run both ad-hoc and on a schedule.
+  (CLI subcommand + bundle job) with an offline test. Use whenever adding or
+  extending a cost/housekeeping/security/governance check, a system-table
+  query, or any capability that should run both ad-hoc and as a bundle job.
 ---
 
 # Adding a check
 
 Every check in this repo is **one code path exposed two ways**: an ad-hoc CLI
-subcommand, and a bundle job task that runs the *same* code on a schedule via
+subcommand, and a bundle job task that runs the *same* code via
 `python_wheel_task`. A change that touches only one surface is a bug. Follow all
 steps; do not stop after the CLI works.
 
@@ -75,9 +75,9 @@ Read-only by default. If the check mutates:
 - The mutating branch runs only when `apply_now` is true. The dry-run path must
   never mutate.
 
-## 4. Scheduled job in `resources/<area>_jobs.yml`
+## 4. Bundle job in `resources/<area>_jobs.yml`
 
-Add a task so the check also runs on a schedule. Match the existing tasks:
+Add a task so the check also runs as a bundle job. Match the existing tasks:
 
 ```yaml
         - task_key: big_tables
@@ -89,8 +89,11 @@ Add a task so the check also runs on a schedule. Match the existing tasks:
 ```
 
 Rules:
-- **Scheduled runs are report-only** — never put `--apply` in a job's
+- **Job runs are report-only** — never put `--apply` in a job's
   `parameters`. Applying is a deliberate manual/local action.
+- **Schedules ship paused** — if the job gets a `schedule:` block, include
+  `pause_status: PAUSED`. The cron documents intended cadence; every run is
+  human-initiated (console Jobs page, agent proposal, or `databricks bundle run`).
 - The environment `dependencies` entry is `../dist/*.whl` (paths in resource files
   resolve relative to `resources/`, and the wheel builds at the bundle root).
 - If the task needs a warehouse, pass `"--warehouse-id", "${var.warehouse_id}"`.

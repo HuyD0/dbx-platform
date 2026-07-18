@@ -7,6 +7,7 @@ import {
   ListChecks,
   Moon,
   Newspaper,
+  PanelsTopLeft,
   Scale,
   Shield,
   Sparkles,
@@ -22,6 +23,7 @@ import type { HealthResponse } from "./lib/types";
 import { AiMl } from "./pages/AiMl";
 import { Chat } from "./pages/Chat";
 import { Cost } from "./pages/Cost";
+import { Dashboards } from "./pages/Dashboards";
 import { Digest } from "./pages/Digest";
 import { Governance } from "./pages/Governance";
 import { Housekeeping } from "./pages/Housekeeping";
@@ -38,6 +40,7 @@ const NAV = [
   { to: "/governance", label: "Governance", icon: Scale, page: <Governance /> },
   { to: "/ai-ml", label: "AI / ML", icon: Sparkles, page: <AiMl /> },
   { to: "/digest", label: "Digest", icon: Newspaper, page: <Digest /> },
+  { to: "/dashboards", label: "Dashboards", icon: PanelsTopLeft, page: <Dashboards /> },
   { to: "/jobs", label: "Jobs", icon: ListChecks, page: <Jobs /> },
 ];
 
@@ -103,7 +106,10 @@ export default function App() {
               </Badge>
             )}
             <div className="flex items-center justify-between text-[11px] text-muted">
-              <span>{health.data ? `v${health.data.version}` : ""}</span>
+              <span>
+                {health.data ? `v${health.data.version}` : ""}
+                {health.data?.build ? ` · ${health.data.build.sha}` : ""}
+              </span>
               <button
                 type="button"
                 onClick={toggle}

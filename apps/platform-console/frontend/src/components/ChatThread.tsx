@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { useMutation } from "@tanstack/react-query";
 import { apiPost } from "../lib/api";
 import { useChat } from "../lib/chat";
-import type { Proposal } from "../lib/types";
+import type { Proposal, RunAllResponse } from "../lib/types";
 import { ActionPlanDialog } from "./ActionPlanDialog";
 import { Badge, ErrorState } from "./ui";
 
@@ -58,6 +58,44 @@ function JobProposalCard({ proposal }: { proposal: Proposal }) {
         </button>
       )}
       {run.isError && <ErrorState error={run.error} />}
+    </div>
+  );
+}
+
+function RunAllProposalCard({ proposal }: { proposal: Proposal }) {
+  const runAll = useMutation({
+    mutationFn: () => apiPost<RunAllResponse>("/api/jobs/run_all"),
+  });
+  return (
+    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
+      <span className="text-ink-2">
+        Run all{" "}
+        <span className="font-medium text-ink">
+          {typeof proposal.count === "number" ? proposal.count : ""} [dbx-platform] jobs
+        </span>
+        ?
+      </span>
+      {runAll.data ? (
+        <>
+          <Badge tone="good">started {runAll.data.count} runs</Badge>
+          {runAll.data.failed.length > 0 && (
+            <span title={runAll.data.failed.map((f) => `${f.name}: ${f.error}`).join("\n")}>
+              <Badge tone="critical">{runAll.data.failed.length} failed</Badge>
+            </span>
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => runAll.mutate()}
+          disabled={runAll.isPending}
+          className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 font-medium text-ink hover:bg-hairline disabled:opacity-50"
+        >
+          <Play className="h-3 w-3" />
+          Run all jobs
+        </button>
+      )}
+      {runAll.isError && <ErrorState error={runAll.error} />}
     </div>
   );
 }
@@ -206,7 +244,11 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                     </div>
                     {turn.proposals?.map((p, j) =>
                       p.kind === "job" ? (
-                        <JobProposalCard key={j} proposal={p} />
+                        p.all ? (
+                          <RunAllProposalCard key={j} proposal={p} />
+                        ) : (
+                          <JobProposalCard key={j} proposal={p} />
+                        )
                       ) : (
                         <ActionProposalCard key={j} proposal={p} />
                       ),
