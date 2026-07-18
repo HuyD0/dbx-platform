@@ -84,7 +84,7 @@ dbx-platform cost report --days 7 --profile dbx-platform
 ## 6. Dashboards: provisioning
 
 The four dashboards query helper functions and reference tables (default location
-`main.dbx_platform`). These are provisioned automatically by the `dashboards-setup`
+`dbx_dev.dbx_platform`). These are provisioned automatically by the `dashboards-setup`
 job (`resources/dashboards_jobs.yml`), which runs daily and once per prod deploy
 (deploy.yml runs `databricks bundle run dashboards_setup -t prod`), so you do not have
 to provision them by hand before deploying.

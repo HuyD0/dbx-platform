@@ -15,7 +15,9 @@ from dbx_platform.dashboards import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Objects the dashboards reference are written as `<catalog>.<schema>.<name>`.
-_HELPER_OBJECT = re.compile(r"main\.dbx_platform\.([A-Za-z_][A-Za-z0-9_]*)")
+# The committed dashboards render to dbx_dev.dbx_platform (this workspace has no
+# `main` catalog — see config.Settings.dashboard_catalog).
+_HELPER_OBJECT = re.compile(r"dbx_dev\.dbx_platform\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def test_render_replaces_all_placeholders():
@@ -198,14 +200,14 @@ def test_dashboards_setup_is_wired_as_a_bundle_job():
 
 
 def test_rendered_dashboards_only_reference_objects_setup_creates():
-    """Every main.dbx_platform.<obj> a dashboard queries must be created by setup.
+    """Every dbx_dev.dbx_platform.<obj> a dashboard queries must be created by setup.
 
     Catches the class of bug where a dashboard references a helper object that
     setup_statements() does not provision (the reverse of the current failure).
     """
     created = set(
         _HELPER_OBJECT.findall(
-            "\n".join(sql for _, sql in setup_statements("main", "dbx_platform", ["team"]))
+            "\n".join(sql for _, sql in setup_statements("dbx_dev", "dbx_platform", ["team"]))
         )
     )
     for name in TEMPLATE_NAMES:

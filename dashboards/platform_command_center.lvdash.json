@@ -3,7 +3,7 @@
     {
       "name": "ds_azure_kpi",
       "displayName": "azure_spend_kpi",
-      "query": "SELECT ROUND(SUM(CASE WHEN usage_date >= DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_30d, ROUND(SUM(CASE WHEN usage_date < DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_prev_30d FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60)"
+      "query": "SELECT ROUND(SUM(CASE WHEN usage_date >= DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_30d, ROUND(SUM(CASE WHEN usage_date < DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_prev_30d FROM dbx_dev.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60)"
     },
     {
       "name": "ds_dbx_kpi",
@@ -13,52 +13,52 @@
     {
       "name": "ds_forecast_kpi",
       "displayName": "forecast_next_30d_kpi",
-      "query": "SELECT ROUND(SUM(p50), 2) AS p50_next_30d, MAX(run_date) AS forecast_run FROM main.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT MAX(run_date) FROM main.dbx_platform.cost_forecasts) AND target_date > CURRENT_DATE() AND target_date <= DATE_ADD(CURRENT_DATE(), 30)"
+      "query": "SELECT ROUND(SUM(p50), 2) AS p50_next_30d, MAX(run_date) AS forecast_run FROM dbx_dev.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT MAX(run_date) FROM dbx_dev.dbx_platform.cost_forecasts) AND target_date > CURRENT_DATE() AND target_date <= DATE_ADD(CURRENT_DATE(), 30)"
     },
     {
       "name": "ds_findings_kpi",
       "displayName": "open_findings_kpi",
-      "query": "SELECT COUNT(*) AS findings_7d FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 7) AND action != 'ok'"
+      "query": "SELECT COUNT(*) AS findings_7d FROM dbx_dev.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 7) AND action != 'ok'"
     },
     {
       "name": "ds_azure_daily",
       "displayName": "azure_daily_by_bucket_90d",
-      "query": "SELECT usage_date, service_bucket, SUM(cost) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 90) GROUP BY usage_date, service_bucket"
+      "query": "SELECT usage_date, service_bucket, SUM(cost) AS cost FROM dbx_dev.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 90) GROUP BY usage_date, service_bucket"
     },
     {
       "name": "ds_findings_recent",
       "displayName": "platform_findings_recent",
-      "query": "SELECT run_ts, area, check_name, resource, reason, action FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 30) AND action != 'ok' ORDER BY run_ts DESC LIMIT 100"
+      "query": "SELECT run_ts, area, check_name, resource, reason, action FROM dbx_dev.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 30) AND action != 'ok' ORDER BY run_ts DESC LIMIT 100"
     },
     {
       "name": "ds_forecast_total",
       "displayName": "forecast_vs_actual_total",
-      "query": "WITH latest AS (SELECT MAX(run_date) AS run_date FROM main.dbx_platform.cost_forecasts) SELECT usage_date AS day, 'actual' AS metric, SUM(cost) AS value FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60) GROUP BY usage_date UNION ALL SELECT target_date, CONCAT('forecast ', quantile), value FROM main.dbx_platform.cost_forecasts LATERAL VIEW EXPLODE(MAP('p10', p10, 'p50', p50, 'p90', p90)) AS quantile, value WHERE series = 'total' AND run_date = (SELECT run_date FROM latest)"
+      "query": "WITH latest AS (SELECT MAX(run_date) AS run_date FROM dbx_dev.dbx_platform.cost_forecasts) SELECT usage_date AS day, 'actual' AS metric, SUM(cost) AS value FROM dbx_dev.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60) GROUP BY usage_date UNION ALL SELECT target_date, CONCAT('forecast ', quantile), value FROM dbx_dev.dbx_platform.cost_forecasts LATERAL VIEW EXPLODE(MAP('p10', p10, 'p50', p50, 'p90', p90)) AS quantile, value WHERE series = 'total' AND run_date = (SELECT run_date FROM latest)"
     },
     {
       "name": "ds_forecast_buckets",
       "displayName": "forecast_p50_by_bucket",
-      "query": "SELECT target_date AS day, series, p50 FROM main.dbx_platform.cost_forecasts WHERE series != 'total' AND run_date = (SELECT MAX(run_date) FROM main.dbx_platform.cost_forecasts)"
+      "query": "SELECT target_date AS day, series, p50 FROM dbx_dev.dbx_platform.cost_forecasts WHERE series != 'total' AND run_date = (SELECT MAX(run_date) FROM dbx_dev.dbx_platform.cost_forecasts)"
     },
     {
       "name": "ds_azure_services",
       "displayName": "azure_top_services_30d",
-      "query": "SELECT service_name, service_bucket, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY service_name, service_bucket ORDER BY cost DESC LIMIT 20"
+      "query": "SELECT service_name, service_bucket, ROUND(SUM(cost), 2) AS cost FROM dbx_dev.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY service_name, service_bucket ORDER BY cost DESC LIMIT 20"
     },
     {
       "name": "ds_azure_rgs",
       "displayName": "azure_top_resource_groups_30d",
-      "query": "SELECT resource_group, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY resource_group ORDER BY cost DESC LIMIT 20"
+      "query": "SELECT resource_group, ROUND(SUM(cost), 2) AS cost FROM dbx_dev.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY resource_group ORDER BY cost DESC LIMIT 20"
     },
     {
       "name": "ds_forecast_monitor",
       "displayName": "forecast_monitor_findings",
-      "query": "SELECT run_ts, check_name, resource, reason, action FROM main.dbx_platform.platform_findings WHERE area = 'forecast' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
+      "query": "SELECT run_ts, check_name, resource, reason, action FROM dbx_dev.dbx_platform.platform_findings WHERE area = 'forecast' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
     },
     {
       "name": "ds_dbx_daily",
       "displayName": "dbx_daily_spend_90d",
-      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90)) SELECT p.usage_date, p.billing_origin_product AS compute_type, COALESCE(wr.workspace_name, p.workspace_id) AS workspace_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN main.dbx_platform.workspace_reference wr ON p.workspace_id = wr.workspace_id GROUP BY ALL"
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90)) SELECT p.usage_date, p.billing_origin_product AS compute_type, COALESCE(wr.workspace_name, p.workspace_id) AS workspace_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN dbx_dev.dbx_platform.workspace_reference wr ON p.workspace_id = wr.workspace_id GROUP BY ALL"
     },
     {
       "name": "ds_dbx_weekly",
@@ -68,12 +68,12 @@
     {
       "name": "ds_jobs_daily",
       "displayName": "jobs_daily_by_sku_90d",
-      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'JOBS') SELECT usage_date, IFNULL(main.dbx_platform.job_type_from_sku(sku_name), 'UNKNOWN') AS job_type, SUM(list_cost) AS list_cost FROM priced GROUP BY ALL"
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'JOBS') SELECT usage_date, IFNULL(dbx_dev.dbx_platform.job_type_from_sku(sku_name), 'UNKNOWN') AS job_type, SUM(list_cost) AS list_cost FROM priced GROUP BY ALL"
     },
     {
       "name": "ds_jobs_top",
       "displayName": "jobs_most_expensive_30d",
-      "query": "WITH recent_jobs AS ( SELECT *, ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) AS rn FROM system.lakeflow.jobs QUALIFY rn = 1 ), priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 30) AND u.billing_origin_product = 'JOBS' AND u.usage_metadata.job_id IS NOT NULL) SELECT COALESCE(j.name, p.usage_metadata.job_id) AS job_name, main.dbx_platform.team_name_from_tags(FIRST(p.custom_tags, TRUE), FIRST(j.tags, TRUE)) AS team, FIRST(p.identity_metadata.run_as, TRUE) AS run_as, COUNT(DISTINCT p.usage_metadata.job_run_id) AS runs, ROUND(SUM(p.list_cost), 2) AS list_cost FROM priced p LEFT JOIN recent_jobs j ON p.workspace_id = j.workspace_id AND p.usage_metadata.job_id = j.job_id GROUP BY p.workspace_id, p.usage_metadata.job_id, j.name ORDER BY list_cost DESC LIMIT 25"
+      "query": "WITH recent_jobs AS ( SELECT *, ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) AS rn FROM system.lakeflow.jobs QUALIFY rn = 1 ), priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 30) AND u.billing_origin_product = 'JOBS' AND u.usage_metadata.job_id IS NOT NULL) SELECT COALESCE(j.name, p.usage_metadata.job_id) AS job_name, dbx_dev.dbx_platform.team_name_from_tags(FIRST(p.custom_tags, TRUE), FIRST(j.tags, TRUE)) AS team, FIRST(p.identity_metadata.run_as, TRUE) AS run_as, COUNT(DISTINCT p.usage_metadata.job_run_id) AS runs, ROUND(SUM(p.list_cost), 2) AS list_cost FROM priced p LEFT JOIN recent_jobs j ON p.workspace_id = j.workspace_id AND p.usage_metadata.job_id = j.job_id GROUP BY p.workspace_id, p.usage_metadata.job_id, j.name ORDER BY list_cost DESC LIMIT 25"
     },
     {
       "name": "ds_jobs_outcome",
@@ -88,7 +88,7 @@
     {
       "name": "ds_sql_daily",
       "displayName": "dbsql_daily_spend_90d",
-      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'SQL') SELECT p.usage_date, IFNULL(main.dbx_platform.sql_type_from_sku(p.sku_name), 'UNKNOWN') AS sql_type, COALESCE(wh.warehouse_name, p.usage_metadata.warehouse_id, 'unknown') AS warehouse_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN main.dbx_platform.warehouse_reference wh ON p.workspace_id = wh.workspace_id AND p.usage_metadata.warehouse_id = wh.warehouse_id GROUP BY ALL"
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'SQL') SELECT p.usage_date, IFNULL(dbx_dev.dbx_platform.sql_type_from_sku(p.sku_name), 'UNKNOWN') AS sql_type, COALESCE(wh.warehouse_name, p.usage_metadata.warehouse_id, 'unknown') AS warehouse_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN dbx_dev.dbx_platform.warehouse_reference wh ON p.workspace_id = wh.workspace_id AND p.usage_metadata.warehouse_id = wh.warehouse_id GROUP BY ALL"
     },
     {
       "name": "ds_sql_kpi",
@@ -128,7 +128,7 @@
     {
       "name": "ds_findings_by_area",
       "displayName": "findings_by_area_90d",
-      "query": "SELECT DATE(run_ts) AS day, area, COUNT(*) AS findings FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 90) AND action != 'ok' GROUP BY ALL"
+      "query": "SELECT DATE(run_ts) AS day, area, COUNT(*) AS findings FROM dbx_dev.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 90) AND action != 'ok' GROUP BY ALL"
     }
   ],
   "pages": [

@@ -133,13 +133,15 @@ GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `b74a6820-d0ac-454f-8c32-0
 GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
--- dashboards' helper schema. CREATE SCHEMA lets the dashboards-setup job create
--- main.dbx_platform on first run (it becomes owner, so it can then create the
--- functions/reference tables inside). If an admin pre-creates the schema instead,
--- the ALL PRIVILEGES grant covers those creates and CREATE SCHEMA is unnecessary.
-GRANT USE CATALOG ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT CREATE SCHEMA ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+-- dashboards' helper schema. This workspace's metastore uses Default Storage and
+-- has no `main` catalog, so the toolkit lives in the pre-existing dbx_dev catalog.
+-- CREATE SCHEMA lets the dashboards-setup job create dbx_dev.dbx_platform on first
+-- run (it becomes owner, so it can then create the functions/reference tables
+-- inside). If an admin pre-creates the schema instead, the ALL PRIVILEGES grant
+-- covers those creates and CREATE SCHEMA is unnecessary.
+GRANT USE CATALOG ON CATALOG dbx_dev TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT CREATE SCHEMA ON CATALOG dbx_dev TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT ALL PRIVILEGES ON SCHEMA dbx_dev.dbx_platform TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
 ```
 
 The schema list matches what the jobs read (see the job table in runbook.md):
@@ -248,8 +250,8 @@ databricks bundle deploy -t prod
 ```
 
 The job identity also needs `ACCESS` on the UC service credential, plus the
-`main.dbx_platform` schema grants above (the ingest MERGEs into
-`main.dbx_platform.azure_costs`).
+`dbx_dev.dbx_platform` schema grants above (the ingest MERGEs into
+`dbx_dev.dbx_platform.azure_costs`).
 
 First-run order (each step is also a plain CLI command if you prefer to run it
 locally):
@@ -260,7 +262,7 @@ locally):
    model and sets `@champion` (the promotion gate always promotes when there is no
    incumbent).
 3. `cost_forecast_daily` job (or `forecast predict` + `forecast monitor`) — forecasts
-   land in `main.dbx_platform.cost_forecasts`; the dashboard and the Console app's
+   land in `dbx_dev.dbx_platform.cost_forecasts`; the dashboard and the Console app's
    Azure Cost page light up.
 
 | Symptom | Cause / fix |

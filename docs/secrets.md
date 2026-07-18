@@ -78,5 +78,5 @@ Then from any notebook:
 from dbx_platform.secrets import get_secret
 ```
 
-(Create the volume once: `CREATE VOLUME main.dbx_platform.wheels;` — and note
+(Create the volume once: `CREATE VOLUME dbx_dev.dbx_platform.wheels;` — and note
 that bundle-deployed jobs do *not* need this; the bundle ships its own wheel.)

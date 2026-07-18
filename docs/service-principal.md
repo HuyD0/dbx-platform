@@ -84,8 +84,10 @@ GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `<application-id>`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `<application-id>`;
 GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `<application-id>`;
 -- dashboards' helper schema (CREATE SCHEMA lets the dashboards-setup job create
--- main.dbx_platform on first run; ALL PRIVILEGES covers the objects inside):
-GRANT USE CATALOG ON CATALOG main TO `<application-id>`;
-GRANT CREATE SCHEMA ON CATALOG main TO `<application-id>`;
-GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `<application-id>`;
+-- dbx_dev.dbx_platform on first run; ALL PRIVILEGES covers the objects inside).
+-- dbx_dev is the pre-existing catalog this workspace uses — its metastore has no
+-- `main` catalog (Default Storage):
+GRANT USE CATALOG ON CATALOG dbx_dev TO `<application-id>`;
+GRANT CREATE SCHEMA ON CATALOG dbx_dev TO `<application-id>`;
+GRANT ALL PRIVILEGES ON SCHEMA dbx_dev.dbx_platform TO `<application-id>`;
 ```
