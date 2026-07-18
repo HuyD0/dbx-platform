@@ -120,7 +120,9 @@ targets:
 
   # Production: real names, schedules deployed paused, identity-owned root.
   # The power controller proposes reconciliation; a human approves the exact
-  # plan before any ON/SLEEPING state is restored.
+  # plan before the warehouse's ON/SLEEPING state is restored. The Platform
+  # Console app is the exception: it deploys started: true (resources/app.yml),
+  # so CI starts it directly on deploy without an approved plan.
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
   # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:
