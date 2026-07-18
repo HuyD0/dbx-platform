@@ -53,6 +53,13 @@ wires up the browser-only loop: comment `@claude` on an issue → PR → CI → 
 | Report | `report ai-digest` | `platform-digest` (weekly) | AI-summarized digest of all checks via `ai_query()`, stored to UC tables |
 | Dashboards | `dashboards setup` / `render` | `dashboards-setup` (daily) | Provision dashboard helper objects / re-render templates |
 | Release | `release publish-wheel` | — | Upload the wheel to a UC Volume for notebook reuse |
+| Azure Cost | `azure-cost pull` | `azure-cost-pull` (daily) | Pull the Azure bill (Cost Management Query API, daily by service/RG) into `main.dbx_platform.azure_costs` — keyless via a UC service credential + Cost Management Reader |
+| Azure Cost | `azure-cost report` / `spikes` | 〃 | Spend by platform bucket (databricks / foundry_ai / search / storage) and per-bucket spike detection |
+| Forecast | `forecast build-features` | `cost-forecast-daily` (daily) | Lag/rolling/calendar features from the ingested bill (leakage-safe, versioned feature set) |
+| Forecast | `forecast predict` | 〃 | Batch P10/P50/P90 forecasts from the UC `@champion` model into `cost_forecasts` |
+| Forecast | `forecast monitor` | 〃 | PSI feature drift + matured-forecast accuracy; fails the job on a retrain verdict |
+| Forecast | `forecast train` | `cost-forecast-train` (weekly) | Rolling-origin backtest (seasonal-naive vs LightGBM quantile), MLflow tracking, champion/challenger promotion gate |
+| Forecast | `forecast status` | — | Champion/challenger registry state (`main.dbx_platform.azure_cost_forecaster`) |
 
 All ML and right-sizing checks are report-only by design (endpoint config
 changes redeploy the endpoint; model/endpoint deletion is irreversible).
@@ -61,9 +68,12 @@ Operational details, thresholds, and how to act on findings: **[docs/runbook.md]
 
 ### Dashboards
 
-Four AI/BI dashboards deployed by the bundle (`resources/dashboards.yml`):
+Five AI/BI dashboards deployed by the bundle (`resources/dashboards.yml`):
 Unified Cost Analysis, Job Operations & Cost Management, DBSQL Cost & Query
-Performance, Data Lineage & Catalog Utilization.
+Performance, Data Lineage & Catalog Utilization, and Azure Bill & Cost Forecast
+(the ingested Azure bill by platform component — Databricks / Foundry-AI /
+Search / Storage — with the P10/P50/P90 ML forecast and the drift monitor's
+findings; this one is authored in-repo, not adapted from the suite).
 
 Adapted from the community
 [databricks-dashboard-suite](https://github.com/mohanab89/databricks-dashboard-suite)

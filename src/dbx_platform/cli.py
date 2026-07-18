@@ -138,6 +138,174 @@ def cmd_cost_warehouse_utilization(args) -> int:
     return 0
 
 
+# --- azure-cost ---------------------------------------------------------------
+
+def cmd_azure_cost_pull(args) -> int:
+    from datetime import date, timedelta
+
+    from dbx_platform import azure_cost, secrets
+
+    s = Settings.from_env()
+    sub = args.subscription_id or s.azure_subscription_id
+    days = args.days if args.days is not None else 3
+    end = date.today()
+    start = end - timedelta(days=days)
+    cred = secrets.get_credential(args.service_credential or None)
+    pages = azure_cost.fetch_cost_query(cred, sub, start.isoformat(), end.isoformat())
+    rows = azure_cost.parse_query_result(pages)
+    w = get_client(args.profile)
+    n = azure_cost.store_costs(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, rows
+    )
+    by_bucket: dict[str, float] = {}
+    for r in rows:
+        by_bucket[r["service_bucket"]] = by_bucket.get(r["service_bucket"], 0.0) + r["cost"]
+    summary = [{"service_bucket": k, "cost": round(v, 2)}
+               for k, v in sorted(by_bucket.items(), key=lambda kv: -kv[1])]
+    emit(args, f"Azure bill pull {start}..{end} — {n} rows merged into "
+               f"{s.dashboard_catalog}.{s.dashboard_schema}.azure_costs", summary)
+    return 0
+
+
+def cmd_azure_cost_report(args) -> int:
+    from dbx_platform import azure_cost
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = azure_cost.report(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema,
+        args.by, days,
+    )
+    emit(args, f"Azure spend by {args.by} — last {days}d", rows)
+    return 0
+
+
+def cmd_azure_cost_spikes(args) -> int:
+    from dbx_platform import azure_cost
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else 14
+    rows = azure_cost.fetch_daily_buckets(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+    )
+    findings = azure_cost.classify_azure_spend(
+        rows, s.azure_spike_pct, s.azure_spike_min_cost
+    )
+    emit(args, "Azure spend spikes by service bucket "
+               f"(day vs trailing 7d, threshold {s.azure_spike_pct}%)", findings,
+         ["Report only — investigate the bucket's resources before acting."])
+    return 0
+
+
+# --- forecast -----------------------------------------------------------------
+
+def cmd_forecast_build_features(args) -> int:
+    from dbx_platform import azure_cost, forecast_features
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else 365
+    rows = azure_cost.fetch_daily_buckets(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+    )
+    feats = forecast_features.build_features(rows)
+    n = forecast_features.store_features(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, feats
+    )
+    series = sorted({f["series"] for f in feats})
+    emit(args, f"Cost features built (set v{forecast_features.FEATURE_SET_VERSION})",
+         [{"series": ", ".join(series), "rows": n,
+           "table": f"{s.dashboard_catalog}.{s.dashboard_schema}.cost_features"}])
+    return 0
+
+
+def cmd_forecast_train(args) -> int:
+    from dbx_platform import forecast_train
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    rows = forecast_train.run_training(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema,
+        args.model_name or s.forecast_model_name,
+        args.experiment or s.forecast_experiment,
+        n_folds=args.folds, horizon=args.horizon,
+        min_improvement=args.min_improvement,
+    )
+    emit(args, "Forecast training — backtest + champion/challenger gate", rows,
+         ["Batch inference resolves the model by @champion alias only."])
+    return 0
+
+
+def cmd_forecast_predict(args) -> int:
+    from dbx_platform import forecast_infer
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    horizon = args.horizon if args.horizon is not None else s.forecast_horizon_days
+    rows = forecast_infer.run_inference(
+        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema,
+        args.model_name or s.forecast_model_name, horizon,
+    )
+    emit(args, f"Azure cost forecast — next {horizon}d (P10/P50/P90)", rows)
+    return 0
+
+
+def cmd_forecast_monitor(args) -> int:
+    from dbx_platform import forecast_monitor
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    warehouse = _warehouse_id(args, s)
+    drift, errors, findings = forecast_monitor.run_monitoring(
+        w, warehouse, s.dashboard_catalog, s.dashboard_schema
+    )
+    emit(args, "Feature drift (PSI vs reference window)", drift)
+    emit(args, "Matured forecast accuracy by series", errors)
+    emit(args, "Forecast monitor verdict", findings)
+    if not args.no_store:
+        try:
+            forecast_monitor.store_findings(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema, findings
+            )
+        except (SystemTablesUnavailableError, RuntimeError, ValueError) as e:
+            print(f"  note: findings not stored ({e}) — run 'dbx-platform "
+                  "dashboards setup' first.")
+    if any(f["action"] == "retrain-recommended" for f in findings):
+        print("retrain recommended — failing so the job notification fires.",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_forecast_status(args) -> int:
+    s = Settings.from_env()
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+    except ImportError:
+        print("error: forecasting libraries not installed. "
+              "Run: pip install 'dbx-platform[forecast]'", file=sys.stderr)
+        return 2
+    mlflow.set_registry_uri("databricks-uc")
+    uc_name = (f"{s.dashboard_catalog}.{s.dashboard_schema}."
+               f"{args.model_name or s.forecast_model_name}")
+    client = MlflowClient()
+    rows = []
+    for alias in ("champion", "challenger"):
+        try:
+            v = client.get_model_version_by_alias(uc_name, alias)
+            rows.append({"alias": alias, "version": v.version,
+                         "backtest_wape": v.tags.get("backtest_wape", ""),
+                         "run_id": v.run_id})
+        except Exception as e:  # noqa: BLE001 — absent alias is a normal state
+            rows.append({"alias": alias, "version": "", "backtest_wape": "",
+                         "run_id": f"(none: {e.__class__.__name__})"})
+    emit(args, f"Forecaster registry status — {uc_name}", rows)
+    return 0
+
+
 # --- housekeeping -------------------------------------------------------------
 
 def cmd_stale_clusters(args) -> int:
@@ -510,6 +678,63 @@ def build_parser() -> argparse.ArgumentParser:
                       help="SQL warehouses: idle spend or sustained queueing")
     x.add_argument("--days", type=int, default=None)
     x.set_defaults(func=cmd_cost_warehouse_utilization)
+
+    # azure-cost
+    pa = sub.add_parser("azure-cost",
+                        help="Azure bill: ingest + report (Cost Management API)"
+                        ).add_subparsers(dest="command")
+    x = pa.add_parser("pull", parents=[common],
+                      help="Pull the Azure bill into <catalog>.<schema>.azure_costs")
+    x.add_argument("--days", type=int, default=None,
+                   help="Window to (re-)pull, default 3 (use 365 to backfill)")
+    x.add_argument("--subscription-id", default=None,
+                   help="Azure subscription (default: DBX_PLATFORM_AZURE_SUBSCRIPTION_ID)")
+    x.add_argument("--service-credential", default=None,
+                   help="UC service credential name for keyless Azure auth")
+    x.set_defaults(func=cmd_azure_cost_pull)
+    x = pa.add_parser("report", parents=[common], help="Azure spend from the ingested bill")
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--by", choices=["bucket", "service", "resource-group"],
+                   default="bucket")
+    x.set_defaults(func=cmd_azure_cost_report)
+    x = pa.add_parser("spikes", parents=[common],
+                      help="Per-bucket day-over-trailing-week spend spikes")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_azure_cost_spikes)
+
+    # forecast
+    pf = sub.add_parser("forecast",
+                        help="ML cost forecasting: features, train, predict, monitor"
+                        ).add_subparsers(dest="command")
+    x = pf.add_parser("build-features", parents=[common],
+                      help="Engineer lag/rolling/calendar features from azure_costs")
+    x.add_argument("--days", type=int, default=None, help="History window (default 365)")
+    x.set_defaults(func=cmd_forecast_build_features)
+    x = pf.add_parser("train", parents=[common],
+                      help="Backtest candidates, register + gate @champion "
+                           "(needs dbx-platform[forecast])")
+    x.add_argument("--folds", type=int, default=4)
+    x.add_argument("--horizon", type=int, default=14)
+    x.add_argument("--min-improvement", type=float, default=0.01,
+                   help="Relative WAPE margin the challenger must win by")
+    x.add_argument("--model-name", default=None)
+    x.add_argument("--experiment", default=None)
+    x.set_defaults(func=cmd_forecast_train)
+    x = pf.add_parser("predict", parents=[common],
+                      help="Batch inference from @champion into cost_forecasts")
+    x.add_argument("--horizon", type=int, default=None)
+    x.add_argument("--model-name", default=None)
+    x.set_defaults(func=cmd_forecast_predict)
+    x = pf.add_parser("monitor", parents=[common],
+                      help="PSI feature drift + matured-forecast accuracy; "
+                           "exits 1 on retrain verdict")
+    x.add_argument("--no-store", action="store_true",
+                   help="Skip writing findings to platform_findings")
+    x.set_defaults(func=cmd_forecast_monitor)
+    x = pf.add_parser("status", parents=[common],
+                      help="Champion/challenger registry status")
+    x.add_argument("--model-name", default=None)
+    x.set_defaults(func=cmd_forecast_status)
 
     # housekeeping
     ph = sub.add_parser("housekeeping", help="Cleanup reports").add_subparsers(dest="command")

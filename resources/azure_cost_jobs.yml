@@ -1,0 +1,52 @@
+# Daily Azure bill ingestion. Same CLI you can run locally:
+#   dbx-platform azure-cost pull / report / spikes
+# Auth: the job identity resolves a UC service credential (keyless) and needs
+# Cost Management Reader on the subscription — see docs/cloud-setup.md.
+resources:
+  jobs:
+    azure_cost_pull:
+      name: "[dbx-platform] azure-cost-pull"
+      description: >
+        Pulls the subscription's actual cost (daily, by service and resource
+        group) from the Azure Cost Management Query API and MERGEs it into
+        <catalog>.<schema>.azure_costs. Re-pulls a 3-day window so Azure's
+        late cost restatements are absorbed. Then reports per-bucket spend
+        spikes. Writes only to platform-owned tables.
+      schedule:
+        quartz_cron_expression: "0 30 6 * * ?"  # daily 06:30 UTC, before cost jobs
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: pull_bill
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["azure-cost", "pull", "--days", "3",
+               "--subscription-id", "${var.azure_subscription_id}",
+               "--service-credential", "${var.azure_service_credential}",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: spend_spikes
+          depends_on:
+            - task_key: pull_bill
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["azure-cost", "spikes",
+               "--warehouse-id", "${var.warehouse_id}"]

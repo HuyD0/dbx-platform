@@ -24,7 +24,7 @@ deleted*, and policy sync *never deletes* unmanaged policies.
 
 | Path | Contents |
 |---|---|
-| `src/dbx_platform/` | CLI + one module per area (`cost`, `security`, `governance`, `housekeeping`, `dashboards`) |
+| `src/dbx_platform/` | CLI + one module per area (`cost`, `azure_cost`, `forecast_*`, `security`, `governance`, `housekeeping`, `dashboards`) |
 | `src/dbx_platform/queries/` | SQL against Databricks system tables |
 | `resources/*.yml` | Bundle job definitions, included by `databricks.yml` |
 | `policies/*.json` | Cluster policies as code, reconciled by `governance policy-sync` |

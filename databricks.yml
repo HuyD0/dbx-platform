@@ -45,6 +45,21 @@ variables:
     description: Recipient for job failure notifications.
     default: huyydo@gmail.com
 
+  azure_subscription_id:
+    description: >
+      Azure subscription whose bill the azure-cost jobs pull via the Cost
+      Management Query API. The job identity needs the Cost Management Reader
+      role on it (see docs/cloud-setup.md). Set via
+      BUNDLE_VAR_azure_subscription_id.
+    default: ""
+
+  azure_service_credential:
+    description: >
+      Unity Catalog service credential name used for keyless Azure auth from
+      scheduled jobs (see docs/secrets.md). Empty falls back to
+      DefaultAzureCredential, which only works locally.
+    default: ""
+
 targets:
   # Development: resources prefixed with "[dev <user>]", all schedules paused,
   # deployed under your user folder. Safe to iterate.

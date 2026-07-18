@@ -28,6 +28,7 @@ TEMPLATE_NAMES = (
     "job_operations_cost",
     "dbsql_cost_performance",
     "lineage_catalog_utilization",
+    "azure_cost_forecast",
 )
 
 
@@ -92,9 +93,15 @@ def build_team_name_function_sql(catalog: str, schema: str, tag_keys: list[str])
 
 def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tuple[str, str]]:
     """All (description, sql) statements needed by the dashboards. Pure function."""
+    # Same DDL the ingest/forecast jobs use — one code path, no schema drift.
+    from dbx_platform.azure_cost import create_table_sql as azure_costs_ddl
+    from dbx_platform.forecast_infer import create_forecasts_table_sql
+
     fq = f"{catalog}.{schema}"
     return [
         (f"schema {fq}", f"CREATE SCHEMA IF NOT EXISTS {fq}"),
+        (f"table {fq}.azure_costs", azure_costs_ddl(catalog, schema)),
+        (f"table {fq}.cost_forecasts", create_forecasts_table_sql(catalog, schema)),
         (
             f"function {fq}.job_type_from_sku",
             f"""CREATE OR REPLACE FUNCTION {fq}.job_type_from_sku(sku STRING)

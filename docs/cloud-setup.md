@@ -181,3 +181,67 @@ Use `gh` and the `databricks` CLI locally as normal — the cloud path exists so
 `tls: failed to verify certificate: x509: OSStatus -26276`. That is the sandbox blocking
 the macOS trust daemon — `errSecInternalComponent`, not an untrusted cert — and it does
 not reproduce in a normal terminal. `az`, Python, and `git` are unaffected.)
+
+---
+
+## Azure Cost Management access (the repo's first ARM RBAC grant)
+
+The `azure-cost-pull` job calls the **Azure Cost Management Query API** at
+subscription scope, which needs an Azure RBAC role. Everything else in this repo
+deliberately holds **no ARM RBAC** (see the troubleshooting note above — the CI SP
+authenticates to Databricks only). This grant is the one deliberate exception, and it
+is read-only:
+
+- **Role:** `Cost Management Reader` — can call the Query/Forecast/Cost Details APIs
+  and view cost configuration; it can **not** create exports or budgets (that would
+  need Cost Management Contributor, which is why the pipeline pulls via the Query API
+  instead of managing storage exports).
+- **Identity:** the **UAMI behind the UC service credential** the jobs resolve through
+  `secrets.get_credential()` (docs/secrets.md has the UAMI + access-connector recipe —
+  the same construct used for Key Vault, so no new machinery). Keep the CI SP
+  (`b74a6820-…`) RBAC-free; grant it too only if you want to run
+  `dbx-platform azure-cost pull` locally under a non-user identity.
+
+One-time setup (human, needs Owner/User Access Administrator on the subscription):
+
+```bash
+# 1) The UAMI that backs the UC service credential (docs/secrets.md §setup)
+UAMI_PRINCIPAL_ID=$(az identity show -g <rg> -n <uami-name> --query principalId -o tsv)
+
+# 2) Read-only cost access on the subscription
+az role assignment create \
+  --assignee-object-id "$UAMI_PRINCIPAL_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Cost Management Reader" \
+  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID"
+```
+
+Then wire the bundle variables and deploy:
+
+```bash
+export BUNDLE_VAR_azure_subscription_id=<subscription-guid>
+export BUNDLE_VAR_azure_service_credential=<uc-service-credential-name>
+databricks bundle deploy -t prod
+```
+
+The job identity also needs `ACCESS` on the UC service credential, plus the
+`main.dbx_platform` schema grants above (the ingest MERGEs into
+`main.dbx_platform.azure_costs`).
+
+First-run order (each step is also a plain CLI command if you prefer to run it
+locally):
+
+1. `azure-cost pull --days 365` — backfill the bill (one-off; the scheduled job
+   re-pulls a 3-day window daily).
+2. `forecast build-features` then `forecast train` — first training run registers the
+   model and sets `@champion` (the promotion gate always promotes when there is no
+   incumbent).
+3. `cost_forecast_daily` job (or `forecast predict` + `forecast monitor`) — forecasts
+   land in `main.dbx_platform.cost_forecasts`; the dashboard and the Console app's
+   Azure Cost page light up.
+
+| Symptom | Cause / fix |
+|---|---|
+| `azure-cost pull` → 403 with the Cost Management Reader hint | The role assignment above is missing, on the wrong identity, or still propagating (can take a few minutes). |
+| `azure-cost pull` → `DefaultAzureCredential` errors inside a job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |
+| `forecast train` → `need >= N days of features` | Not enough billing history ingested yet — run the 365-day backfill first. |

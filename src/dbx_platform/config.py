@@ -52,6 +52,14 @@ class Settings:
     digest_model: str = "databricks-claude-sonnet-4-5"
     # Azure secrets helper
     service_credential: str = ""
+    # Azure Cost Management (bill ingestion + spike check)
+    azure_subscription_id: str = ""
+    azure_spike_pct: int = 50
+    azure_spike_min_cost: int = 10
+    # Cost forecasting (see forecast_*.py)
+    forecast_horizon_days: int = 30
+    forecast_model_name: str = "azure_cost_forecaster"
+    forecast_experiment: str = "/Shared/dbx-platform/cost-forecast"
     # Wheel distribution
     wheel_volume_path: str = ""
 
