@@ -196,21 +196,44 @@ is read-only:
   and view cost configuration; it can **not** create exports or budgets (that would
   need Cost Management Contributor, which is why the pipeline pulls via the Query API
   instead of managing storage exports).
-- **Identity:** the **UAMI behind the UC service credential** the jobs resolve through
-  `secrets.get_credential()` (docs/secrets.md has the UAMI + access-connector recipe —
-  the same construct used for Key Vault, so no new machinery). Keep the CI SP
-  (`b74a6820-…`) RBAC-free; grant it too only if you want to run
+- **Identity:** the **access connector's identity behind the UC service credential** the
+  jobs resolve through `secrets.get_credential()` (docs/secrets.md has the access-connector
+  recipe — the same construct used for Key Vault, so no new machinery). This workspace's
+  connector is `dbx-dev-ac`
+  (`/subscriptions/ea936670-dda1-4884-8467-49c225bf3e83/resourceGroups/rg-databricks-dbx-dev/providers/Microsoft.Databricks/accessConnectors/dbx-dev-ac`),
+  a **system-assigned** identity (principal ID `d89926fd-c4bc-4d48-a52f-0119971d4a72`) —
+  not a standalone UAMI; it already holds `Storage Blob Data Contributor` on the UC
+  storage accounts, confirming it's the identity actually in use. `databricks credentials
+  list-credentials` shows two service credentials pointing at this connector — `dbx_dev`
+  and `learn_app_azure` (the latter belongs to the other project) — use `dbx_dev`. Keep the
+  CI SP (`b74a6820-…`) RBAC-free; grant it too only if you want to run
   `dbx-platform azure-cost pull` locally under a non-user identity.
 
-One-time setup (human, needs Owner/User Access Administrator on the subscription):
+**Done for this deployment** (2026-07-18, via Azure MCP tools + Resource Graph, not the
+`az` CLI — see the local-CLI note above):
 
 ```bash
-# 1) The UAMI that backs the UC service credential (docs/secrets.md §setup)
-UAMI_PRINCIPAL_ID=$(az identity show -g <rg> -n <uami-name> --query principalId -o tsv)
+az role assignment create \
+  --assignee-object-id d89926fd-c4bc-4d48-a52f-0119971d4a72 \
+  --assignee-principal-type ServicePrincipal \
+  --role "Cost Management Reader" \
+  --scope "/subscriptions/ea936670-dda1-4884-8467-49c225bf3e83"
+```
+
+Verified in place: role assignment
+`9b8ef5f2-f528-4cea-b63e-5985d22dad45`, role `72fafb9e-0641-4937-9268-a91bfd8191a3`
+(Cost Management Reader), scope = the subscription.
+
+To reproduce this from scratch (a different subscription, a rotated connector, etc.):
+
+```bash
+# 1) The access connector's own identity (or the UAMI it wraps, if user-assigned)
+CONNECTOR_PRINCIPAL_ID=$(az databricks access-connector show \
+  -g <rg> -n <connector-name> --query identity.principalId -o tsv)
 
 # 2) Read-only cost access on the subscription
 az role assignment create \
-  --assignee-object-id "$UAMI_PRINCIPAL_ID" \
+  --assignee-object-id "$CONNECTOR_PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal \
   --role "Cost Management Reader" \
   --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID"
@@ -219,8 +242,8 @@ az role assignment create \
 Then wire the bundle variables and deploy:
 
 ```bash
-export BUNDLE_VAR_azure_subscription_id=<subscription-guid>
-export BUNDLE_VAR_azure_service_credential=<uc-service-credential-name>
+export BUNDLE_VAR_azure_subscription_id=ea936670-dda1-4884-8467-49c225bf3e83
+export BUNDLE_VAR_azure_service_credential=dbx_dev
 databricks bundle deploy -t prod
 ```
 
