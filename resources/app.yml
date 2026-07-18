@@ -13,11 +13,11 @@ resources:
       description: "dbx-platform findings, remediation planning, AI digests, agent chat"
       source_code_path: ../apps/platform-console
       user_api_scopes:
-        # Required for the backend to verify the forwarded user token against
-        # the workspace current-user/SCIM APIs before showing data or accepting
-        # guarded control-plane proposals.
-        - iam.current-user:read
-        - iam.access-control:read
+        # Databricks Apps automatically grants the default identity scopes
+        # when user authorization is enabled. Do not submit those defaults
+        # explicitly: some workspaces reject them as invalid explicit scopes,
+        # which prevents forwarded user identity verification at runtime.
+        #
         # Required for request-scoped SQL reads/writes executed on behalf of
         # the verified user against the bundle-owned warehouse.
         - sql
