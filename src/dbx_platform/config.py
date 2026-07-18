@@ -47,8 +47,12 @@ class Settings:
     # System-table queries
     warehouse_id: str = ""
     lookback_days: int = 30
-    # Dashboards (see dashboards.py): where helper functions/tables live
-    dashboard_catalog: str = "main"
+    # Dashboards (see dashboards.py): where helper functions/tables live.
+    # Concrete for this deployment: the workspace's metastore uses Default
+    # Storage and has no `main` catalog, so everything lives in dbx_dev. Point
+    # a different workspace at its own catalog with DBX_PLATFORM_DASHBOARD_CATALOG
+    # (and re-render: dbx-platform dashboards render --catalog <c>).
+    dashboard_catalog: str = "dbx_dev"
     dashboard_schema: str = "dbx_platform"
     # AI digest: a pay-per-token foundation-model serving endpoint name
     digest_model: str = "databricks-claude-sonnet-4-5"

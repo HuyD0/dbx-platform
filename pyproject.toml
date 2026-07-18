@@ -45,7 +45,7 @@ agent = [
 ]
 
 [project.scripts]
-dbx-platform = "dbx_platform.cli:main"
+dbx-platform = "dbx_platform.cli:entry"
 
 [tool.hatch.version]
 path = "src/dbx_platform/__init__.py"

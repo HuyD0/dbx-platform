@@ -1605,19 +1605,41 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
+_HANDLED_ERRORS = (SystemTablesUnavailableError, RuntimeError, ValueError,
+                   FileNotFoundError, TimeoutError)
+
+
+def _dispatch(argv: list[str] | None) -> int:
+    """Parse and run one command, letting failures propagate to the caller."""
     args = build_parser().parse_args(argv)
     if not hasattr(args, "func"):
         build_parser().parse_args((argv or sys.argv[1:]) + ["--help"])
         return 2
+    return args.func(args)
+
+
+def main(argv: list[str] | None = None) -> int:
     try:
-        return args.func(args)
-    except SystemTablesUnavailableError as e:
+        return _dispatch(argv)
+    except _HANDLED_ERRORS as e:
         print(f"error: {e}", file=sys.stderr)
-        return 3
-    except (RuntimeError, ValueError, FileNotFoundError, TimeoutError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+        return 3 if isinstance(e, SystemTablesUnavailableError) else 1
+
+
+def entry() -> None:
+    """Console-script entry point. Databricks python_wheel_task calls this
+    function directly and ignores its return value — a task only fails if it
+    raises — and `bundle run` relays only the exception text, not the task's
+    stderr, so a bare SystemExit(1) leaves CI logs with no diagnosis. Raise
+    SystemExit carrying the error message instead: the job fails loudly AND
+    the reason lands in the CI log. Locally the interpreter prints a string
+    SystemExit to stderr and exits 1."""
+    try:
+        code = _dispatch(None)
+    except _HANDLED_ERRORS as e:
+        raise SystemExit(f"error: {e}") from e
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":

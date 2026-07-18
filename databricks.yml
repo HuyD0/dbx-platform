@@ -28,6 +28,7 @@ sync:
   include:
     - apps/platform-console/wheels/*.whl
     - apps/platform-console/static/**
+    - apps/platform-console/build_info.json
 
 artifacts:
   default:

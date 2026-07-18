@@ -131,7 +131,7 @@ every step and the jobs are in the workspace.)
 | Deploy → `no files match pattern: ./resources/dist/*.whl` | Wheel dependency path regressed. Job specs live in `resources/`, so the wheel (built at the bundle root) must be referenced as `../dist/*.whl`, not `./dist/*.whl`. |
 | `@claude` does nothing at all — no run, no error | The Claude GitHub App isn't installed (step 1), or `claude.yml` isn't on the **default** branch (`main`). |
 | Deploy waits on approval | A protection rule was added to the `production` environment. Remove it. |
-| Scheduled job fails with `INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.<x>'` (exit 3) | The job's run-as principal — the service principal, since CI deployed the bundle — has no grant on that system schema. Workspace admin does not confer it. Run the grants below. |
+| Scheduled job fails with `INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.<x>'` | The job's run-as principal — the service principal, since CI deployed the bundle — has no grant on that system schema. Workspace admin does not confer it. Run the grants below. |
 
 ### Required: apply the report/deployment grants
 
@@ -258,8 +258,8 @@ databricks bundle deploy -t prod
 ```
 
 The job identity also needs `ACCESS` on the UC service credential, plus the
-`main.dbx_platform` schema grants above (the ingest MERGEs into
-`main.dbx_platform.azure_costs`).
+`dbx_dev.dbx_platform` schema grants above (the ingest MERGEs into
+`dbx_dev.dbx_platform.azure_costs`).
 
 First-run order (stateful/costly manual runs go through Action Center):
 

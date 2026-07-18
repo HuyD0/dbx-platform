@@ -37,3 +37,13 @@ resources:
       file_path: ../dashboards/azure_cost_forecast.lvdash.json
       warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
+
+    # Consolidated successor to the five dashboards above: the same content
+    # curated into one dashboard whose pages render as tabs (Overview, Azure
+    # Bill & Forecast, Databricks Cost, Jobs, SQL Warehouses, Governance &
+    # Lineage). Once it covers your needs, drop the five standalone entries.
+    platform_command_center:
+      display_name: "[dbx-platform] Platform Command Center"
+      file_path: ../dashboards/platform_command_center.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      embed_credentials: false

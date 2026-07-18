@@ -2,9 +2,10 @@
 
 The five dashboards under dashboards/templates/ include four adapted from the community
 suite github.com/mohanab89/databricks-dashboard-suite (system-table dashboards,
-provided as-is, no license file — see README attribution). Their queries use
-``{catalog}.{schema}`` placeholders and depend on helper objects the suite's
-notebook normally creates:
+provided as-is, no license file — see README attribution); azure_cost_forecast
+and platform_command_center (the consolidated tabbed successor) are authored
+in-repo. Their queries use ``{catalog}.{schema}`` placeholders and depend on
+helper objects the suite's notebook normally creates:
 
 - functions ``job_type_from_sku``, ``sql_type_from_sku``, ``team_name_from_tags``
 - reference tables ``workspace_reference`` and ``warehouse_reference``
@@ -28,6 +29,7 @@ TEMPLATE_NAMES = (
     "dbsql_cost_performance",
     "lineage_catalog_utilization",
     "azure_cost_forecast",
+    "platform_command_center",
 )
 
 REQUIRED_TABLES = (

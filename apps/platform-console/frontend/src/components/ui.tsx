@@ -193,6 +193,40 @@ const errorGuidance: Record<string, string> = {
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
 };
 
+/** One-click escape hatch for findings_table_missing: find the
+ * dashboards-setup job and kick it off right from the error box. */
+function RunSetupJobButton() {
+  const jobs = useQuery({
+    queryKey: ["jobs"],
+    queryFn: () => apiGet<Envelope<JobInfo[]>>("/api/jobs"),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const setup = jobs.data?.data.find((j) => j.name.includes("dashboards-setup"));
+  const run = useMutation({
+    mutationFn: (jobId: number) => apiPost<{ run_id: number }>(`/api/jobs/${jobId}/run_now`),
+  });
+  if (!setup) return null;
+  if (run.data) {
+    return (
+      <div className="mt-2">
+        <Badge tone="good">setup started — refresh in a minute or two</Badge>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => run.mutate(setup.job_id)}
+      disabled={run.isPending}
+      className="mt-2 inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
+    >
+      <Play className="h-3 w-3" />
+      Run setup job now
+    </button>
+  );
+}
+
 export function ErrorState({ error }: { error: unknown }) {
   const apiErr = error instanceof ApiError ? error : null;
   const unavailable = apiErr && [404, 405, 501].includes(apiErr.status);
