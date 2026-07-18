@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens — dark is the default theme (html.dark), light via toggle.
+   Palette follows the validated reference instance: categorical slots in
+   fixed order, reserved status colors, recessive chrome. */
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-page: #f9f9f7;
+  --color-surface: #fcfcfb;
+  --color-ink: #0b0b0b;
+  --color-ink-2: #52514e;
+  --color-muted: #898781;
+  --color-grid: #e1e0d9;
+  --color-hairline: rgba(11, 11, 11, 0.1);
+
+  --color-series-1: #2a78d6;
+  --color-series-2: #008300;
+  --color-series-3: #e87ba4;
+  --color-series-4: #eda100;
+
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  --color-accent: #2a78d6;
+}
+
+.dark {
+  --color-page: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-ink: #ffffff;
+  --color-ink-2: #c3c2b7;
+  --color-muted: #898781;
+  --color-grid: #2c2c2a;
+  --color-hairline: rgba(255, 255, 255, 0.1);
+
+  --color-series-1: #3987e5;
+  --color-series-2: #008300;
+  --color-series-3: #d55181;
+  --color-series-4: #c98500;
+
+  --color-accent: #3987e5;
+}
+
+html,
+body {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+}
+
+/* Markdown rendered from digests / chat */
+.prose-console {
+  line-height: 1.6;
+  font-size: 0.875rem;
+}
+.prose-console h1,
+.prose-console h2,
+.prose-console h3 {
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+}
+.prose-console h1 { font-size: 1.05rem; }
+.prose-console h2 { font-size: 1rem; }
+.prose-console h3 { font-size: 0.9rem; }
+.prose-console p { margin: 0.5em 0; }
+.prose-console ul,
+.prose-console ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.prose-console ul { list-style: disc; }
+.prose-console ol { list-style: decimal; }
+.prose-console li { margin: 0.2em 0; }
+.prose-console code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8em;
+  background: var(--color-hairline);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.prose-console strong { font-weight: 600; }
+.prose-console a { color: var(--color-accent); text-decoration: underline; }

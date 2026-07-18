@@ -75,6 +75,18 @@ jobs:
           python -m build --wheel
           mkdir -p apps/platform-console/wheels
           cp dist/*.whl apps/platform-console/wheels/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/platform-console/frontend/package-lock.json
+      - name: Build the Platform Console frontend
+        # Databricks Apps never run npm — the SPA is built here into the
+        # git-ignored static/ dir, which databricks.yml sync.include ships.
+        working-directory: apps/platform-console/frontend
+        run: |
+          npm ci
+          npm run build
       - name: Validate
         run: databricks bundle validate -t prod
       - name: Deploy
