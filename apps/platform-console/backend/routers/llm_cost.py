@@ -175,6 +175,14 @@ def cost_efficiency(days: int = 30, refresh: bool = False) -> dict:
     return envelope(data, as_of, hit)
 
 
+@router.get("/tokenomics")
+def tokenomics(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days, 1, 400)
+    ledger, as_of, hit = _ledger(days, refresh)
+    data = llm_cost.tokenomics_lens(ledger["cost_rows"], ledger["usage_rows"])
+    return envelope(data, as_of, hit)
+
+
 @router.get("/data-health")
 def data_health(days: int = 30, refresh: bool = False) -> dict:
     days = deps.clamp_days(days, 1, 400)

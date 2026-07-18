@@ -875,6 +875,145 @@ def breakdown(cost_rows: list[dict], usage_rows: list[dict], dimension: str) -> 
     )
 
 
+def tokenomics_lens(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
+    """Decision lens for LLM token unit economics and throughput governance.
+
+    The lens uses only persisted ledger facts for the whole workspace scope,
+    not just the platform-console app. Coverage follows the governed rollup:
+    Databricks-hosted models and FMAPI, external models routed through Unity
+    AI Gateway, and Azure AI Foundry/Azure OpenAI actuals when Azure Cost
+    Management ingestion has matching rows. It keeps financial bases separate
+    and labels throughput values as observation-derived, not capacity claims.
+    """
+
+    usage = _usage_totals(usage_rows)
+    total_tokens = _optional_sum(usage["input_tokens"], usage["output_tokens"])
+    context_tokens = _optional_sum(usage["input_tokens"], usage["cached_tokens"])
+    output_share = (usage["output_tokens"] / total_tokens) if total_tokens else None
+    cache_read_ratio = (
+        usage["cached_tokens"] / context_tokens
+        if usage["cached_tokens"] is not None and context_tokens is not None and context_tokens > 0
+        else None
+    )
+    avg_input_tokens = (
+        round(usage["input_tokens"] / usage["requests"], 2)
+        if usage["input_tokens"] is not None and usage["requests"]
+        else None
+    )
+    avg_output_tokens = (
+        round(usage["output_tokens"] / usage["requests"], 2)
+        if usage["output_tokens"] is not None and usage["requests"]
+        else None
+    )
+
+    cost_groups: dict[tuple[str, str], float] = defaultdict(float)
+    for row in cost_rows:
+        cost_groups[(str(row.get("currency") or "UNKNOWN"), str(row.get("cost_basis")))] += _number(
+            row.get("cost")
+        )
+    unit_costs = []
+    for (currency, basis), amount in sorted(cost_groups.items()):
+        unit_costs.append(
+            {
+                "currency": currency,
+                "cost_basis": basis,
+                "cost": round(amount, 2),
+                "cost_per_1m_total_tokens": (
+                    round(amount / total_tokens * 1_000_000, 2) if total_tokens else None
+                ),
+                "cost_per_1m_input_tokens": (
+                    round(amount / usage["input_tokens"] * 1_000_000, 2)
+                    if usage["input_tokens"]
+                    else None
+                ),
+                "cost_per_1m_output_tokens": (
+                    round(amount / usage["output_tokens"] * 1_000_000, 2)
+                    if usage["output_tokens"]
+                    else None
+                ),
+            }
+        )
+
+    recommendations: list[dict] = []
+    if avg_input_tokens is not None and avg_input_tokens >= 8_000:
+        recommendations.append(
+            {
+                "type": "context-window-tax",
+                "severity": "medium",
+                "evidence": f"average input context is {avg_input_tokens:,.0f} tokens per request",
+                "action_type": "review-rag-context-budget",
+                "requires_approval": False,
+            }
+        )
+    if (
+        cache_read_ratio is not None
+        and context_tokens
+        and context_tokens >= 100_000
+        and cache_read_ratio < 0.10
+    ):
+        recommendations.append(
+            {
+                "type": "prompt-cache-opportunity",
+                "severity": "medium",
+                "evidence": f"cache-read share of reusable context is {cache_read_ratio:.1%}",
+                "action_type": "evaluate-semantic-or-provider-cache",
+                "requires_approval": True,
+            }
+        )
+    if output_share is not None and output_share >= 0.40:
+        recommendations.append(
+            {
+                "type": "output-token-pressure",
+                "severity": "medium",
+                "evidence": f"output tokens are {output_share:.1%} of observed billed tokens",
+                "action_type": "review-max-tokens-and-response-shaping",
+                "requires_approval": False,
+            }
+        )
+
+    cost_sources = sorted({str(row.get("source")) for row in cost_rows if row.get("source")})
+    usage_sources = sorted({str(row.get("source")) for row in usage_rows if row.get("source")})
+
+    return {
+        "scope": {
+            "description": (
+                "Workspace-level LLM ledger coverage, not only platform-console app traffic"
+            ),
+            "covered_when_ingested": [
+                "Databricks-hosted models and Foundation Model APIs",
+                "Unity AI Gateway external-model routes",
+                "Azure AI Foundry and Azure OpenAI actual costs from Azure Cost Management",
+            ],
+            "cost_sources": cost_sources,
+            "usage_sources": usage_sources,
+            "limitations": [
+                "Azure actual costs provide financial reconciliation, not per-request tokens",
+                "Token and latency metrics require Gateway or serving usage telemetry",
+            ],
+        },
+        "unit_costs": unit_costs,
+        "metrics": {
+            "requests": usage["requests"],
+            "input_tokens": usage["input_tokens"],
+            "output_tokens": usage["output_tokens"],
+            "cached_tokens": usage["cached_tokens"],
+            "reasoning_tokens": usage["reasoning_tokens"],
+            "total_observed_tokens": total_tokens,
+            "avg_input_tokens_per_request": avg_input_tokens,
+            "avg_output_tokens_per_request": avg_output_tokens,
+            "output_token_share": round(output_share, 4) if output_share is not None else None,
+            "cache_read_ratio": round(cache_read_ratio, 4)
+            if cache_read_ratio is not None
+            else None,
+        },
+        "recommendations": recommendations,
+        "notes": [
+            "Cost bases and currencies are intentionally not combined.",
+            "Throughput capacity decisions need provider TTFT/ITL/TPS telemetry when available.",
+        ],
+    }
+
+
 def efficiency(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
     """Cross-pillar efficiency metrics and deterministic recommendations."""
 

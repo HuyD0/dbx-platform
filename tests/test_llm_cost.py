@@ -23,6 +23,7 @@ from dbx_platform.llm_cost import (
     store_source_health,
     summarize,
     time_series,
+    tokenomics_lens,
 )
 
 
@@ -217,6 +218,43 @@ def test_summary_compares_same_elapsed_days_without_mixing_basis():
     assert total["comparison_to"] == "2026-06-15"
 
 
+def test_tokenomics_lens_keeps_unit_costs_separate_and_flags_context_tax():
+    costs = normalize_cost_rows(
+        [_cost(cost=20)],
+        "system.billing.usage",
+        "DATABRICKS_LIST",
+    ) + normalize_cost_rows([_cost(cost=16)], "azure_cost_details", "AZURE_ACTUAL")
+    usage = normalize_usage_rows(
+        [
+            _usage(
+                requests=2,
+                input_tokens=20_000,
+                output_tokens=10_000,
+                cached_tokens=500,
+                reasoning_tokens=100,
+            )
+        ],
+        "gateway",
+    )
+
+    result = tokenomics_lens(costs, usage)
+
+    assert [
+        (row["cost_basis"], row["cost_per_1m_total_tokens"]) for row in result["unit_costs"]
+    ] == [
+        ("AZURE_ACTUAL", 533.33),
+        ("DATABRICKS_LIST", 666.67),
+    ]
+    assert result["scope"]["description"] == (
+        "Workspace-level LLM ledger coverage, not only platform-console app traffic"
+    )
+    assert result["scope"]["cost_sources"] == ["azure_cost_details", "system.billing.usage"]
+    assert result["scope"]["usage_sources"] == ["gateway"]
+    assert result["metrics"]["avg_input_tokens_per_request"] == 10_000
+    assert result["metrics"]["output_token_share"] == 0.3333
+    assert result["recommendations"][0]["type"] == "context-window-tax"
+
+
 def test_time_series_avoids_false_usage_allocation():
     costs = normalize_cost_rows(
         [_cost(cost=10)], "billing", "DATABRICKS_LIST"
@@ -305,8 +343,9 @@ def test_persisted_ledger_reads_are_exactly_workspace_scoped(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dbx_platform.llm_cost.run_query",
-        lambda _w, sql, _warehouse, params=None, **kwargs: calls.append((sql, params, kwargs))
-        or [],
+        lambda _w, sql, _warehouse, params=None, **kwargs: (
+            calls.append((sql, params, kwargs)) or []
+        ),
     )
 
     read_llm_cost_daily(object(), "warehouse", "main", "dbx_platform", "w1", "prod", 400)
