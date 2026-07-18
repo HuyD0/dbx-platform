@@ -1,0 +1,657 @@
+{
+ "datasets": [
+  {
+   "name": "ds_requests_30d",
+   "displayName": "ai_requests_30d",
+   "query": "SELECT SUM(requests) AS requests FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30)"
+  },
+  {
+   "name": "ds_errors_30d",
+   "displayName": "ai_errors_30d",
+   "query": "SELECT SUM(errors) AS errors FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30)"
+  },
+  {
+   "name": "ds_apps_30d",
+   "displayName": "ai_active_apps_30d",
+   "query": "SELECT COUNT(DISTINCT app) AS apps FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30)"
+  },
+  {
+   "name": "ds_daily_by_app",
+   "displayName": "ai_daily_requests_by_app",
+   "query": "SELECT usage_date, app, SUM(requests) AS requests FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 90) GROUP BY usage_date, app"
+  },
+  {
+   "name": "ds_error_rate",
+   "displayName": "ai_daily_error_rate_by_endpoint",
+   "query": "SELECT usage_date, endpoint_name, ROUND(SUM(errors) / GREATEST(SUM(requests), 1) * 100, 2) AS error_pct FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY usage_date, endpoint_name"
+  },
+  {
+   "name": "ds_tokens_by_app",
+   "displayName": "ai_tokens_by_app",
+   "query": "SELECT app, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(input_tokens) + SUM(output_tokens) AS total_tokens FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY app ORDER BY total_tokens DESC LIMIT 20"
+  },
+  {
+   "name": "ds_requesters",
+   "displayName": "ai_peak_requesters_by_endpoint",
+   "query": "SELECT endpoint_name, MAX(distinct_requesters) AS peak_daily_requesters, SUM(requests) AS requests FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.serving.endpoint_usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY endpoint_name ORDER BY requests DESC LIMIT 20"
+  },
+  {
+   "name": "ds_latency",
+   "displayName": "ai_p95_latency_by_endpoint",
+   "query": "SELECT usage_date, endpoint_name, MAX(p95_latency_ms) AS p95_latency_ms FROM {catalog}.{schema}.ai_app_monitoring WHERE source = 'system.ai_gateway.usage' AND usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY usage_date, endpoint_name"
+  },
+  {
+   "name": "ds_findings",
+   "displayName": "ai_monitor_findings",
+   "query": "SELECT run_ts, check_name, resource, reason, action FROM {catalog}.{schema}.platform_findings WHERE area = 'ai-monitor' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
+  }
+ ],
+ "pages": [
+  {
+   "name": "ai_app_monitoring",
+   "displayName": "AI App Monitoring",
+   "layout": [
+    {
+     "widget": {
+      "name": "w_requests_counter",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_requests_30d",
+         "fields": [
+          {
+           "name": "requests",
+           "expression": "SUM(`requests`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "requests",
+         "displayName": "Requests (30d)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "AI requests — last 30 days",
+        "showDescription": true,
+        "description": "All tracked serving endpoints (usage tracking must be enabled)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_errors_counter",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_errors_30d",
+         "fields": [
+          {
+           "name": "errors",
+           "expression": "SUM(`errors`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "errors",
+         "displayName": "Errors (30d)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Failed AI requests — last 30 days",
+        "showDescription": true,
+        "description": "Responses with HTTP status >= 400"
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_apps_counter",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_apps_30d",
+         "fields": [
+          {
+           "name": "apps",
+           "expression": "SUM(`apps`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "apps",
+         "displayName": "Active apps (30d)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Apps calling AI models",
+        "showDescription": true,
+        "description": "Distinct usage_context app tags; 'unallocated' means untagged callers"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_daily_by_app",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_daily_by_app",
+         "fields": [
+          {
+           "name": "usage_date",
+           "expression": "`usage_date`"
+          },
+          {
+           "name": "sum(requests)",
+           "expression": "SUM(`requests`)"
+          },
+          {
+           "name": "app",
+           "expression": "`app`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "usage_date",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "date"
+        },
+        "y": {
+         "fieldName": "sum(requests)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "requests"
+         },
+         "displayName": "requests"
+        },
+        "color": {
+         "fieldName": "app",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "app"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Daily AI requests by app — last 90 days",
+        "showDescription": true,
+        "description": "Stacked per calling app (usage_context attribution)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 4,
+      "width": 6,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_error_rate",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_error_rate",
+         "fields": [
+          {
+           "name": "usage_date",
+           "expression": "`usage_date`"
+          },
+          {
+           "name": "avg(error_pct)",
+           "expression": "AVG(`error_pct`)"
+          },
+          {
+           "name": "endpoint_name",
+           "expression": "`endpoint_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "usage_date",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "date"
+        },
+        "y": {
+         "fieldName": "avg(error_pct)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "error %"
+         },
+         "displayName": "error %"
+        },
+        "color": {
+         "fieldName": "endpoint_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "endpoint"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Daily error rate per endpoint — last 30 days",
+        "showDescription": true,
+        "description": "The ai-monitor/error-rate-spike check alerts on jumps vs the trailing average"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 9,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_latency",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_latency",
+         "fields": [
+          {
+           "name": "usage_date",
+           "expression": "`usage_date`"
+          },
+          {
+           "name": "max(p95_latency_ms)",
+           "expression": "MAX(`p95_latency_ms`)"
+          },
+          {
+           "name": "endpoint_name",
+           "expression": "`endpoint_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "usage_date",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "date"
+        },
+        "y": {
+         "fieldName": "max(p95_latency_ms)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "p95 ms"
+         },
+         "displayName": "p95 latency (ms)"
+        },
+        "color": {
+         "fieldName": "endpoint_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "endpoint"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "p95 latency per endpoint — last 30 days",
+        "showDescription": true,
+        "description": "From system.ai_gateway.usage (Beta); empty until the preview is enabled"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 9,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_tokens_by_app",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_tokens_by_app",
+         "fields": [
+          {
+           "name": "app",
+           "expression": "`app`"
+          },
+          {
+           "name": "input_tokens",
+           "expression": "`input_tokens`"
+          },
+          {
+           "name": "output_tokens",
+           "expression": "`output_tokens`"
+          },
+          {
+           "name": "total_tokens",
+           "expression": "`total_tokens`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "app",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 1,
+          "title": "app",
+          "displayName": "app"
+         },
+         {
+          "fieldName": "input_tokens",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 2,
+          "title": "input tokens",
+          "displayName": "input tokens"
+         },
+         {
+          "fieldName": "output_tokens",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 3,
+          "title": "output tokens",
+          "displayName": "output tokens"
+         },
+         {
+          "fieldName": "total_tokens",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 4,
+          "title": "total",
+          "displayName": "total"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Token consumption by app — last 30 days",
+        "showDescription": true,
+        "description": "Cost attribution basis; pair with the LLM cost dashboards"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 14,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_requesters",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_requesters",
+         "fields": [
+          {
+           "name": "endpoint_name",
+           "expression": "`endpoint_name`"
+          },
+          {
+           "name": "peak_daily_requesters",
+           "expression": "`peak_daily_requesters`"
+          },
+          {
+           "name": "requests",
+           "expression": "`requests`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "endpoint_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 1,
+          "title": "endpoint",
+          "displayName": "endpoint"
+         },
+         {
+          "fieldName": "peak_daily_requesters",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 2,
+          "title": "peak daily requesters",
+          "displayName": "peak daily requesters"
+         },
+         {
+          "fieldName": "requests",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 3,
+          "title": "requests (30d)",
+          "displayName": "requests (30d)"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Endpoints by traffic and requester spread",
+        "showDescription": true,
+        "description": "Distinct requester identities per day, peak over the window"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 14,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_findings_table",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_findings",
+         "fields": [
+          {
+           "name": "run_ts",
+           "expression": "`run_ts`"
+          },
+          {
+           "name": "check_name",
+           "expression": "`check_name`"
+          },
+          {
+           "name": "resource",
+           "expression": "`resource`"
+          },
+          {
+           "name": "reason",
+           "expression": "`reason`"
+          },
+          {
+           "name": "action",
+           "expression": "`action`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "run_ts",
+          "type": "datetime",
+          "displayAs": "datetime",
+          "visible": true,
+          "order": 1,
+          "title": "run",
+          "displayName": "run"
+         },
+         {
+          "fieldName": "check_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 2,
+          "title": "check",
+          "displayName": "check"
+         },
+         {
+          "fieldName": "resource",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 3,
+          "title": "resource",
+          "displayName": "resource"
+         },
+         {
+          "fieldName": "reason",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 4,
+          "title": "reason",
+          "displayName": "reason"
+         },
+         {
+          "fieldName": "action",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 5,
+          "title": "action",
+          "displayName": "action"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "AI monitoring findings",
+        "showDescription": true,
+        "description": "Error-rate spikes, usage-tracking gaps and idle endpoints"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 19,
+      "width": 6,
+      "height": 5
+     }
+    }
+   ]
+  }
+ ]
+}

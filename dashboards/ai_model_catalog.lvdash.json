@@ -1,0 +1,686 @@
+{
+ "datasets": [
+  {
+   "name": "ds_total_models",
+   "displayName": "ai_models_total",
+   "query": "SELECT COUNT(*) AS models FROM dbx_dev.dbx_platform.ai_model_catalog WHERE is_current AND entity_type != 'ACCOUNT'"
+  },
+  {
+   "name": "ds_models_by_source",
+   "displayName": "ai_models_by_source",
+   "query": "SELECT source, COUNT(*) AS models FROM dbx_dev.dbx_platform.ai_model_catalog WHERE is_current AND entity_type != 'ACCOUNT' GROUP BY source ORDER BY models DESC"
+  },
+  {
+   "name": "ds_models_by_provider",
+   "displayName": "ai_models_by_provider",
+   "query": "SELECT provider, COUNT(*) AS models FROM dbx_dev.dbx_platform.ai_model_catalog WHERE is_current AND entity_type != 'ACCOUNT' GROUP BY provider ORDER BY models DESC"
+  },
+  {
+   "name": "ds_key_auth_accounts",
+   "displayName": "azure_accounts_with_key_auth",
+   "query": "SELECT endpoint_name AS account, subscription_id, region, resource_id FROM dbx_dev.dbx_platform.ai_model_catalog WHERE is_current AND source = 'azure_openai' AND entity_type = 'ACCOUNT' AND key_auth_enabled ORDER BY account"
+  },
+  {
+   "name": "ds_access_levels",
+   "displayName": "ai_access_by_level",
+   "query": "SELECT source, access_level, COUNT(*) AS grants FROM dbx_dev.dbx_platform.ai_model_access WHERE is_current GROUP BY source, access_level ORDER BY grants DESC"
+  },
+  {
+   "name": "ds_top_principals",
+   "displayName": "ai_top_principals",
+   "query": "SELECT principal_name, source, COUNT(DISTINCT model_key) AS models FROM dbx_dev.dbx_platform.ai_model_access WHERE is_current AND access_level IN ('INVOKE', 'ADMIN', 'CAN_QUERY', 'CAN_MANAGE') GROUP BY principal_name, source ORDER BY models DESC LIMIT 20"
+  },
+  {
+   "name": "ds_model_inventory",
+   "displayName": "ai_model_inventory",
+   "query": "SELECT source, model_name, model_version, provider, entity_type, endpoint_name, status, region, owner, last_seen_at FROM dbx_dev.dbx_platform.ai_model_catalog WHERE is_current AND entity_type != 'ACCOUNT' ORDER BY source, model_name LIMIT 500"
+  },
+  {
+   "name": "ds_findings",
+   "displayName": "ai_catalog_findings",
+   "query": "SELECT run_ts, check_name, resource, reason, action FROM dbx_dev.dbx_platform.platform_findings WHERE area = 'ai-catalog' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
+  }
+ ],
+ "pages": [
+  {
+   "name": "ai_model_catalog",
+   "displayName": "AI Model Catalog",
+   "layout": [
+    {
+     "widget": {
+      "name": "w_total_models",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_total_models",
+         "fields": [
+          {
+           "name": "models",
+           "expression": "SUM(`models`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "models",
+         "displayName": "Models"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "AI models in the catalog",
+        "showDescription": true,
+        "description": "UC registered models, served entities and Azure deployments (current)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_models_by_source",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_models_by_source",
+         "fields": [
+          {
+           "name": "source",
+           "expression": "`source`"
+          },
+          {
+           "name": "sum(models)",
+           "expression": "SUM(`models`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "source",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "source"
+        },
+        "y": {
+         "fieldName": "sum(models)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "models"
+         },
+         "displayName": "models"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Models by source",
+        "showDescription": true,
+        "description": "databricks_uc / databricks_serving / azure_openai"
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_models_by_provider",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_models_by_provider",
+         "fields": [
+          {
+           "name": "provider",
+           "expression": "`provider`"
+          },
+          {
+           "name": "sum(models)",
+           "expression": "SUM(`models`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "provider",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "provider"
+        },
+        "y": {
+         "fieldName": "sum(models)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "models"
+         },
+         "displayName": "models"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Models by provider",
+        "showDescription": true,
+        "description": "databricks / OpenAI / AIServices and other deployment formats"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 0,
+      "width": 2,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_key_auth_table",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_key_auth_accounts",
+         "fields": [
+          {
+           "name": "account",
+           "expression": "`account`"
+          },
+          {
+           "name": "subscription_id",
+           "expression": "`subscription_id`"
+          },
+          {
+           "name": "region",
+           "expression": "`region`"
+          },
+          {
+           "name": "resource_id",
+           "expression": "`resource_id`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "account",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 1,
+          "title": "account",
+          "displayName": "account"
+         },
+         {
+          "fieldName": "subscription_id",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 2,
+          "title": "subscription",
+          "displayName": "subscription"
+         },
+         {
+          "fieldName": "region",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 3,
+          "title": "region",
+          "displayName": "region"
+         },
+         {
+          "fieldName": "resource_id",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 4,
+          "title": "resource",
+          "displayName": "resource"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Azure AI accounts with API-key auth enabled",
+        "showDescription": true,
+        "description": "Key-based access cannot be attributed to an identity; disable local auth"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 4,
+      "width": 6,
+      "height": 4
+     }
+    },
+    {
+     "widget": {
+      "name": "w_access_levels",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_access_levels",
+         "fields": [
+          {
+           "name": "access_level",
+           "expression": "`access_level`"
+          },
+          {
+           "name": "sum(grants)",
+           "expression": "SUM(`grants`)"
+          },
+          {
+           "name": "source",
+           "expression": "`source`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "access_level",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "access level"
+        },
+        "y": {
+         "fieldName": "sum(grants)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "axis": {
+          "title": "grants"
+         },
+         "displayName": "grants"
+        },
+        "color": {
+         "fieldName": "source",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "source"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Access grants by level",
+        "showDescription": true,
+        "description": "UC EXECUTE grants, endpoint ACLs and Azure RBAC, normalized"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 8,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_top_principals",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_top_principals",
+         "fields": [
+          {
+           "name": "principal_name",
+           "expression": "`principal_name`"
+          },
+          {
+           "name": "source",
+           "expression": "`source`"
+          },
+          {
+           "name": "models",
+           "expression": "`models`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "principal_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 1,
+          "title": "principal",
+          "displayName": "principal"
+         },
+         {
+          "fieldName": "source",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 2,
+          "title": "source",
+          "displayName": "source"
+         },
+         {
+          "fieldName": "models",
+          "type": "integer",
+          "displayAs": "number",
+          "visible": true,
+          "order": 3,
+          "title": "models reachable",
+          "displayName": "models reachable"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Principals with the broadest model access",
+        "showDescription": true,
+        "description": "Identities that can invoke or administer the most models"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 8,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "w_model_inventory",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_model_inventory",
+         "fields": [
+          {
+           "name": "source",
+           "expression": "`source`"
+          },
+          {
+           "name": "model_name",
+           "expression": "`model_name`"
+          },
+          {
+           "name": "model_version",
+           "expression": "`model_version`"
+          },
+          {
+           "name": "provider",
+           "expression": "`provider`"
+          },
+          {
+           "name": "entity_type",
+           "expression": "`entity_type`"
+          },
+          {
+           "name": "endpoint_name",
+           "expression": "`endpoint_name`"
+          },
+          {
+           "name": "status",
+           "expression": "`status`"
+          },
+          {
+           "name": "owner",
+           "expression": "`owner`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "source",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 1,
+          "title": "source",
+          "displayName": "source"
+         },
+         {
+          "fieldName": "model_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 2,
+          "title": "model",
+          "displayName": "model"
+         },
+         {
+          "fieldName": "model_version",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 3,
+          "title": "version",
+          "displayName": "version"
+         },
+         {
+          "fieldName": "provider",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 4,
+          "title": "provider",
+          "displayName": "provider"
+         },
+         {
+          "fieldName": "entity_type",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 5,
+          "title": "type",
+          "displayName": "type"
+         },
+         {
+          "fieldName": "endpoint_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 6,
+          "title": "endpoint / account",
+          "displayName": "endpoint / account"
+         },
+         {
+          "fieldName": "status",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 7,
+          "title": "status",
+          "displayName": "status"
+         },
+         {
+          "fieldName": "owner",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 8,
+          "title": "owner",
+          "displayName": "owner"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Model inventory (all sources)",
+        "showDescription": true,
+        "description": "Every current model across Databricks and Azure, one row per model"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 13,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "w_findings_table",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_findings",
+         "fields": [
+          {
+           "name": "run_ts",
+           "expression": "`run_ts`"
+          },
+          {
+           "name": "check_name",
+           "expression": "`check_name`"
+          },
+          {
+           "name": "resource",
+           "expression": "`resource`"
+          },
+          {
+           "name": "reason",
+           "expression": "`reason`"
+          },
+          {
+           "name": "action",
+           "expression": "`action`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "run_ts",
+          "type": "datetime",
+          "displayAs": "datetime",
+          "visible": true,
+          "order": 1,
+          "title": "run",
+          "displayName": "run"
+         },
+         {
+          "fieldName": "check_name",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 2,
+          "title": "check",
+          "displayName": "check"
+         },
+         {
+          "fieldName": "resource",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 3,
+          "title": "resource",
+          "displayName": "resource"
+         },
+         {
+          "fieldName": "reason",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 4,
+          "title": "reason",
+          "displayName": "reason"
+         },
+         {
+          "fieldName": "action",
+          "type": "string",
+          "displayAs": "string",
+          "visible": true,
+          "order": 5,
+          "title": "action",
+          "displayName": "action"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "AI catalog findings",
+        "showDescription": true,
+        "description": "Key-auth accounts, broad-scope roles, broad UC grants, open endpoint ACLs"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 19,
+      "width": 6,
+      "height": 5
+     }
+    }
+   ]
+  }
+ ]
+}

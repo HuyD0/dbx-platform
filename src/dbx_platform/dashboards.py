@@ -30,6 +30,8 @@ TEMPLATE_NAMES = (
     "lineage_catalog_utilization",
     "azure_cost_forecast",
     "platform_command_center",
+    "ai_model_catalog",
+    "ai_app_monitoring",
 )
 
 REQUIRED_TABLES = (
@@ -37,6 +39,9 @@ REQUIRED_TABLES = (
     "warehouse_reference",
     "platform_findings",
     "platform_digest",
+    "ai_model_catalog",
+    "ai_model_access",
+    "ai_app_monitoring",
 )
 REQUIRED_FUNCTIONS = (
     "job_type_from_sku",
@@ -144,6 +149,8 @@ def build_team_name_function_sql(catalog: str, schema: str, tag_keys: list[str])
 def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tuple[str, str]]:
     """All (description, sql) statements needed by the dashboards. Pure function."""
     # Same DDL the ingest/forecast jobs use — one code path, no schema drift.
+    from dbx_platform.ai_catalog import create_access_table_sql, create_catalog_table_sql
+    from dbx_platform.ai_monitor import create_monitoring_table_sql
     from dbx_platform.azure_cost import (
         create_detail_table_sql as azure_cost_details_ddl,
     )
@@ -158,6 +165,12 @@ def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tup
         (
             f"table {fq}.azure_cost_details",
             azure_cost_details_ddl(catalog, schema),
+        ),
+        (f"table {fq}.ai_model_catalog", create_catalog_table_sql(catalog, schema)),
+        (f"table {fq}.ai_model_access", create_access_table_sql(catalog, schema)),
+        (
+            f"table {fq}.ai_app_monitoring",
+            create_monitoring_table_sql(catalog, schema),
         ),
         (f"table {fq}.cost_features", create_features_table_sql(catalog, schema)),
         (f"table {fq}.cost_forecasts", create_forecasts_table_sql(catalog, schema)),

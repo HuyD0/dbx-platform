@@ -82,6 +82,54 @@ def collect_findings(
         "cost/llm-efficiency",
         lambda: _llm_efficiency_findings(w, warehouse_id, days),
     )
+
+    # The ai-catalog / ai-monitor collectors re-classify from the tables their
+    # daily sync jobs persist, so the digest needs no Azure credential. The
+    # classifiers emit multiple 'area/check' keys, hence the dict merge; the
+    # finding_ids match the daily-stored rows, so store_findings dedupes.
+    def collect_area(label: str, fn) -> None:
+        try:
+            for key, rows in fn().items():
+                findings[key] = rows
+        except Exception as e:  # noqa: BLE001 — digest must survive any one check
+            skipped[label] = str(e)
+
+    from dbx_platform import ai_catalog, ai_monitor
+
+    workspace_id = str(w.get_workspace_id())
+    collect_area(
+        "ai-catalog/*",
+        lambda: ai_catalog.classify_ai_catalog(
+            ai_catalog.read_catalog(
+                w, warehouse_id, s.dashboard_catalog, s.dashboard_schema,
+                workspace_id, s.environment,
+            ),
+            ai_catalog.read_access(
+                w, warehouse_id, s.dashboard_catalog, s.dashboard_schema,
+                workspace_id, s.environment,
+            ),
+        ),
+    )
+
+    def _ai_monitor_findings() -> dict[str, list[dict]]:
+        rows = ai_monitor.read_monitoring(
+            w, warehouse_id, s.dashboard_catalog, s.dashboard_schema,
+            workspace_id, s.environment, days,
+        )
+        if not any(r.get("source") == ai_monitor.ENDPOINT_USAGE_SOURCE for r in rows):
+            return {}
+        return ai_monitor.classify_ai_monitoring(
+            rows,
+            ml.fetch_serving_endpoints(w),
+            ml.serving_cost(w, warehouse_id, days),
+            now_ms,
+            spike_pct=s.ai_error_spike_pct,
+            min_requests=s.ai_error_min_requests,
+            min_error_rate_pct=s.ai_error_min_rate_pct,
+            stale_days=s.serving_stale_days,
+        )
+
+    collect_area("ai-monitor/*", _ai_monitor_findings)
     return findings, skipped
 
 
@@ -278,6 +326,10 @@ def _pillar(area: str, check: str) -> str:
         return "COST"
     if area == "ml" and ("serving" in check or "endpoint" in check):
         return "PERFORMANCE"
+    if area == "ai-monitor":
+        return "PERFORMANCE"
+    if area == "ai-catalog":
+        return "SECURITY"
     return "RISK"
 
 

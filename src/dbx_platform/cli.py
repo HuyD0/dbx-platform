@@ -1057,6 +1057,457 @@ def cmd_ml_vector_search_audit(args) -> int:
     return 0
 
 
+# --- ai-catalog --------------------------------------------------------------------
+
+
+def cmd_ai_catalog_sync(args) -> int:
+    """Snapshot AI models + the identities that can access them into UC tables."""
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not args.no_store and not _verify_governed_write(args, w, s):
+        return 2
+    from dbx_platform import ai_catalog, digest, llm_cost, secrets
+
+    warehouse = _warehouse_id(args, s)
+    workspace_id = str(w.get_workspace_id())
+    environment = getattr(args, "environment", s.environment)
+    notes: list[str] = []
+    catalog_rows: list[dict] = []
+    access_rows: list[dict] = []
+    refreshed: list[str] = []
+    source_health: list[dict] = []
+
+    try:
+        models, truncated = ml.fetch_registered_models(w, None, None, s.ml_max_models)
+        grants, grant_errors = ai_catalog.fetch_model_grants(
+            w, [m["full_name"] for m in models]
+        )
+        catalog_rows.extend(ai_catalog.normalize_registered_models(models))
+        access_rows.extend(ai_catalog.normalize_uc_grants(grants))
+        refreshed.append("databricks_uc")
+        uc_status = "partial" if (truncated or grant_errors) else "available"
+        uc_note = "UC registered models and their grants"
+        if truncated:
+            uc_note += f"; listing capped at {s.ml_max_models} models"
+        if grant_errors:
+            uc_note += f"; {grant_errors} models had unreadable grants"
+        uc_rows = len(models)
+    except Exception as error:  # noqa: BLE001 - one surface never kills the sync
+        uc_status, uc_rows = "unavailable", 0
+        uc_note = f"UC model listing unavailable: {error.__class__.__name__}"
+        notes.append(f"databricks_uc unavailable ({error.__class__.__name__})")
+    source_health.append(
+        llm_cost.coverage_record(
+            "UC registered models",
+            uc_status,
+            source_key="ai-catalog-databricks-uc",
+            source_type="inventory",
+            freshness="on sync",
+            retention_days=None,
+            row_count=uc_rows,
+            available_metrics=["models", "grants"],
+            notes=uc_note,
+        )
+    )
+
+    try:
+        endpoints = ml.fetch_serving_endpoints(w)
+        acls, acl_errors = ai_catalog.fetch_endpoint_acls(w, endpoints)
+        catalog_rows.extend(ai_catalog.normalize_serving_entities(endpoints))
+        access_rows.extend(ai_catalog.normalize_endpoint_acls(acls))
+        refreshed.append("databricks_serving")
+        serving_status = "partial" if acl_errors else "available"
+        serving_note = "Serving endpoints, served entities and workspace ACLs"
+        if acl_errors:
+            serving_note += f"; {acl_errors} endpoints had unreadable ACLs"
+        serving_rows = len(endpoints)
+    except Exception as error:  # noqa: BLE001 - one surface never kills the sync
+        serving_status, serving_rows = "unavailable", 0
+        serving_note = f"Serving endpoint listing unavailable: {error.__class__.__name__}"
+        notes.append(f"databricks_serving unavailable ({error.__class__.__name__})")
+    source_health.append(
+        llm_cost.coverage_record(
+            "Model serving endpoints",
+            serving_status,
+            source_key="ai-catalog-databricks-serving",
+            source_type="inventory",
+            freshness="on sync",
+            retention_days=None,
+            row_count=serving_rows,
+            available_metrics=["served_entities", "acls"],
+            notes=serving_note,
+        )
+    )
+
+    subscriptions = ai_catalog.parse_subscriptions(
+        args.subscriptions
+        if args.subscriptions is not None
+        else s.ai_catalog_subscriptions
+    )
+    scope_note = (
+        f"subscriptions: {', '.join(subscriptions)}"
+        if subscriptions
+        else "all subscriptions visible to the identity"
+    )
+    try:
+        cred = secrets.get_credential(args.service_credential or None)
+        accounts = ai_catalog.fetch_resource_graph(
+            cred, ai_catalog.AI_ACCOUNTS_QUERY, subscriptions
+        )
+        deployments = ai_catalog.fetch_resource_graph(
+            cred, ai_catalog.AI_DEPLOYMENTS_QUERY, subscriptions
+        )
+        azure_status = "available"
+        azure_note = scope_note
+        if accounts and not deployments:
+            deployments = ai_catalog.fetch_deployments_via_arm(
+                cred, [str(a.get("id") or "").lower() for a in accounts]
+            )
+            azure_status = "partial"
+            azure_note += "; deployments listed via ARM fallback (absent from Resource Graph)"
+        assignments = ai_catalog.fetch_resource_graph(
+            cred,
+            ai_catalog.AI_ROLE_ASSIGNMENTS_QUERY,
+            subscriptions,
+            authorization_scoped=True,
+        )
+        accounts_by_id = {str(a.get("id") or "").lower(): a for a in accounts}
+        catalog_rows.extend(ai_catalog.normalize_azure_accounts(accounts))
+        catalog_rows.extend(
+            ai_catalog.normalize_azure_deployments(deployments, accounts_by_id)
+        )
+        access_rows.extend(
+            ai_catalog.match_assignments_to_accounts(assignments, accounts)
+        )
+        refreshed.append("azure_openai")
+        azure_rows = len(accounts) + len(deployments)
+    except Exception as error:  # noqa: BLE001 - Azure integration is optional
+        azure_status, azure_rows = "unavailable", 0
+        azure_note = (
+            f"Azure Resource Graph unavailable ({error.__class__.__name__}); {scope_note}"
+        )
+        notes.append(f"azure_openai unavailable ({error.__class__.__name__})")
+    source_health.append(
+        llm_cost.coverage_record(
+            "Azure AI resources (Resource Graph)",
+            azure_status,
+            source_key="ai-catalog-azure-arg",
+            source_type="inventory",
+            freshness="on sync",
+            retention_days=None,
+            row_count=azure_rows,
+            available_metrics=["accounts", "deployments", "role_assignments"],
+            notes=azure_note,
+        )
+    )
+
+    findings = {
+        key: rows
+        for key, rows in ai_catalog.classify_ai_catalog(catalog_rows, access_rows).items()
+        if ai_catalog.CHECK_SOURCES[key] in refreshed
+    }
+    counts = [{"check": k, "findings": len(v)} for k, v in sorted(findings.items())]
+
+    if args.no_store:
+        emit(args, "AI catalog sync (preview, not stored)", counts, notes)
+        return 0
+    if not refreshed:
+        raise RuntimeError(
+            "No catalog source refreshed; canonical snapshot left unchanged."
+        )
+    stored_models = ai_catalog.store_catalog(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        catalog_rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        sources=refreshed,
+    )
+    stored_access = ai_catalog.store_access(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        access_rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        sources=refreshed,
+    )
+    stored_findings = 0
+    if findings:
+        stored_findings = digest.store_findings(
+            w,
+            warehouse,
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            findings,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+    health_rows = llm_cost.store_source_health(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        source_health,
+        workspace_id=workspace_id,
+        environment=environment,
+    )
+    emit(
+        args,
+        "AI catalog sync",
+        [
+            {
+                "model_rows": stored_models,
+                "access_rows": stored_access,
+                "finding_rows": stored_findings,
+                "source_health_rows": health_rows,
+                "catalog_table": (
+                    f"{s.dashboard_catalog}.{s.dashboard_schema}.ai_model_catalog"
+                ),
+                "access_table": (
+                    f"{s.dashboard_catalog}.{s.dashboard_schema}.ai_model_access"
+                ),
+            }
+        ],
+        notes,
+    )
+    emit(args, "AI catalog findings", counts)
+    return 0
+
+
+def cmd_ai_catalog_report(args) -> int:
+    from dbx_platform import ai_catalog
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    rows = ai_catalog.read_catalog(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        str(w.get_workspace_id()),
+        s.environment,
+        source=args.source,
+    )
+    scope = args.source or "all sources"
+    emit(args, f"AI model catalog — {scope}", rows)
+    return 0
+
+
+def cmd_ai_catalog_access(args) -> int:
+    from dbx_platform import ai_catalog
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    rows = ai_catalog.read_access(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        str(w.get_workspace_id()),
+        s.environment,
+        model_key=args.model_key,
+        principal=args.principal,
+    )
+    emit(args, "AI model access — who can reach which model", rows)
+    return 0
+
+
+# --- ai-monitor --------------------------------------------------------------------
+
+
+def cmd_ai_monitor_rollup(args) -> int:
+    """Roll per-request serving telemetry up to daily per-endpoint/app rows."""
+
+    from datetime import date, timedelta
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not args.no_store and not _verify_governed_write(args, w, s):
+        return 2
+    from dbx_platform import ai_monitor, digest, llm_cost
+
+    warehouse = _warehouse_id(args, s)
+    workspace_id = str(w.get_workspace_id())
+    environment = getattr(args, "environment", s.environment)
+    days = min(args.days if args.days is not None else 7, 90)
+    window_end = date.today()
+    window_start = window_end - timedelta(days=days)
+    notes: list[str] = []
+    rows: list[dict] = []
+    refreshed: list[str] = []
+    source_health: list[dict] = []
+
+    try:
+        endpoint_rows = ai_monitor.endpoint_usage_daily(w, warehouse, days)
+        rows.extend(endpoint_rows)
+        refreshed.append(ai_monitor.ENDPOINT_USAGE_SOURCE)
+        endpoint_status = "available"
+        endpoint_note = "Per-request usage for endpoints with usage tracking enabled"
+    except Exception as error:  # noqa: BLE001 - feature detection
+        endpoint_rows = []
+        endpoint_status = "unavailable"
+        endpoint_note = f"Serving usage unavailable: {error.__class__.__name__}"
+        notes.append(f"system.serving.endpoint_usage unavailable ({error.__class__.__name__})")
+    source_health.append(
+        llm_cost.coverage_record(
+            "Serving endpoint usage",
+            endpoint_status,
+            source_key="ai-monitor-endpoint-usage",
+            source_type="usage",
+            freshness="throughout the day",
+            retention_days=90,
+            coverage_start=(
+                window_start.isoformat() if endpoint_status != "unavailable" else None
+            ),
+            coverage_end=(
+                window_end.isoformat() if endpoint_status != "unavailable" else None
+            ),
+            row_count=len(endpoint_rows),
+            available_metrics=[
+                "requests", "errors", "input_tokens", "output_tokens",
+                "distinct_requesters",
+            ],
+            notes=endpoint_note,
+        )
+    )
+
+    try:
+        gateway_rows = ai_monitor.gateway_usage_daily(w, warehouse, days)
+        rows.extend(gateway_rows)
+        refreshed.append(ai_monitor.GATEWAY_USAGE_SOURCE)
+        gateway_status = "available"
+        gateway_note = "Beta; adds latency and request-tag attribution"
+    except Exception as error:  # noqa: BLE001 - optional Beta source
+        gateway_rows = []
+        gateway_status = "unavailable"
+        gateway_note = f"Optional Beta source: {error.__class__.__name__}"
+        notes.append(f"system.ai_gateway.usage unavailable ({error.__class__.__name__})")
+    source_health.append(
+        llm_cost.coverage_record(
+            "Unity AI Gateway usage",
+            gateway_status,
+            source_key="ai-monitor-ai-gateway",
+            source_type="usage",
+            freshness="throughout the day",
+            retention_days=365,
+            coverage_start=(
+                window_start.isoformat() if gateway_status != "unavailable" else None
+            ),
+            coverage_end=(
+                window_end.isoformat() if gateway_status != "unavailable" else None
+            ),
+            row_count=len(gateway_rows),
+            available_metrics=["requests", "errors", "p95_latency_ms"],
+            notes=gateway_note,
+        )
+    )
+
+    findings: dict[str, list[dict]] = {}
+    if ai_monitor.ENDPOINT_USAGE_SOURCE in refreshed:
+        try:
+            endpoints = ml.fetch_serving_endpoints(w)
+        except Exception as error:  # noqa: BLE001 - degrade the config-joined checks
+            endpoints = []
+            notes.append(f"endpoint listing unavailable ({error.__class__.__name__})")
+        try:
+            cost_rows = ml.serving_cost(w, warehouse, days)
+        except Exception as error:  # noqa: BLE001 - degrade the tracking-gap check
+            cost_rows = []
+            notes.append(f"serving cost unavailable ({error.__class__.__name__})")
+        findings = ai_monitor.classify_ai_monitoring(
+            rows,
+            endpoints,
+            cost_rows,
+            _now_ms(),
+            spike_pct=s.ai_error_spike_pct,
+            min_requests=s.ai_error_min_requests,
+            min_error_rate_pct=s.ai_error_min_rate_pct,
+            stale_days=s.serving_stale_days,
+        )
+    else:
+        notes.append("findings skipped: the serving usage source did not refresh")
+    counts = [{"check": k, "findings": len(v)} for k, v in sorted(findings.items())]
+
+    if args.no_store:
+        emit(args, "AI monitoring rollup (preview, not stored)", counts, notes)
+        return 0
+    if not refreshed:
+        raise RuntimeError("No usage source refreshed; canonical rollup left unchanged.")
+    stored = ai_monitor.store_monitoring(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        window_start=window_start.isoformat(),
+        window_end=window_end.isoformat(),
+        sources=refreshed,
+    )
+    stored_findings = 0
+    if findings:
+        stored_findings = digest.store_findings(
+            w,
+            warehouse,
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            findings,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+    health_rows = llm_cost.store_source_health(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        source_health,
+        workspace_id=workspace_id,
+        environment=environment,
+    )
+    emit(
+        args,
+        f"AI monitoring rollup — last {days}d",
+        [
+            {
+                "usage_rows": stored,
+                "finding_rows": stored_findings,
+                "source_health_rows": health_rows,
+                "table": (
+                    f"{s.dashboard_catalog}.{s.dashboard_schema}.ai_app_monitoring"
+                ),
+            }
+        ],
+        notes,
+    )
+    emit(args, "AI monitoring findings", counts)
+    return 0
+
+
+def cmd_ai_monitor_report(args) -> int:
+    from dbx_platform import ai_monitor
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = ai_monitor.report(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        str(w.get_workspace_id()),
+        s.environment,
+        days,
+    )
+    emit(args, f"AI app usage by app/endpoint — last {days}d", rows)
+    return 0
+
+
 # --- dashboards --------------------------------------------------------------------
 
 
@@ -1512,6 +1963,72 @@ def build_parser() -> argparse.ArgumentParser:
         help="Vector search endpoints: no indexes / unhealthy",
     )
     x.set_defaults(func=cmd_ml_vector_search_audit)
+
+    # ai-catalog
+    pac = sub.add_parser(
+        "ai-catalog",
+        help="Unified AI model catalog: models + identities (Databricks + Azure)",
+    ).add_subparsers(dest="command")
+    x = pac.add_parser(
+        "sync",
+        parents=[common, governed_write],
+        help="Snapshot models and access into ai_model_catalog/ai_model_access",
+    )
+    x.add_argument(
+        "--service-credential",
+        default=None,
+        help="UC service credential name for keyless Azure auth",
+    )
+    x.add_argument(
+        "--subscriptions",
+        default=None,
+        help="Comma-separated Azure subscription IDs to inventory "
+             "(default: DBX_PLATFORM_AI_CATALOG_SUBSCRIPTIONS; empty = all "
+             "subscriptions the identity can read)",
+    )
+    x.add_argument(
+        "--no-store",
+        action="store_true",
+        help="Read-only preview; skip table writes and findings",
+    )
+    x.set_defaults(func=cmd_ai_catalog_sync)
+    x = pac.add_parser("report", parents=[common], help="Cataloged models by source")
+    x.add_argument(
+        "--source",
+        default=None,
+        choices=["databricks_uc", "databricks_serving", "azure_openai"],
+    )
+    x.set_defaults(func=cmd_ai_catalog_report)
+    x = pac.add_parser("access", parents=[common], help="Who can access which model")
+    x.add_argument("--model-key", default=None, help="Filter to one model_key")
+    x.add_argument("--principal", default=None, help="Filter to one principal")
+    x.set_defaults(func=cmd_ai_catalog_access)
+
+    # ai-monitor
+    pam = sub.add_parser(
+        "ai-monitor",
+        help="Production AI app monitoring from serving system tables",
+    ).add_subparsers(dest="command")
+    x = pam.add_parser(
+        "rollup",
+        parents=[common, governed_write],
+        help="Roll up per-day endpoint/app usage into ai_app_monitoring",
+    )
+    x.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Window to reprocess; default 7, capped at the 90d source retention",
+    )
+    x.add_argument(
+        "--no-store",
+        action="store_true",
+        help="Read-only preview; skip table writes and findings",
+    )
+    x.set_defaults(func=cmd_ai_monitor_rollup)
+    x = pam.add_parser("report", parents=[common], help="Per-app usage and error summary")
+    x.add_argument("--days", type=int, default=None)
+    x.set_defaults(func=cmd_ai_monitor_report)
 
     # dashboards
     pd = sub.add_parser("dashboards", help="AI/BI dashboards").add_subparsers(dest="command")

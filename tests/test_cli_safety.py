@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from dbx_platform import (
+    ai_catalog,
+    ai_monitor,
     azure_cost,
     dashboards,
     forecast_features,
@@ -122,6 +124,9 @@ def test_dashboard_and_volume_library_entrypoints_are_also_disabled():
 
 def test_scheduled_store_functions_never_execute_ddl():
     for function in (
+        ai_catalog.store_catalog,
+        ai_catalog.store_access,
+        ai_monitor.store_monitoring,
         azure_cost.store_costs,
         azure_cost.store_detail_costs,
         forecast_features.store_features,
@@ -227,6 +232,8 @@ def test_llm_rollup_persists_feature_health_for_zero_and_unavailable_sources(
         ["forecast", "monitor"],
         ["report", "operational-findings"],
         ["report", "ai-digest"],
+        ["ai-catalog", "sync"],
+        ["ai-monitor", "rollup"],
     ],
 )
 def test_direct_stateful_or_costly_cli_run_requires_governed_job_context(

@@ -49,7 +49,7 @@ These exist; nothing to do.
 | Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (runtime controller) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor) |
 
 The keyless CI chain is proven. Mission Control adds a dedicated warehouse,
-eleven PAUSED report schedules, manual approval-gated training, and out-of-band
+thirteen PAUSED report schedules, manual approval-gated training, and out-of-band
 executor Jobs; enablement is proposal-only until the prerequisites below exist.
 
 Workspace admin is not the target operating model. Deploy into the dedicated
@@ -285,3 +285,65 @@ First-run order (stateful/costly manual runs go through Action Center):
 | `azure-cost pull` → 403 with the Cost Management Reader hint | The role assignment above is missing, on the wrong identity, or still propagating (can take a few minutes). |
 | `azure-cost pull` → `DefaultAzureCredential` errors inside a job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |
 | Forecast training → `need >= N days of features` | Not enough approved/scheduled billing history exists; complete the backfill action first. |
+
+---
+
+## Azure Resource Graph access (AI catalog)
+
+The `ai-catalog-sync` job inventories Azure AI Foundry / Azure OpenAI
+accounts, model deployments, and the RBAC role assignments that grant access
+to them, via **Azure Resource Graph** (plus a per-account ARM fallback for
+deployments). ARG only returns resources the caller can read, so this is the
+repo's second read-only ARM RBAC grant, same identity and pattern as Cost
+Management Reader above:
+
+- **Role:** `Reader` — sufficient for ARG queries, resource enumeration, and
+  reading role assignments; it cannot change anything.
+- **Identity:** the access connector's system-assigned identity behind the
+  `dbx_dev` UC service credential (principal ID
+  `d89926fd-c4bc-4d48-a52f-0119971d4a72`) — the same identity that holds Cost
+  Management Reader.
+- **Scope:** one grant **per subscription listed in
+  `BUNDLE_VAR_azure_ai_subscriptions`** (least privilege, recommended):
+
+```bash
+az role assignment create \
+  --assignee-object-id d89926fd-c4bc-4d48-a52f-0119971d4a72 \
+  --assignee-principal-type ServicePrincipal \
+  --role "Reader" \
+  --scope "/subscriptions/<subscription-id>"   # repeat per listed subscription
+```
+
+Leaving `azure_ai_subscriptions` empty switches the sync to "every
+subscription the identity can read" — useful with a management-group-scope
+grant instead:
+
+```bash
+az role assignment create \
+  --assignee-object-id d89926fd-c4bc-4d48-a52f-0119971d4a72 \
+  --assignee-principal-type ServicePrincipal \
+  --role "Reader" \
+  --scope "/providers/Microsoft.Management/managementGroups/<mg-id>"
+```
+
+Then wire the bundle variables and deploy:
+
+```bash
+export BUNDLE_VAR_azure_ai_subscriptions=ea936670-dda1-4884-8467-49c225bf3e83
+export BUNDLE_VAR_azure_service_credential=dbx_dev
+databricks bundle deploy -t prod
+```
+
+The job identity also needs `ACCESS` on the UC service credential and the
+`ai_model_catalog` / `ai_model_access` grants in
+[service-principal.md](service-principal.md). The companion
+`ai-monitor-rollup` job needs no ARM RBAC at all — it reads
+`system.serving.*` (already in the reporter grant set) and, when the Beta is
+enabled, `system.ai_gateway.usage`.
+
+| Symptom | Cause / fix |
+|---|---|
+| `ai-catalog sync` → 403 with the Reader hint | The Reader assignment above is missing on a listed subscription, or still propagating. |
+| Sync succeeds but finds zero Azure accounts | The identity has no Reader grant on the listed subscriptions (ARG silently returns only readable resources), or the subscription list is wrong. |
+| Role assignments show DIRECT/RG/SUBSCRIPTION but never MANAGEMENT_GROUP | Expected when scoping to a subscription list only if the MG has no AI-relevant assignments; the sync already widens the scope filter (`AtScopeAboveAndBelow`) to include inherited ones. |
+| `DefaultAzureCredential` errors inside the job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |

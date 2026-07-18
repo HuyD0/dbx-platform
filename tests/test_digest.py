@@ -152,3 +152,28 @@ def test_store_digest_forwards_exact_workspace_environment_scope(monkeypatch):
         "workspace_id": "workspace-1",
         "environment": "dev",
     }
+
+
+def test_ai_areas_map_to_pillars_and_keep_explicit_severity():
+    rows = flatten_findings(
+        {
+            "ai-catalog/azure-key-auth": [
+                {"name": "foundry-prod", "resource_id": "/subs/x/acct",
+                 "resource_type": "AI_ACCOUNT",
+                 "reason": "key auth enabled",
+                 "action": "disable-key-auth (manual)", "severity": "HIGH"}
+            ],
+            "ai-monitor/idle-endpoint": [
+                {"name": "old-api", "reason": "no requests in 30d",
+                 "resource_type": "SERVING_ENDPOINT",
+                 "action": "review-or-delete (manual)", "severity": "LOW"}
+            ],
+        }
+    )
+    by_area = {row["area"]: row for row in rows}
+    assert by_area["ai-catalog"]["pillar"] == "SECURITY"
+    assert by_area["ai-catalog"]["severity"] == "HIGH"
+    assert by_area["ai-monitor"]["pillar"] == "PERFORMANCE"
+    assert by_area["ai-monitor"]["severity"] == "LOW"
+    affected = json.loads(by_area["ai-monitor"]["affected_resources_json"])
+    assert affected[0]["resource_type"] == "SERVING_ENDPOINT"

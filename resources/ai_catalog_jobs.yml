@@ -1,0 +1,64 @@
+# Daily unified AI model catalog snapshot. The sync writes only from its
+# periodic run or an exact executor-approved manual run; report/access remain
+# read-only. Auth: the job identity resolves a UC service credential (keyless)
+# and needs Reader on every subscription in var.azure_ai_subscriptions (or on
+# a management group for the all-visible mode) — see docs/cloud-setup.md.
+resources:
+  jobs:
+    ai_catalog_sync:
+      name: "[dbx-platform] ai-catalog-sync"
+      description: >
+        Snapshots every AI model and the identities that can access it into
+        <catalog>.<schema>.ai_model_catalog / ai_model_access: Unity Catalog
+        registered models with their grants, serving endpoints with their
+        ACLs, and Azure AI Foundry / Azure OpenAI accounts, deployments and
+        RBAC role assignments via Azure Resource Graph. Disappeared models
+        and grants are soft-resolved, never deleted. Writes only to
+        platform-owned tables.
+      schedule:
+        quartz_cron_expression: "0 45 6 * * ?"  # daily 06:45 UTC, after azure-cost
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: sync
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ai-catalog", "sync",
+               "--subscriptions", "${var.azure_ai_subscriptions}",
+               "--service-credential", "${var.azure_service_credential}",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

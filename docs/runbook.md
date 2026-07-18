@@ -78,7 +78,7 @@ bypass any durable checks.
 The exact managed scope is generated from bundle output:
 
 - Platform Console app;
-- eleven declared schedules;
+- thirteen declared schedules;
 - dedicated `[dbx-platform] mission-control` 2X-Small serverless warehouse.
 
 Protected/out of scope:
@@ -227,6 +227,25 @@ and agent deployment are not general executor actions in v1.
 `agents/platform_agent/deploy_agent.py` intentionally exits without logging,
 registering, or deploying. Add a narrowly scoped, tested model-deploy action
 before enabling it.
+
+### AI catalog & monitoring
+
+The `ai-catalog-sync` and `ai-monitor-rollup` schedules only read and append;
+every remediation below is a manual owner action:
+
+- **`disable-key-auth (manual)`** — an Azure AI account allows API-key access
+  (`disableLocalAuth=false`), so model calls cannot be attributed to an
+  identity. The account owner sets `disableLocalAuth=true` (Entra-only auth)
+  after confirming no caller still uses keys; roll keys first if unsure.
+- **`review-model-grant (manual)` / `review-endpoint-acl (manual)`** — a
+  broad group (`account users`, `users`) can invoke a model or query an
+  endpoint. The object owner narrows the grant to the intended team group.
+- **`narrow-role-scope (manual)`** — an AI-capable RBAC role is assigned at
+  subscription or management-group scope. Reassign it at the resource or
+  resource-group scope instead.
+- **`enable-usage-tracking (manual)`** — an endpoint bills serving cost but
+  emits no usage telemetry. The endpoint owner enables AI Gateway usage
+  tracking so production traffic becomes observable.
 
 ## LLM Cost & Value operations
 

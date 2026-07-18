@@ -273,6 +273,8 @@ def test_every_scheduled_stateful_task_passes_exact_run_context():
         ("forecast", "monitor"),
         ("report", "operational-findings"),
         ("report", "ai-digest"),
+        ("ai-catalog", "sync"),
+        ("ai-monitor", "rollup"),
     }
     found = set()
     required = {
@@ -338,4 +340,4 @@ def test_every_scheduled_job_grants_only_exact_runtime_and_run_permissions():
                 "${var.action_executor_service_principal_name}",
                 "CAN_MANAGE_RUN",
             ) in grants
-    assert len(scheduled) == 11
+    assert len(scheduled) == 13

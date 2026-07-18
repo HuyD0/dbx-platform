@@ -47,3 +47,15 @@ resources:
       file_path: ../dashboards/platform_command_center.lvdash.json
       warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
+
+    ai_model_catalog:
+      display_name: "[dbx-platform] AI Model Catalog"
+      file_path: ../dashboards/ai_model_catalog.lvdash.json
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
+      embed_credentials: false
+
+    ai_app_monitoring:
+      display_name: "[dbx-platform] AI App Monitoring"
+      file_path: ../dashboards/ai_app_monitoring.lvdash.json
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
+      embed_credentials: false
