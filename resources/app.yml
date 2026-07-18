@@ -20,7 +20,12 @@ resources:
         - sql
       lifecycle:
         prevent_destroy: true
-        started: false
+        # Deploy converges the app to this state, so every prod deploy starts
+        # the app directly rather than leaving it stopped for an approved power
+        # controller reconciliation. This intentionally lets the CI identity
+        # perform a runtime start without an approval; do not flip back to
+        # false expecting the app to stay off after a merge to main.
+        started: true
       config:
         command: ["python", "main.py"]
         env:
