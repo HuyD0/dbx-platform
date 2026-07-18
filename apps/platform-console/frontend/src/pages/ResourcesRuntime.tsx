@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, Database, Moon, Power, Search, ServerCog, TimerReset } from "lucide-react";
+import { AppWindow, Database, Moon, Power, ServerCog, ShieldCheck, TimerReset } from "lucide-react";
 import { PlanActionButton } from "../components/ActionPlanDialog";
 import { DataTable } from "../components/DataTable";
 import {
@@ -48,13 +48,6 @@ export function ResourcesRuntime() {
     staleTime: 60_000,
     retry: false,
   });
-  const vectorSearch = useQuery({
-    queryKey: ["/api/ml/vector-search-audit"],
-    queryFn: () => apiGet<Envelope<Row[]>>("/api/ml/vector-search-audit"),
-    staleTime: 60_000,
-    retry: false,
-  });
-
   const runtime = state.data?.data;
   const resources = inventory.data ? normalizedInventory(inventory.data.data).resources ?? [] : [];
   const exclusions = inventory.data ? normalizedInventory(inventory.data.data).exclusions ?? [] : [];
@@ -62,8 +55,6 @@ export function ResourcesRuntime() {
     (state.isError && isUnavailable(state.error)) ||
     (inventory.isError && isUnavailable(inventory.error));
   const sleeping = runtime?.desired_state === "SLEEPING" || runtime?.current_state === "SLEEPING";
-  const vectorFindings = vectorSearch.data?.data ?? [];
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -144,14 +135,14 @@ export function ResourcesRuntime() {
       <Card>
         <SectionTitle
           title="15-minute idle auto-sleep readiness"
-          subtitle="Hourly serverless checks identify idle owned runtime and vector search endpoints; stopping still flows through the approved hibernate plan."
+          subtitle="Hourly serverless checks focus only on bundle-owned runtime; stopping still flows through the approved hibernate plan."
           right={
-            vectorSearch.data ? (
+            inventory.data ? (
               <AsOf
-                asOf={vectorSearch.data.as_of}
-                cached={vectorSearch.data.cached}
-                onRefresh={() => vectorSearch.refetch()}
-                refreshing={vectorSearch.isFetching}
+                asOf={inventory.data.as_of}
+                cached={inventory.data.cached}
+                onRefresh={() => inventory.refetch()}
+                refreshing={inventory.isFetching}
               />
             ) : undefined
           }
@@ -167,11 +158,11 @@ export function ResourcesRuntime() {
           </div>
           <div className="rounded-xl border border-hairline/70 bg-canvas-2/60 p-3">
             <div className="flex items-center gap-2 text-accent">
-              <Search className="h-4 w-4" />
-              <span className="text-xs font-semibold text-ink">Vector search</span>
+              <ServerCog className="h-4 w-4" />
+              <span className="text-xs font-semibold text-ink">Owned targets</span>
             </div>
-            <p className="mt-2 text-2xl font-semibold text-ink">{vectorFindings.length}</p>
-            <p className="mt-1 text-[11px] leading-5 text-muted">Endpoint finding(s) with no indexes or unhealthy state.</p>
+            <p className="mt-2 text-2xl font-semibold text-ink">{resources.length || "—"}</p>
+            <p className="mt-1 text-[11px] leading-5 text-muted">Only explicit bundle inventory can be selected for hibernation.</p>
           </div>
           <div className="rounded-xl border border-hairline/70 bg-canvas-2/60 p-3">
             <div className="flex items-center gap-2 text-accent">
@@ -182,11 +173,6 @@ export function ResourcesRuntime() {
             <p className="mt-1 text-[11px] leading-5 text-muted">The app drafts hibernate plans; durable approver confirmation executes the stop.</p>
           </div>
         </div>
-        {vectorSearch.isError && !isUnavailable(vectorSearch.error) && (
-          <div className="mt-3">
-            <ErrorState error={vectorSearch.error} />
-          </div>
-        )}
       </Card>
 
       <Card>
@@ -235,8 +221,8 @@ export function ResourcesRuntime() {
               Eleven bundle-declared schedules, restoring only prior unpaused state
             </li>
             <li className="flex items-center gap-2">
-              <Database className="h-4 w-4 text-accent" />
-              Dedicated dbx-platform XXS serverless warehouse
+              <ShieldCheck className="h-4 w-4 text-accent" />
+              Dedicated dbx-platform XXS serverless warehouse, with data stores left untouched
             </li>
           </ul>
           <p className="mt-3 rounded-lg bg-hairline/30 p-2 text-[11px] leading-5 text-muted">
