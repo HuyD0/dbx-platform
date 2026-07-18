@@ -108,12 +108,30 @@ def test_wheel_entry_point_raises_on_failure(monkeypatch):
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     assert pyproject["project"]["scripts"]["dbx-platform"] == "dbx_platform.cli:entry"
 
-    monkeypatch.setattr(cli, "main", lambda argv=None: 1)
+    monkeypatch.setattr(cli, "_dispatch", lambda argv: 1)
     with pytest.raises(SystemExit):
         cli.entry()
 
-    monkeypatch.setattr(cli, "main", lambda argv=None: 0)
+    monkeypatch.setattr(cli, "_dispatch", lambda argv: 0)
     assert cli.entry() is None  # success must NOT raise (or every job "fails")
+
+
+def test_wheel_entry_point_carries_the_error_message(monkeypatch):
+    """`bundle run` relays only the exception text, not the task's stderr — a
+    bare SystemExit(1) leaves CI logs with no diagnosis (how the missing-catalog
+    root cause stayed hidden behind 'SystemExit: 1'). The message must ride in
+    the exception."""
+    from dbx_platform import cli
+
+    def boom(argv):
+        raise RuntimeError("[NO_SUCH_CATALOG_EXCEPTION] Catalog 'main' was not found")
+
+    monkeypatch.setattr(cli, "_dispatch", boom)
+    with pytest.raises(SystemExit, match="NO_SUCH_CATALOG_EXCEPTION"):
+        cli.entry()
+
+    monkeypatch.setattr(cli, "main", lambda argv=None: 0)  # main() API unchanged
+    assert cli.main() == 0
 
 
 def test_committed_templates_are_valid_and_renderable():
