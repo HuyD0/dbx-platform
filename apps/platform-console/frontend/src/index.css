@@ -105,6 +105,22 @@ body {
 .glass-hover-accent:hover {
   border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
+/* Solid focus affordance for the composer: the low-alpha ring utility alone
+   is ~1.5:1 — imperceptible — and a layered border utility could not
+   override the unlayered glass border anyway. */
+.glass-focus-accent:focus-within {
+  border-color: var(--color-accent);
+}
+
+/* Suggestion-chip icon colors. The light categorical steps for magenta and
+   yellow are chart-fill colors (~2:1 as icon strokes on their own 15% tint),
+   so light mode uses darker steps; dark mode keeps the series tokens. */
+.icon-chip-1 { color: var(--color-series-1); }
+.icon-chip-2 { color: var(--color-series-2); }
+.icon-chip-3 { color: #ab3a68; }
+.icon-chip-4 { color: #8a6200; }
+.dark .icon-chip-3 { color: var(--color-series-3); }
+.dark .icon-chip-4 { color: var(--color-series-4); }
 
 /* Markdown rendered from digests / chat */
 .prose-console {

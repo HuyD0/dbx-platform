@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { ShieldAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiPost } from "../lib/api";
 import type { ApplyResponse, PlanResponse } from "../lib/types";
 import { DataTable } from "./DataTable";
@@ -41,7 +42,10 @@ export function ActionPlanDialog({
   const phraseOk = p !== undefined && confirm === p.confirm_phrase;
   const applied = apply.data;
 
-  return (
+  // Portaled to <body>: the trigger sits inside .glass surfaces, whose
+  // backdrop-filter makes them containing blocks for fixed descendants —
+  // rendered inline, this fixed overlay would be trapped inside the card.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       role="dialog"
@@ -148,7 +152,8 @@ export function ActionPlanDialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

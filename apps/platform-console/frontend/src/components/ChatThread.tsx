@@ -11,25 +11,25 @@ import { Badge, ErrorState } from "./ui";
 const SUGGESTIONS = [
   {
     icon: DollarSign,
-    tint: "bg-series-1/15 text-series-1",
+    tint: "bg-series-1/15 icon-chip-1",
     title: "Find money leaks",
     prompt: "Where are we wasting the most money right now?",
   },
   {
     icon: Sparkles,
-    tint: "bg-series-3/15 text-series-3",
+    tint: "bg-series-3/15 icon-chip-3",
     title: "Audit AI/ML",
     prompt: "Audit our serving endpoints and summarize the risks.",
   },
   {
     icon: Shield,
-    tint: "bg-series-4/15 text-series-4",
+    tint: "bg-series-4/15 icon-chip-4",
     title: "Check security",
     prompt: "Any security findings I should worry about?",
   },
   {
     icon: Gauge,
-    tint: "bg-series-2/15 text-series-2",
+    tint: "bg-series-2/15 icon-chip-2",
     title: "Clean up compute",
     prompt: "Clean up stale clusters.",
   },
@@ -98,7 +98,7 @@ function Composer({ autoFocus }: { autoFocus?: boolean }) {
   };
 
   return (
-    <div className="glass-strong rounded-3xl p-2.5 shadow-2xl shadow-black/10 transition-shadow focus-within:shadow-accent/10 focus-within:ring-2 focus-within:ring-accent/30 dark:shadow-black/40">
+    <div className="glass-strong glass-focus-accent rounded-3xl p-2.5 shadow-2xl shadow-black/10 transition-shadow focus-within:shadow-accent/10 focus-within:ring-2 focus-within:ring-accent/30 dark:shadow-black/40">
       <div className="flex items-end gap-2">
         <textarea
           ref={ref}
@@ -118,7 +118,7 @@ function Composer({ autoFocus }: { autoFocus?: boolean }) {
           }}
           placeholder="Ask anything about your workspace…"
           aria-label="Message the platform agent"
-          className="max-h-40 w-full resize-none bg-transparent px-3 py-2 text-[15px] text-ink outline-none placeholder:text-muted"
+          className="max-h-40 w-full resize-none bg-transparent px-3 py-2 text-[15px] text-ink outline-none placeholder:text-ink-2"
         />
         <button
           type="button"
@@ -157,7 +157,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
             >
               What should we look at?
             </p>
-            <p className="max-w-md text-sm text-muted">
+            <p className="max-w-md text-sm text-ink-2">
               Same read-only checks as the CLI. When something needs changing, you get a
               confirmation card — nothing happens without you.
             </p>
@@ -171,8 +171,8 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                   key={title}
                   type="button"
                   onClick={() => send(prompt)}
-                  className={`glass glass-hover-accent group rounded-2xl p-4 text-left shadow-lg shadow-black/5 transition-all hover:-translate-y-0.5 hover:shadow-xl dark:shadow-black/20 ${
-                    compact ? "flex items-center gap-3 p-3" : ""
+                  className={`glass glass-hover-accent group rounded-2xl text-left shadow-lg shadow-black/5 transition-all hover:-translate-y-0.5 hover:shadow-xl dark:shadow-black/20 ${
+                    compact ? "flex items-center gap-3 p-3" : "p-4"
                   }`}
                 >
                   <div className={`w-fit rounded-xl p-2 ${tint} ${compact ? "" : "mb-3"}`}>
@@ -180,7 +180,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                   </div>
                   <div>
                     <div className="text-sm font-medium text-ink">{title}</div>
-                    <div className="mt-0.5 text-xs leading-snug text-muted">{prompt}</div>
+                    <div className="mt-0.5 text-xs leading-snug text-ink-2">{prompt}</div>
                   </div>
                 </button>
               ))}
