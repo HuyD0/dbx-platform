@@ -121,6 +121,11 @@ def _entry(action: str) -> dict:
     return entry
 
 
+# X-Forwarded-Email is set by the Databricks Apps proxy and is trusted for
+# audit logging ONLY — authorization comes from the env gate + confirm flow,
+# never from this header.
+
+
 @router.post("/{action}/plan")
 def plan(action: str, request: Request) -> dict:
     """Dry-run — always allowed, mutates nothing."""
