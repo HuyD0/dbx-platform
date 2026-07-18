@@ -1,6 +1,5 @@
-# Weekly governance check. Policy sync runs as a DRIFT REPORT (dry run) —
-# applying policy changes is a deliberate local action:
-#   dbx-platform governance policy-sync --apply --yes
+# Weekly governance drift evidence. Policy changes require an immutable
+# Mission Control action; unmanaged policies are never deleted.
 resources:
   jobs:
     governance_check:
@@ -13,11 +12,19 @@ resources:
       schedule:
         quartz_cron_expression: "0 30 6 ? * MON"  # weekly Monday 06:30 UTC
         timezone_id: UTC
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -41,7 +48,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["governance", "tag-compliance", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: tag_recommendations
           environment_key: default
           python_wheel_task:

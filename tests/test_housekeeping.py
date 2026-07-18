@@ -1,6 +1,12 @@
+from unittest.mock import MagicMock
+
 from conftest import days_ago, hours_ago
 
-from dbx_platform.housekeeping import classify_clusters, find_orphaned_jobs
+from dbx_platform.housekeeping import (
+    apply_cluster_findings,
+    classify_clusters,
+    find_orphaned_jobs,
+)
 
 
 def _cluster(**overrides) -> dict:
@@ -18,11 +24,11 @@ def _cluster(**overrides) -> dict:
     return {**base, **overrides}
 
 
-def test_long_terminated_cluster_flagged_for_delete(now_ms):
+def test_long_terminated_cluster_flagged_for_retention_review(now_ms):
     clusters = [_cluster(terminated_time=days_ago(40))]
     findings = classify_clusters(clusters, now_ms, stale_days=30, max_uptime_hours=24)
     assert len(findings) == 1
-    assert findings[0]["action"] == "permanent-delete"
+    assert findings[0]["action"] == "review-retention"
 
 
 def test_exact_boundary_is_flagged(now_ms):
@@ -82,3 +88,20 @@ def test_orphaned_job_detection():
 def test_orphan_check_is_case_insensitive():
     jobs = [{"job_id": 1, "name": "j", "creator": "Alice@Example.com", "has_schedule": False}]
     assert find_orphaned_jobs(jobs, {"alice@example.com"}) == []
+
+
+def test_retention_review_never_deletes_a_cluster():
+    workspace = MagicMock()
+    result = apply_cluster_findings(
+        workspace,
+        [
+            {
+                "cluster_id": "c-1",
+                "cluster_name": "old",
+                "action": "review-retention",
+            }
+        ],
+    )
+    assert "deletion is unsupported" in result[0]
+    workspace.clusters.delete.assert_not_called()
+    workspace.clusters.permanent_delete.assert_not_called()

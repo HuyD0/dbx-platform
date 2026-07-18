@@ -1,7 +1,9 @@
 import random
 from datetime import date, timedelta
 
-from dbx_platform.forecast_infer import recursive_forecast
+import pytest
+
+from dbx_platform.forecast_infer import recursive_forecast, store_forecasts
 from dbx_platform.forecast_monitor import (
     classify_feature_drift,
     classify_retrain,
@@ -179,3 +181,18 @@ def test_recursive_forecast_feeds_predictions_forward():
 def test_recursive_forecast_short_history_skipped():
     dense = {"total": {date(2026, 7, 1): 1.0}}
     assert recursive_forecast(dense, 3, lambda rows: [(0, 0, 0)] * len(rows)) == []
+
+
+def test_store_forecasts_missing_storage_has_migration_guidance(monkeypatch):
+    monkeypatch.setattr(
+        "dbx_platform.forecast_infer.run_query",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(Exception("TABLE_NOT_FOUND")),
+    )
+    with pytest.raises(RuntimeError, match="schema_migrations"):
+        store_forecasts(
+            object(),
+            "warehouse",
+            "main",
+            "dbx_platform",
+            [{"run_date": "2026-07-18", "target_date": "2026-07-19"}],
+        )

@@ -1,34 +1,33 @@
 # dbx-platform
 
-Databricks platform-management toolkit: admin CLI, scheduled jobs, AI/BI dashboards,
-and cluster policies as code, deployed with Databricks Asset Bundles.
+AI Mission Control for one Azure Databricks workspace: a React/FastAPI App,
+scheduled evidence jobs, durable human-approved actions, dedicated executors,
+AI/BI dashboards, and policy source deployed with Databricks Asset Bundles.
 
 ## Core design invariant
 
-Every check is **one code path exposed two ways**: an ad-hoc CLI command, and a
-bundle-deployed job that runs the same code on a schedule via `python_wheel_task`
-against the `dbx-platform` entry point. When you add a check, wire up both — a CLI
-subcommand in `src/dbx_platform/cli.py` and a task in the matching `resources/*.yml`.
-Never let the scheduled path drift into a separate implementation. The **`add-check`
-skill** (`.claude/skills/add-check/`) walks the full procedure end to end — use it.
+Evidence checks share package logic across CLI, scheduled Jobs, API summaries,
+and the assistant. Scheduled stateful/append-only commands attest their exact
+Job/run/trigger; a manual run must instead match a durable `run-job` approval.
+When adding a check, update its package logic, schedule (if any), normalized
+finding, source-health metadata, and tests together.
 
 ## Safety model
 
-Everything is **read-only by default**. Mutating commands are dry-run unless given
-`--apply`, and `--apply` additionally requires `--yes` (or `DBX_PLATFORM_CONFIRM=true`
-for non-interactive contexts). Preserve this for any new mutating command. Existing
-`--apply` actions are deliberately conservative: orphaned jobs are *paused, never
-deleted*, and policy sync *never deletes* unmanaged policies.
+AI, the app service principal, and legacy CLI commands never execute target
+mutations. `--apply`/`--yes` are compatibility flags that always fail.
 
-The Platform Console app mirrors these gates rather than bypassing them: its four
-remediation actions reuse the same package mutators and require (1) the
-off-by-default `DBX_PLATFORM_CONSOLE_ACTIONS` env gate in `app.yaml`, (2) a
-server-side dry-run plan (single-use, 15-minute expiry), and (3) a typed confirm
-phrase. `tests/test_app.py` enforces this structurally: mutators may be referenced
-only in `backend/routers/actions.py`, mutating routes are POST-only, and no module
-touches the workspace at import time. The served agent stays read-only by
-construction (`tests/test_agent.py`) — its `propose_*` tools are dry-runs whose
-markers the console turns into human-confirmed plans.
+Every managed-resource/configuration mutation requires one exact immutable,
+15-minute, single-use plan; current `dbx-platform-approvers` membership; a
+typed confirmation for medium/high risk; revalidation; a dedicated
+least-privileged executor; and append-only execution/verification events.
+Missing identity/audit storage, altered payload/hash, drift, expiry, or replay
+fails closed. Resource deletion is unsupported.
+
+Schedules may read and append internal findings/cost/audit telemetry. Training,
+model promotion, budgets/configuration, manual stateful Jobs, remediation, and
+runtime state require approval. The served agent remains read-only and can only
+cite evidence/draft proposals.
 
 ## Layout
 
@@ -56,14 +55,15 @@ Do not hardcode a workspace URL anywhere else, and do **not** try to make it a
 authentication, which silently breaks every bundle command. Override it at runtime with
 the `DATABRICKS_HOST` env var or a profile.
 
-`warehouse_id` has no default and must be supplied (`BUNDLE_VAR_warehouse_id`); the
-dashboards and system-table tasks need it.
+The bundle owns a dedicated 2X-Small serverless warehouse; do not reintroduce a
+shared `warehouse_id` bundle variable.
 
 ## Targets
 
 - `dev` (default) — `mode: development`, resources prefixed `[dev <user>]`, schedules
   paused, deployed under your user folder. Safe to iterate.
-- `prod` — real names, active schedules, shared root path. Deployed by CI on push to `main`.
+- `prod` — real names, all schedules PAUSED and app/warehouse stopped until an
+  approved reconciliation. Deployed by CI on push to `main`.
 
 ## Commands
 

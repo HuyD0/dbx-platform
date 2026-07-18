@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter
 
 import dbx_platform
@@ -19,6 +21,7 @@ def health() -> dict:
         "status": "ok",
         "version": dbx_platform.__version__,
         "actions_enabled": deps.actions_enabled(),
+        "environment": os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev"),
     }
 
 

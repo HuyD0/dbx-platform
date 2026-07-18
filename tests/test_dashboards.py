@@ -8,6 +8,7 @@ import yaml
 from dbx_platform.dashboards import (
     TEMPLATE_NAMES,
     build_team_name_function_sql,
+    dependency_health,
     render_template,
     setup_statements,
 )
@@ -19,7 +20,7 @@ _HELPER_OBJECT = re.compile(r"main\.dbx_platform\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def test_render_replaces_all_placeholders():
-    text = 'SELECT * FROM {catalog}.{schema}.workspace_reference, {catalog}.{schema}.t2'
+    text = "SELECT * FROM {catalog}.{schema}.workspace_reference, {catalog}.{schema}.t2"
     out = render_template(text, "main", "dbx_platform")
     assert "{catalog}" not in out and "{schema}" not in out
     assert "main.dbx_platform.workspace_reference" in out
@@ -46,9 +47,23 @@ def test_team_name_function_uses_all_tag_keys():
 
 def test_setup_statements_cover_all_dashboard_dependencies():
     fq_objects = "\n".join(sql for _, sql in setup_statements("c", "s", ["team"]))
-    for obj in ("job_type_from_sku", "sql_type_from_sku", "team_name_from_tags",
-                "workspace_reference", "warehouse_reference"):
+    for obj in (
+        "job_type_from_sku",
+        "sql_type_from_sku",
+        "team_name_from_tags",
+        "workspace_reference",
+        "warehouse_reference",
+        "azure_costs",
+        "azure_cost_details",
+        "cost_features",
+        "cost_forecasts",
+        "llm_cost_daily",
+        "llm_usage_hourly",
+        "llm_budgets",
+        "llm_source_health",
+    ):
         assert f"c.s.{obj}" in fq_objects
+    assert "CREATE SCHEMA" not in fq_objects
 
 
 def test_committed_templates_are_valid_and_renderable():
@@ -86,24 +101,36 @@ def _wheel_task_parameters():
                     yield resource_file.name, pw["parameters"]
 
 
-def test_dashboards_setup_runs_on_a_schedule():
-    """The invariant: dashboards setup must be a scheduled job, not CLI-only.
+def test_dashboard_schedule_is_health_only_and_migration_owns_setup():
+    """Scheduled dashboard work reads health; only bootstrap applies DDL."""
 
-    Guards against the deploy-time failure where the bundle ships dashboards that
-    query helper tables nothing ever provisions.
-    """
-    setup_params = [
-        params
-        for _, params in _wheel_task_parameters()
-        if params[:2] == ["dashboards", "setup"]
+    health_params = [
+        params for _, params in _wheel_task_parameters() if params[:2] == ["dashboards", "health"]
     ]
-    assert setup_params, (
-        "No scheduled job runs `dashboards setup` — the dashboards' helper tables "
-        "(main.dbx_platform.workspace_reference, etc.) would never be provisioned. "
-        "Add the task to resources/dashboards_jobs.yml."
+    assert health_params
+    assert not [
+        params for _, params in _wheel_task_parameters() if params[:2] == ["dashboards", "setup"]
+    ]
+    migration_source = (REPO_ROOT / "src/dbx_platform/migrations.py").read_text()
+    assert "setup_statements" in migration_source
+
+
+def test_dependency_health_reports_missing_objects(monkeypatch):
+    responses = [
+        [{"tableName": "workspace_reference"}, {"tableName": "platform_findings"}],
+        [{"function": "main.dbx_platform.job_type_from_sku"}],
+    ]
+
+    monkeypatch.setattr(
+        "dbx_platform.dashboards.run_query",
+        lambda *_args, **_kwargs: responses.pop(0),
     )
-    for params in setup_params:
-        assert "--warehouse-id" in params, "dashboards setup job needs --warehouse-id"
+    rows = dependency_health(object(), "warehouse", "main", "dbx_platform")
+    by_name = {row["dependency"]: row["status"] for row in rows}
+    assert by_name["workspace_reference"] == "AVAILABLE"
+    assert by_name["warehouse_reference"] == "MISSING"
+    assert by_name["job_type_from_sku"] == "AVAILABLE"
+    assert by_name["team_name_from_tags"] == "MISSING"
 
 
 def test_rendered_dashboards_only_reference_objects_setup_creates():

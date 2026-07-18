@@ -1,0 +1,35 @@
+# Deployment-only internal schema migration. It uses serverless Spark and is
+# excluded from both schedules and the Hibernate inventory.
+resources:
+  jobs:
+    schema_migrations:
+      name: "[dbx-platform] schema-migrations"
+      description: >
+        Idempotent Unity Catalog migrations for findings, approvals, audit,
+        runtime inventory, cost ledgers, and dashboard helpers.
+      max_concurrent_runs: 1
+      timeout_seconds: 1800
+      tags:
+        team: platform
+        project: dbx-platform
+        control_plane: schema-migration
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: migrate
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/dbx_platform/migrations.py
+            parameters:
+              - --catalog
+              - main
+              - --schema
+              - dbx_platform
+              - --operator-group
+              - ${var.operator_group}
+              - --approver-group
+              - ${var.approver_group}

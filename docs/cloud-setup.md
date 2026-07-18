@@ -39,19 +39,24 @@ These exist; nothing to do.
 |---|---|
 | Entra app / SP | `github-actions-dbx-platform` — appId `b74a6820-d0ac-454f-8c32-02141cba3c8a` |
 | Federated credential | subject `repo:HuyD0@151226205/dbx-platform@1303537051:environment:production` (see note) |
-| Workspace registration | registered via SCIM, member of the `admins` group |
+| Workspace registration | registered via SCIM; legacy `admins` membership must be removed after applying the scoped deployment grants |
 | Workspace | `dbx-dev` — `https://adb-7405609799238491.11.azuredatabricks.net` |
-| SQL warehouse | `09c77e5867b64a0d` (Serverless Starter Warehouse) |
+| Shared SQL warehouse | `09c77e5867b64a0d` (Serverless Starter; preserved and no longer used by this bundle) |
+| Mission Control warehouse | Bundle-owned `[dbx-platform] mission-control` (2X-Small serverless, five-minute auto-stop) |
 | GitHub default branch | `main` |
 | GitHub `production` environment | created, no protection rules |
-| Repo secrets | `DATABRICKS_HOST`, `DATABRICKS_WAREHOUSE_ID`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
+| Repo secrets | `DATABRICKS_HOST`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
+| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (dedicated runtime controller) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (separate allowlisted remediation executor) |
 
-The **Deploy** workflow has run green end-to-end against the workspace, and the four
-`[dbx-platform]` jobs are deployed. The keyless chain is proven, not just wired.
+The keyless CI chain is proven. Mission Control adds a dedicated warehouse,
+eleven PAUSED report schedules, manual approval-gated training, and out-of-band
+executor Jobs; enablement is proposal-only until the prerequisites below exist.
 
-Workspace **admin** is required because the security job calls the token-management and
-SCIM APIs — and, as it turned out, is also what authorizes the deploy (see "no Azure
-RBAC" below). To avoid admin, strip the security job from the deployment.
+Workspace admin is not the target operating model. Deploy into the dedicated
+application schema and apply the identity-specific matrix in
+[service-principal.md](service-principal.md). If token listing/revocation
+cannot be granted narrowly, keep that security pack proposal-only instead of
+making the deployment or action executor a workspace admin.
 
 > **Federated subject — immutable form.** This repo was created recently enough that
 > GitHub issues OIDC tokens with the *immutable* subject prefix
@@ -65,8 +70,21 @@ RBAC" below). To avoid admin, strip the security job from the deployment.
 
 ## What still needs you
 
-Only two things remain, both in the GitHub web UI, and both are the `@claude` half — the
-Databricks deploy pipeline is already live.
+Mission Control requires two platform prerequisites in addition to the two
+GitHub/Claude items below:
+
+- create `dbx-platform-approvers` and add the humans allowed to approve plans;
+- provision separate least-privileged runtime and action executors, register
+  both in the workspace, grant the runtime permissions in
+  [runbook.md](runbook.md#safe-hibernate), grant the action executor
+  only its enabled action-pack permissions, and set
+  `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` plus
+  `DBX_PLATFORM_ACTION_EXECUTOR_SP` in the GitHub production environment.
+
+The deploy workflow fails instead of substituting another identity when either
+variable is absent. It runs idempotent control-plane migrations under the CI
+deployment identity, leaves schedules PAUSED, and creates only a reconciliation
+proposal.
 
 ### 1. Install the Claude GitHub App
 
@@ -94,7 +112,7 @@ subscription, not a pay-per-use API bill.
 (Prefer an API key anyway? Add `ANTHROPIC_API_KEY` instead and change the input in
 `.github/workflows/claude.yml` from `claude_code_oauth_token` to `anthropic_api_key`.)
 
-Everything else — the five `AZURE_*`/`DATABRICKS_*` secrets (identifiers, not
+Everything else — the four `AZURE_*`/`DATABRICKS_*` secrets (identifiers, not
 credentials), the `production` environment, and the default branch — is already set.
 
 ### Then verify the `@claude` loop
@@ -115,41 +133,33 @@ every step and the jobs are in the workspace.)
 | Deploy waits on approval | A protection rule was added to the `production` environment. Remove it. |
 | Scheduled job fails with `INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.<x>'` (exit 3) | The job's run-as principal — the service principal, since CI deployed the bundle — has no grant on that system schema. Workspace admin does not confer it. Run the grants below. |
 
-### Required: grant system-table access to the service principal
+### Required: apply the report/deployment grants
 
-The prod jobs are deployed by CI, so they **run as the service principal** (production
-mode's default run-as is the deploying identity — with or without the explicit `run_as`
-below). Workspace admin does **not** include Unity Catalog access to `system.*` schemas,
-so without these grants every system-table task fails with
-`INSUFFICIENT_PERMISSIONS … USE SCHEMA on Schema 'system.…'`.
-
-Run as a metastore admin in a SQL editor (schemas must also be *enabled* on the
-metastore first — setup.md §4):
+Production report Jobs run as their configured report/deployment identity.
+Workspace admin does not confer Unity Catalog access to `system.*`. Grant only
+the schemas enabled for installed evidence packs:
 
 ```sql
-GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
--- dashboards' helper schema. CREATE SCHEMA lets the dashboards-setup job create
--- main.dbx_platform on first run (it becomes owner, so it can then create the
--- functions/reference tables inside). If an admin pre-creates the schema instead,
--- the ALL PRIVILEGES grant covers those creates and CREATE SCHEMA is unnecessary.
-GRANT USE CATALOG ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT CREATE SCHEMA ON CATALOG main TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
-GRANT ALL PRIVILEGES ON SCHEMA main.dbx_platform TO `b74a6820-d0ac-454f-8c32-02141cba3c8a`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.billing  TO `dbx-platform-reporters`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.access   TO `dbx-platform-reporters`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.lakeflow TO `dbx-platform-reporters`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.compute  TO `dbx-platform-reporters`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.query    TO `dbx-platform-reporters`;
+GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `dbx-platform-reporters`;
 ```
 
-The schema list matches what the jobs read (see the job table in runbook.md):
-billing/lakeflow/compute/query for `cost-usage-report`, access for `security-audit`,
-serving for `ml-serving-report`. The `dashboards-setup` job reads billing + access to
-refresh its `workspace_reference` / `warehouse_reference` tables.
+Pre-create `main.dbx_platform` and make the deployment group its owner as shown
+in [setup.md](setup.md); only the unscheduled `schema_migrations` bootstrap
+performs DDL. Do not grant the CI principal `CREATE SCHEMA` on `main` or
+`ALL PRIVILEGES` on the application schema. Table-level app, human, runtime,
+action-executor, and reporter grants are in
+[service-principal.md](service-principal.md).
 
-### Optional: run prod jobs as the service principal
+### Optional: run read-only prod jobs as the CI service principal
 
-Add to the `prod` target in `databricks.yml` so scheduled jobs stop running as a human:
+The power/action executor Jobs already use the dedicated runtime executor.
+Optionally add this to the `prod` target so read-only scheduled reports also run
+under CI rather than the resource owner:
 
 ```yaml
   prod:
@@ -169,7 +179,7 @@ Do this only after step 4 passes, so a failure is unambiguous.
 | Write code / open a PR | `@claude` on an issue, or claude.ai/code |
 | Lint, test, build, validate bundle | `ci.yml` on every PR |
 | Deploy to the workspace | `deploy.yml` on merge to `main`, or *Run workflow* |
-| Ad-hoc admin command | Run the job in the Databricks UI, or add a `workflow_dispatch` job |
+| Stateful/costly manual run | Create and approve an exact `run-job` action in Mission Control |
 | Inspect a failing run | `@claude` on the PR — it has `actions: read` |
 
 ## Note on local CLI use
@@ -251,20 +261,20 @@ The job identity also needs `ACCESS` on the UC service credential, plus the
 `main.dbx_platform` schema grants above (the ingest MERGEs into
 `main.dbx_platform.azure_costs`).
 
-First-run order (each step is also a plain CLI command if you prefer to run it
-locally):
+First-run order (stateful/costly manual runs go through Action Center):
 
-1. `azure-cost pull --days 365` — backfill the bill (one-off; the scheduled job
-   re-pulls a 3-day window daily).
-2. `forecast build-features` then `forecast train` — first training run registers the
-   model and sets `@champion` (the promotion gate always promotes when there is no
-   incumbent).
-3. `cost_forecast_daily` job (or `forecast predict` + `forecast monitor`) — forecasts
-   land in `main.dbx_platform.cost_forecasts`; the dashboard and the Console app's
-   Azure Cost page light up.
+1. For a historical backfill, make a reviewed temporary bundle change from the
+   Job’s 3-day window to 365 days, deploy it, plan/approve the exact changed
+   Job, then restore/redeploy the 3-day window. Otherwise let scheduled
+   ingestion accumulate.
+2. Plan and approve the manual `cost-forecast-train` Job, which builds features,
+   registers the first model, and sets `@champion` (training/promotion has no
+   schedule).
+3. Let `cost-forecast-daily` run on schedule or plan/approve that exact Job.
+   Forecasts land in `main.dbx_platform.cost_forecasts`.
 
 | Symptom | Cause / fix |
 |---|---|
 | `azure-cost pull` → 403 with the Cost Management Reader hint | The role assignment above is missing, on the wrong identity, or still propagating (can take a few minutes). |
 | `azure-cost pull` → `DefaultAzureCredential` errors inside a job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |
-| `forecast train` → `need >= N days of features` | Not enough billing history ingested yet — run the 365-day backfill first. |
+| Forecast training → `need >= N days of features` | Not enough approved/scheduled billing history exists; complete the backfill action first. |

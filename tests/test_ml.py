@@ -32,6 +32,7 @@ def _endpoint(**overrides) -> dict:
         "updated_ms": days_ago(1),
         "served_entities": [_entity()],
         "is_external_or_fm": False,
+        "is_system_endpoint": False,
         "has_inference_table": True,
         "has_rate_limits": False,
         "has_usage_tracking": False,
@@ -107,6 +108,26 @@ def test_external_model_with_gateway_not_flagged(now_ms):
     assert classify_serving_endpoints([e], now_ms, failed_grace_hours=24) == []
 
 
+def test_databricks_system_endpoint_is_excluded_from_config_audit(now_ms):
+    e = _endpoint(
+        name="databricks-claude-opus-4-8",
+        creator="",
+        is_system_endpoint=True,
+        is_external_or_fm=True,
+        has_inference_table=False,
+        has_rate_limits=False,
+        has_usage_tracking=False,
+        served_entities=[
+            _entity(
+                entity_name="system.ai.claude-opus",
+                workload_size="",
+                is_external_or_fm=True,
+            )
+        ],
+    )
+    assert classify_serving_endpoints([e], now_ms, failed_grace_hours=24) == []
+
+
 # --- find_stale_endpoints ------------------------------------------------------
 
 def test_old_endpoint_with_no_usage_is_stale(now_ms):
@@ -122,6 +143,16 @@ def test_endpoint_with_usage_not_stale(now_ms):
 
 def test_young_endpoint_without_usage_not_stale(now_ms):
     e = _endpoint(created_ms=days_ago(3))
+    assert find_stale_endpoints([e], [], now_ms, stale_days=30) == []
+
+
+def test_system_endpoint_is_not_a_stale_customer_resource(now_ms):
+    e = _endpoint(
+        name="databricks-claude-opus-4-8",
+        creator="",
+        is_system_endpoint=True,
+        created_ms=days_ago(365),
+    )
     assert find_stale_endpoints([e], [], now_ms, stale_days=30) == []
 
 

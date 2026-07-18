@@ -45,21 +45,21 @@ jobs:
             repo-specific risks over generic style feedback, and flag any
             violation with an inline comment on the offending line:
 
-            1. SAFETY MODEL (most important). Everything is read-only by default.
-               Any mutating action must be dry-run unless given `--apply`, and
-               `--apply` must additionally require `--yes` (or
-               DBX_PLATFORM_CONFIRM=true). Existing mutations are deliberately
-               conservative — orphaned-jobs only PAUSES (never deletes), and
-               policy-sync creates/updates but NEVER deletes unmanaged policies.
-               Flag any new code that deletes, that mutates without the
-               apply/yes gate, or that loosens these guarantees.
+            1. SAFETY MODEL (most important). AI, the app identity, and direct
+               CLI paths never mutate targets; legacy --apply/--yes always
+               fail. Every resource/config mutation must reload one durable,
+               immutable, expiring, single-use plan and approval inside a
+               dedicated executor, verify current approver-group membership
+               and exact target state, then append execution/verification
+               events. Missing audit/identity, drift, replay, or expiry fails
+               closed. Resource deletion is unsupported. Scheduled writes are
+               limited to internal evidence/cost/audit data and must attest an
+               exact periodic Job/run; manual stateful runs require an approved
+               run-job action. Flag every bypass or permission broadening.
 
-            2. "ONE CODE PATH, TWO WAYS." Every check is a CLI subcommand AND a
-               matching bundle job task running the same code via
-               python_wheel_task. If a PR adds or changes a check, verify BOTH
-               sides moved together — a new area-module function wired into
-               cli.py, and a corresponding task in resources/<area>_jobs.yml.
-               Flag a check that is wired to only one surface.
+            2. EVIDENCE CONSISTENCY. Package logic, CLI/API/assistant summaries,
+               normalized Finding fields, dependency-health/freshness, bundle
+               schedule (when applicable), and tests must move together.
 
             3. OFFLINE TESTS. Tests mock the Databricks SDK and must not require
                workspace credentials or network — CI runs them without secrets.

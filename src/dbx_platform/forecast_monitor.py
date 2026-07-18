@@ -17,7 +17,6 @@ failure email doubles as the alert, and findings are stored to
 
 from __future__ import annotations
 
-import json
 from datetime import date
 
 from databricks.sdk import WorkspaceClient
@@ -240,29 +239,15 @@ def store_findings(
     w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str,
     findings: list[dict],
 ) -> None:
-    """Append monitor findings to platform_findings (digest/dashboards feed)."""
-    from dbx_platform.digest import FINDINGS_SCHEMA
+    """Merge lifecycle-aware, workspace-scoped performance findings."""
+    from dbx_platform.digest import store_findings as store_canonical_findings
 
-    rows = [
-        {
-            "area": "forecast",
-            "check_name": f"monitor/{f.get('signal', '')}",
-            "resource": str(f.get("resource", "")),
-            "reason": str(f.get("reason", "")),
-            "action": str(f.get("action", "")),
-            "details": json.dumps(f, default=str, sort_keys=True),
-        }
-        for f in findings
-    ]
-    run_query(
+    store_canonical_findings(
         w,
-        f"INSERT INTO {catalog}.{schema}.platform_findings "
-        "(run_ts, area, check_name, resource, reason, action, details) "
-        "SELECT current_timestamp(), item.area, item.check_name, item.resource, "
-        "item.reason, item.action, item.details "
-        f"FROM (SELECT explode(from_json(:findings, '{FINDINGS_SCHEMA}')) AS item)",
         warehouse_id,
-        {"findings": json.dumps(rows, default=str)},
+        catalog,
+        schema,
+        {"performance/forecast-monitor": findings},
     )
 
 

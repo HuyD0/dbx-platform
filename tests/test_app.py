@@ -13,6 +13,7 @@ Two layers, both offline (the SDK is mocked, per repo convention):
 from __future__ import annotations
 
 import ast
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -92,6 +93,16 @@ def test_action_registry_is_exactly_the_four_conservative_actions():
 def test_app_yaml_launches_the_backend():
     config = yaml.safe_load((APP_DIR / "app.yaml").read_text())
     assert config["command"] == ["python", "main.py"]
+    bundle_config = yaml.safe_load(
+        (APP_DIR.parent.parent / "resources" / "app.yml").read_text()
+    )
+    assert bundle_config["resources"]["apps"]["platform_console"][
+        "user_api_scopes"
+    ] == [
+        "iam.current-user:read",
+        "iam.access-control:read",
+        "sql",
+    ]
     requirements = (APP_DIR / "requirements.txt").read_text()
     assert "--find-links wheels" in requirements
     assert "fastapi" in requirements
@@ -109,11 +120,17 @@ def ws(monkeypatch) -> MagicMock:
 
 
 @pytest.fixture()
-def client(ws):
+def client(ws, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_IDENTITY", "true")
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ACTOR_ID", "test-operator")
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "operator")
+    deps.get_identity_verifier.cache_clear()
     from backend.app import create_app
     from fastapi.testclient import TestClient
 
-    return TestClient(create_app(), raise_server_exceptions=False)
+    with TestClient(create_app(), raise_server_exceptions=False) as test_client:
+        yield test_client
+    deps.get_identity_verifier.cache_clear()
 
 
 def test_app_construction_never_touches_the_workspace(monkeypatch):
@@ -124,6 +141,20 @@ def test_app_construction_never_touches_the_workspace(monkeypatch):
     create_app()
     mock.assert_not_called()
     assert not mock.method_calls
+
+
+def test_llm_cost_routes_are_registered(client):
+    paths = {
+        getattr(route, "path", "")
+        for route in _iter_routes(client.app)
+    }
+    assert {
+        "/api/llm-cost/summary",
+        "/api/llm-cost/timeseries",
+        "/api/llm-cost/breakdown",
+        "/api/llm-cost/efficiency",
+        "/api/llm-cost/data-health",
+    }.issubset(paths)
 
 
 def _iter_routes(container):
@@ -145,14 +176,17 @@ def test_every_mutating_route_is_post_only(client):
             get_paths.add(path)
         if "POST" in methods:
             post_paths.add(path)
-    assert post_paths == {
-        "/api/actions/{action}/plan",
-        "/api/actions/{action}/apply",
+    assert post_paths - {"/api/{path:path}"} == {
+        "/api/action-requests/plan",
+        "/api/action-requests/{action_id}/approve",
+        "/api/action-requests/{action_id}/reject",
         "/api/jobs/{job_id}/run_now",
         "/api/digest/generate",
         "/api/chat",
     }
-    assert not (get_paths & post_paths), "no route may accept both GET and POST"
+    assert (get_paths & post_paths) <= {
+        "/api/{path:path}"
+    }, "only the stable JSON 404 catch-all may accept multiple methods"
 
 
 def test_health_reports_actions_disabled_by_default(client, monkeypatch):
@@ -162,96 +196,144 @@ def test_health_reports_actions_disabled_by_default(client, monkeypatch):
     assert body["actions_enabled"] is False
 
 
-@pytest.fixture()
-def fake_action(monkeypatch):
-    """A registry entry with a recording apply, so guard tests never touch
-    the real mutators."""
-    applied = []
-    items = [{"cluster_id": "c-1", "action": "terminate"}]
-    monkeypatch.setitem(actions.REGISTRY, "stale-clusters", {
-        "plan": lambda: (items, items, {"terminate": 1}),
-        "apply": lambda payload: (applied.append(payload) or ["terminated c-1"]),
-    })
-    return applied
+def test_unknown_api_returns_stable_json_capability_error(client):
+    response = client.get("/api/not-a-real-capability")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "capability_not_available"
 
 
-def test_plan_works_while_actions_are_disabled(client, fake_action, monkeypatch):
-    monkeypatch.delenv("DBX_PLATFORM_CONSOLE_ACTIONS", raising=False)
-    body = client.post("/api/actions/stale-clusters/plan").json()
-    assert body["actions_enabled"] is False
-    assert body["confirm_phrase"] == "apply stale-clusters 1"
-    assert body["items"] == [{"cluster_id": "c-1", "action": "terminate"}]
+def test_production_runtime_auto_migration_fails_closed(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_APP_NAME", "dbx-platform")
+    monkeypatch.setenv("DBX_PLATFORM_CONTROL_PLANE_REPOSITORY", "sql")
+    monkeypatch.setenv("DBX_PLATFORM_CONTROL_PLANE_AUTO_MIGRATE", "true")
+    deps.get_control_plane_repository.cache_clear()
+
+    with pytest.raises(RuntimeError, match="deployment-only schema_migrations"):
+        deps.get_control_plane_repository()
+
+    deps.get_control_plane_repository.cache_clear()
 
 
-def test_apply_refused_when_gate_is_off(client, fake_action, monkeypatch):
-    monkeypatch.delenv("DBX_PLATFORM_CONSOLE_ACTIONS", raising=False)
-    plan = client.post("/api/actions/stale-clusters/plan").json()
-    resp = client.post("/api/actions/stale-clusters/apply", json={
-        "plan_id": plan["plan_id"], "confirm": plan["confirm_phrase"]})
-    assert resp.status_code == 403
-    assert resp.json()["error"] == "actions_disabled"
-    assert fake_action == []
+def test_operational_api_requires_verified_user_but_health_stays_public(
+    client,
+    ws,
+    monkeypatch,
+):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_IDENTITY", "false")
+    deps.get_identity_verifier.cache_clear()
+    ws.api_client.do.return_value = {}
+    response = client.get("/api/config")
+    assert response.status_code == 401
+    assert response.json()["error"] == "unauthenticated"
+    assert client.get("/api/health").status_code == 200
 
 
-def test_apply_refuses_wrong_confirm_phrase(client, fake_action, monkeypatch):
-    monkeypatch.setenv("DBX_PLATFORM_CONSOLE_ACTIONS", "true")
-    plan = client.post("/api/actions/stale-clusters/plan").json()
-    resp = client.post("/api/actions/stale-clusters/apply", json={
-        "plan_id": plan["plan_id"], "confirm": "yes please"})
-    assert resp.status_code == 409
-    assert resp.json()["error"] == "confirmation_mismatch"
-    assert fake_action == []
+def test_viewer_operational_responses_mask_pat_and_identity_fields(
+    client,
+    ws,
+    monkeypatch,
+):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    deps.get_control_plane_repository().add_finding(
+        {
+            "workspace_id": "local",
+            "environment": "dev",
+            "run_ts": "2026-07-17T12:00:00+00:00",
+            "area": "security",
+            "check_name": "stale-pat",
+            "resource": "pat-secret-id",
+            "reason": "token exceeds the configured maximum age",
+            "action": "token-revoke",
+            "affected_resources_json": json.dumps(
+                [{"resource_id": "pat-secret-id"}]
+            ),
+            "evidence_json": json.dumps(
+                {
+                    "token_id": "pat-secret-id",
+                    "created_by": "owner@example.com",
+                    "comment": "automation",
+                }
+            ),
+        }
+    )
+    cache.clear()
+    response = client.get("/api/security/token-audit")
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["resource"] == "[redacted]"
+    assert row["affected_resources"] == [{"resource_id": "[redacted]"}]
+    assert row["evidence"]["token_id"] == "[redacted]"
+    assert row["evidence"]["created_by"] == "[redacted]"
+    assert row["evidence"]["comment"] == "automation"
 
 
-def test_apply_refuses_expired_plan(client, fake_action, monkeypatch):
-    monkeypatch.setenv("DBX_PLATFORM_CONSOLE_ACTIONS", "true")
-    plan = client.post("/api/actions/stale-clusters/plan").json()
-    actions.plans._plans[plan["plan_id"]]["expires_at"] = 0
-    resp = client.post("/api/actions/stale-clusters/apply", json={
-        "plan_id": plan["plan_id"], "confirm": plan["confirm_phrase"]})
-    assert resp.status_code == 410
-    assert resp.json()["error"] == "plan_expired"
-    assert fake_action == []
-
-
-def test_apply_happy_path_is_single_use(client, fake_action, monkeypatch):
-    monkeypatch.setenv("DBX_PLATFORM_CONSOLE_ACTIONS", "true")
-    plan = client.post("/api/actions/stale-clusters/plan").json()
-    request = {"plan_id": plan["plan_id"], "confirm": plan["confirm_phrase"]}
-    resp = client.post("/api/actions/stale-clusters/apply", json=request)
-    assert resp.status_code == 200
-    assert resp.json()["applied"] == ["terminated c-1"]
-    assert fake_action == [[{"cluster_id": "c-1", "action": "terminate"}]]
-    # The plan is consumed: a retry must re-plan against current state.
-    retry = client.post("/api/actions/stale-clusters/apply", json=request)
-    assert retry.status_code == 404
-    assert retry.json()["error"] == "plan_not_found"
-    assert len(fake_action) == 1
-
-
-def test_apply_without_body_is_rejected(client, monkeypatch):
-    monkeypatch.setenv("DBX_PLATFORM_CONSOLE_ACTIONS", "true")
-    assert client.post("/api/actions/stale-clusters/apply").status_code == 422
-
-
-def test_unknown_action_is_404(client):
-    assert client.post("/api/actions/delete-everything/plan").status_code == 404
+def test_legacy_action_http_routes_are_removed(client):
+    # The SPA's GET-only catch-all can make an unmatched POST surface as 405;
+    # route enumeration above proves neither legacy handler is registered.
+    assert client.post("/api/actions/stale-clusters/plan").status_code in {404, 405}
+    assert client.post("/api/actions/stale-clusters/apply").status_code in {404, 405}
 
 
 def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
+    repo = deps.get_control_plane_repository()
+    repo.add_managed_resource({
+        "workspace_id": "local",
+        "environment": "dev",
+        "resource_id": "7",
+        "resource_type": "JOB",
+        "ownership": "BUNDLE",
+        "protected": False,
+    })
     job = MagicMock()
     job.job_id = 7
     job.settings.name = "[dbx-platform] cost-usage-report"
+    job.settings.as_dict.return_value = {
+        "name": job.settings.name,
+        "tasks": [{"task_key": "report"}],
+    }
+    job.run_as_user_name = "runner@example.com"
     other = MagicMock()
     other.job_id = 8
     other.settings.name = "someone-elses-etl"
     ws.jobs.list.return_value = [job, other]
+    ws.jobs.get.return_value = job
     assert client.post("/api/jobs/8/run_now").status_code == 404
     ws.jobs.run_now.assert_not_called()
-    ws.jobs.run_now.return_value.run_id = 99
     resp = client.post("/api/jobs/7/run_now")
-    assert resp.status_code == 200
-    assert resp.json()["run_id"] == 99
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "approval_required"
+    ws.jobs.run_now.assert_not_called()
+
+
+def test_protected_manual_job_is_admitted_only_by_exact_bound_id(
+    client,
+    ws,
+    monkeypatch,
+):
+    monkeypatch.setenv("DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS", "91")
+    training = MagicMock()
+    training.job_id = 91
+    training.settings.name = "[dbx-platform] cost-forecast-train"
+    training.settings.as_dict.return_value = {
+        "name": training.settings.name,
+        "tasks": [{"task_key": "train"}],
+    }
+    training.run_as_user_name = "forecast-executor"
+    unrelated = MagicMock()
+    unrelated.job_id = 92
+    unrelated.settings.name = "[dbx-platform] similarly-named-but-unbound"
+    ws.jobs.list.return_value = [training, unrelated]
+    ws.jobs.get.return_value = training
+
+    allowed = client.post("/api/jobs/91/run_now")
+    excluded = client.post("/api/jobs/92/run_now")
+
+    assert allowed.status_code == 409
+    assert allowed.json()["error"] == "approval_required"
+    assert excluded.status_code == 404
+    ws.jobs.run_now.assert_not_called()
 
 
 def test_system_tables_error_maps_to_friendly_503(client, monkeypatch):
@@ -264,6 +346,7 @@ def test_system_tables_error_maps_to_friendly_503(client, monkeypatch):
     resp = client.get("/api/cost/usage")
     assert resp.status_code == 503
     assert resp.json()["error"] == "system_tables_unavailable"
+    assert "system tables not enabled" not in resp.json()["message"]
 
 
 def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
@@ -281,6 +364,22 @@ def test_chat_degrades_when_the_agent_endpoint_is_missing(client, ws):
     assert resp.json()["error"] == "agent_unavailable"
 
 
+def test_chat_denies_viewers_before_invoking_app_sp_agent(
+    client,
+    ws,
+    monkeypatch,
+):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    resp = client.post(
+        "/api/chat",
+        json={"messages": [{"role": "user", "content": "show token owners"}]},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "unauthorized"
+    ws.api_client.do.assert_not_called()
+
+
 def test_chat_parses_agent_proposals(client, ws):
     ws.api_client.do.return_value = {
         "output": [{
@@ -291,11 +390,29 @@ def test_chat_parses_agent_proposals(client, ws):
             )}],
         }],
     }
-    resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "clean up"}]})
+    resp = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "clean up"}],
+            "context": {
+                "route": "/security-risk",
+                "query": "?severity=critical",
+                "filters": {"severity": "critical"},
+                "selected_resources": [{"resource_type": "TOKEN", "count": "2"}],
+            },
+        },
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
+    invocation = ws.api_client.do.call_args.kwargs["body"]["input"]
+    assert invocation[0]["role"] == "system"
+    assert "Every factual claim must cite" in invocation[0]["content"]
+    assert invocation[1]["role"] == "system"
+    assert "PAGE_CONTEXT" in invocation[1]["content"]
+    assert "/security-risk" in invocation[1]["content"]
+    assert invocation[-1] == {"role": "user", "content": "clean up"}
 
 
 # --- proposal marker parsing (pure) ----------------------------------------

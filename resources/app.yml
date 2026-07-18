@@ -1,10 +1,7 @@
-# Platform Console — Databricks App (third surface of the same code path:
-# CLI, scheduled jobs, app). FastAPI backend + React SPA. Report-only by
-# default: remediation actions exist but sit behind the off-by-default
-# DBX_PLATFORM_CONSOLE_ACTIONS gate in app.yaml plus a dry-run plan and a
-# typed confirmation (see docs/runbook.md). Grant CAN_MANAGE_RUN on the
-# report jobs after the first deploy so the Jobs page can kick them off, and
-# CAN_QUERY on the platform agent's serving endpoint for the Chat page.
+# Mission Control Databricks App (FastAPI + React). Proposal-only by default.
+# Verified users create/approve durable plans; the read-only app identity can
+# submit only an approved action ID to governed executor Jobs. It has no target
+# mutation or Unity Catalog MODIFY permission.
 #
 # The app installs dbx-platform from a wheel staged into
 # apps/platform-console/wheels/ and serves the SPA from
@@ -15,9 +12,59 @@ resources:
       name: "platform-console"
       description: "dbx-platform findings, remediation planning, AI digests, agent chat"
       source_code_path: ../apps/platform-console
+      user_api_scopes:
+        - iam.current-user:read
+        - iam.access-control:read
+        - sql
+      lifecycle:
+        prevent_destroy: true
+        started: false
+      config:
+        command: ["python", "main.py"]
+        env:
+          - name: DBX_PLATFORM_WAREHOUSE_ID
+            value_from: sql-warehouse
+          - name: DBX_PLATFORM_POWER_CONTROLLER_JOB_ID
+            value_from: power-controller
+          - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
+            value_from: action-executor
+          # Exact bundle-bound manual Jobs that Action Center may plan. These
+          # remain protected/outside the Hibernate inventory.
+          - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
+            value_from: governed-forecast-training
+          - name: DBX_PLATFORM_ENVIRONMENT
+            value: ${bundle.target}
+          - name: DBX_PLATFORM_APPROVER_GROUP
+            value: ${var.approver_group}
+          - name: DBX_PLATFORM_OPERATOR_GROUP
+            value: ${var.operator_group}
+          - name: DBX_PLATFORM_CONSOLE_ACTIONS
+            value: ${var.actions_enabled}
       resources:
         - name: sql-warehouse
-          description: Warehouse for system-table queries and findings tables
+          description: Dedicated bundle-owned warehouse for Mission Control
           sql_warehouse:
-            id: ${var.warehouse_id}
+            id: ${resources.sql_warehouses.platform_console_warehouse.id}
             permission: CAN_USE
+        - name: power-controller
+          description: >
+            Submit an already approved runtime action to the out-of-band
+            controller; the app service principal cannot execute it directly.
+          job:
+            id: ${resources.jobs.power_controller.id}
+            permission: CAN_MANAGE_RUN
+        - name: action-executor
+          description: >
+            Submit an approved non-runtime action ID to the dedicated executor;
+            no execution payload is accepted from the app.
+          job:
+            id: ${resources.jobs.action_executor.id}
+            permission: CAN_MANAGE_RUN
+        - name: governed-forecast-training
+          description: >
+            Read the exact protected forecast-training Job definition so
+            Action Center can hash and revalidate it. The App cannot run it
+            directly; execution is submitted only through action-executor.
+          job:
+            id: ${resources.jobs.cost_forecast_train.id}
+            permission: CAN_VIEW

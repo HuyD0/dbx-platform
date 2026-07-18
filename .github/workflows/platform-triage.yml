@@ -1,9 +1,11 @@
 name: Platform triage
 
-# Weekly findings -> rolling GitHub issue -> @claude proposes fixes as PRs.
+# Human-dispatched findings -> rolling GitHub issue -> @claude proposes fixes
+# as PRs. This workflow is deliberately unscheduled: Hibernate must not have
+# any out-of-band timer capable of starting SQL compute.
 # The agent never touches the workspace: remediation lands as reviewable git
-# changes (policies/*.json, job specs), humans merge, CI deploys. --apply
-# paths remain human-invoked.
+# changes (policies/*.json, job specs), humans merge, CI deploys. Any resulting
+# platform/configuration mutation still requires a Mission Control action.
 #
 # Auth rules (see CLAUDE.md): this job touches the workspace, so it MUST
 # declare environment: production and id-token: write, and MUST NOT run on
@@ -11,8 +13,6 @@ name: Platform triage
 # untrusted PR-branch code.
 
 on:
-  schedule:
-    - cron: "0 9 * * 1" # weekly Monday 09:00 UTC, after the digest job
   workflow_dispatch:
 
 jobs:
@@ -26,7 +26,8 @@ jobs:
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_AUTH_TYPE: azure-cli
-      DBX_PLATFORM_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+      BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
+      BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +42,32 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
+      - name: Install the Databricks CLI
+        # Pinned to the same immutable commit as ci.yml and deploy.yml.
+        uses: databricks/setup-cli@71b5fa6b2b94c9a543658f65ebb6b477913f8626 # v1.6.0
+      - name: Verify executor identity separation
+        run: |
+          if [ -z "$BUNDLE_VAR_runtime_executor_service_principal_name" ] ||
+             [ -z "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
+            echo "Both executor service-principal variables are required." >&2
+            exit 1
+          fi
+          if [ "$BUNDLE_VAR_runtime_executor_service_principal_name" = \
+               "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
+            echo "Runtime and action executors must use separate service principals." >&2
+            exit 1
+          fi
+      - name: Resolve the bundle-owned SQL warehouse
+        # Pull the deployed bundle state and use the exact logical resource
+        # key. Never search warehouses by name and never fall back to shared
+        # compute. A missing deployment ID fails the workflow closed.
+        run: |
+          warehouse_id="$(
+            databricks bundle summary -t prod --force-pull --output json |
+            jq -er '.resources.sql_warehouses.platform_console_warehouse.id
+              | select(type == "string" and length > 0 and (contains("${") | not))'
+          )"
+          printf 'DBX_PLATFORM_WAREHOUSE_ID=%s\n' "$warehouse_id" >> "$GITHUB_ENV"
       - name: Run checks (report-only, JSON output)
         run: |
           mkdir -p findings

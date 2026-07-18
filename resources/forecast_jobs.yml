@@ -1,9 +1,10 @@
-# ML cost forecasting — the MLOps loop as two scheduled jobs.
+# ML cost forecasting — one manual training Job and one scheduled inference Job.
 #
-# Training (weekly): rolling-origin backtest of a seasonal-naive baseline vs
-# LightGBM quantile models, MLflow experiment tracking, UC registry with
-# @challenger on every run and @champion moved only through the promotion
-# gate.
+# Training (manual, approval-gated): rolling-origin backtest of a
+# seasonal-naive baseline vs LightGBM quantile models, MLflow experiment
+# tracking, UC registry with @challenger on every run and @champion moved only
+# through the promotion gate. It has no schedule because training/promotion is
+# a stateful and potentially expensive action.
 #
 # Daily: rebuild features from the ingested bill -> batch inference from
 # @champion into cost_forecasts -> drift + accuracy monitor (fails the job on
@@ -16,17 +17,28 @@ resources:
     cost_forecast_train:
       name: "[dbx-platform] cost-forecast-train"
       description: >
-        Weekly training for the Azure cost forecaster: backtest, MLflow
+        Approval-gated training for the Azure cost forecaster: backtest, MLflow
         experiment logging, UC registration and the champion/challenger
         promotion gate on backtest WAPE.
-      schedule:
-        quartz_cron_expression: "0 0 5 ? * MON"  # weekly, Monday 05:00 UTC
-        timezone_id: UTC
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      run_as:
+        service_principal_name: ${var.action_executor_service_principal_name}
+      permissions:
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+        - group_name: ${var.approver_group}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -47,7 +59,12 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["forecast", "train",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--environment", "${bundle.target}"]
 
     cost_forecast_daily:
       name: "[dbx-platform] cost-forecast-daily"
@@ -58,11 +75,24 @@ resources:
       schedule:
         quartz_cron_expression: "0 15 7 * * ?"  # daily 07:15 UTC
         timezone_id: UTC
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -83,7 +113,13 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["forecast", "build-features",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
         - task_key: predict
           depends_on:
             - task_key: build_features
@@ -93,7 +129,13 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["forecast", "predict",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
         - task_key: monitor
           depends_on:
             - task_key: predict
@@ -103,4 +145,10 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["forecast", "monitor",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

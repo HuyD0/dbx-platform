@@ -52,6 +52,38 @@ body {
   color: var(--color-ink);
 }
 
+html {
+  color-scheme: light;
+  scroll-behavior: smooth;
+}
+.dark {
+  color-scheme: dark;
+}
+body {
+  min-width: 320px;
+  min-height: 100vh;
+}
+button,
+a,
+input,
+select,
+textarea,
+[tabindex] {
+  outline: none;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
 /* Ambient glows behind the glass — without depth to blur, glassmorphism
    reads as flat gray. Fixed so scrolling content slides over the light. */
 body {
@@ -101,6 +133,9 @@ body {
 }
 .glass-edge-l {
   border-width: 0 0 0 1px; /* full-height right panel: left edge only */
+}
+.glass-edge-b {
+  border-width: 0 0 1px; /* mobile header: bottom edge only */
 }
 .glass-hover-accent:hover {
   border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
@@ -154,3 +189,14 @@ body {
 }
 .prose-console strong { font-weight: 600; }
 .prose-console a { color: var(--color-accent); text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

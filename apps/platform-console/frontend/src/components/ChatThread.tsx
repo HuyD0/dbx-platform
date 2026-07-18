@@ -1,12 +1,10 @@
-import { ArrowUp, DollarSign, Gauge, Play, Shield, Sparkles } from "lucide-react";
+import { ArrowUp, DollarSign, Gauge, Shield, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { useMutation } from "@tanstack/react-query";
-import { apiPost } from "../lib/api";
 import { useChat } from "../lib/chat";
 import type { Proposal } from "../lib/types";
-import { ActionPlanDialog } from "./ActionPlanDialog";
-import { Badge, ErrorState } from "./ui";
+import { ActionPlanDialog, PlanActionButton } from "./ActionPlanDialog";
+import { ErrorState } from "./ui";
 
 const SUGGESTIONS = [
   {
@@ -36,28 +34,17 @@ const SUGGESTIONS = [
 ];
 
 function JobProposalCard({ proposal }: { proposal: Proposal }) {
-  const run = useMutation({
-    mutationFn: () => apiPost<{ run_id: number }>(`/api/jobs/${proposal.job_id}/run_now`),
-  });
   return (
     <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
-        Run <span className="font-medium text-ink">{proposal.name}</span>?
+        Proposed job run: <span className="font-medium text-ink">{proposal.name}</span>
       </span>
-      {run.data ? (
-        <Badge tone="good">started run {run.data.run_id}</Badge>
-      ) : (
-        <button
-          type="button"
-          onClick={() => run.mutate()}
-          disabled={run.isPending}
-          className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 font-medium text-ink hover:bg-hairline disabled:opacity-50"
-        >
-          <Play className="h-3 w-3" />
-          Run job
-        </button>
-      )}
-      {run.isError && <ErrorState error={run.error} />}
+      <PlanActionButton
+        action="run-job"
+        label="Review exact plan"
+        parameters={{ job_id: proposal.job_id, job_name: proposal.name }}
+        allowLegacy={false}
+      />
     </div>
   );
 }
@@ -158,8 +145,8 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
               What should we look at?
             </p>
             <p className="max-w-md text-sm text-ink-2">
-              Same read-only checks as the CLI. When something needs changing, you get a
-              confirmation card — nothing happens without you.
+              I can investigate the page you are viewing and draft evidence-backed plans.
+              Every change is revalidated and requires your exact-plan approval.
             </p>
             <div
               className={`grid w-full gap-3 ${
@@ -234,7 +221,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
       <div className={compact ? "border-t border-grid p-3" : "mx-auto w-full max-w-3xl pb-4"}>
         <Composer autoFocus={!compact} />
         <p className="mt-2 text-center text-[10px] text-muted">
-          The agent is read-only — every change requires your typed confirmation.
+          AI can investigate and propose. It cannot execute without a human-approved plan.
         </p>
       </div>
     </div>

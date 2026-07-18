@@ -1,0 +1,119 @@
+# Dedicated, bundle-owned compute and the out-of-band Hibernate/Wake controller.
+#
+# The controller has no schedule and no idle compute. It is intentionally NOT in
+# its own managed inventory, so it remains callable from the Jobs UI while the
+# Platform Console app and its SQL warehouse are stopped.
+resources:
+  sql_warehouses:
+    platform_console_warehouse:
+      name: "[dbx-platform] mission-control"
+      cluster_size: "2X-Small"
+      warehouse_type: PRO
+      enable_serverless_compute: true
+      enable_photon: true
+      min_num_clusters: 1
+      max_num_clusters: 1
+      auto_stop_mins: 5
+      lifecycle:
+        prevent_destroy: true
+        started: false
+      tags:
+        custom_tags:
+          - key: project
+            value: dbx-platform
+          - key: team
+            value: platform
+          - key: ownership
+            value: bundle
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          # CAN_MANAGE is the minimum SQL warehouse ACL that can both inspect
+          # all active queries and stop the warehouse. The app remains CAN_USE.
+          level: CAN_MANAGE
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_USE
+
+  jobs:
+    power_controller:
+      name: "[dbx-platform] power-controller"
+      description: >
+        Unscheduled, serverless recovery path for exact-plan Hibernate/Wake.
+        Planning is read-only. Execution requires a 15-minute canonical plan,
+        matching SHA-256 hash, exact confirmation phrase, and membership in
+        dbx-platform-approvers. This job is excluded from its managed inventory.
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      run_as:
+        service_principal_name: ${var.runtime_executor_service_principal_name}
+      tags:
+        team: platform
+        project: dbx-platform
+        control_plane: power-controller
+      permissions:
+        - group_name: ${var.approver_group}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_MANAGE_RUN
+      parameters:
+        - name: operation
+          default: reconcile
+        - name: plan_id
+          default: ""
+        - name: plan_hash
+          default: ""
+        - name: confirmation
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: runtime_control
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/dbx_platform/runtime_control.py
+            parameters:
+              - --operation
+              - "{{job.parameters.operation}}"
+              - --plan-id
+              - "{{job.parameters.plan_id}}"
+              - --plan-hash
+              - "{{job.parameters.plan_hash}}"
+              - --confirmation
+              - "{{job.parameters.confirmation}}"
+              - --run-id
+              - "{{job.run_id}}"
+              - --environment
+              - ${bundle.target}
+              - --approver-group
+              - ${var.approver_group}
+              - --expected-executor
+              - ${var.runtime_executor_service_principal_name}
+              - --warehouse-id
+              - ${resources.sql_warehouses.platform_console_warehouse.id}
+              - --app-name
+              - ${resources.apps.platform_console.name}
+              - --job
+              - cost_usage_report=${resources.jobs.cost_usage_report.id}
+              - --job
+              - housekeeping_report=${resources.jobs.housekeeping_report.id}
+              - --job
+              - security_audit=${resources.jobs.security_audit.id}
+              - --job
+              - governance_check=${resources.jobs.governance_check.id}
+              - --job
+              - platform_digest=${resources.jobs.platform_digest.id}
+              - --job
+              - ml_serving_report=${resources.jobs.ml_serving_report.id}
+              - --job
+              - ml_hygiene_report=${resources.jobs.ml_hygiene_report.id}
+              - --job
+              - dashboards_setup=${resources.jobs.dashboards_setup.id}
+              - --job
+              - azure_cost_pull=${resources.jobs.azure_cost_pull.id}
+              - --job
+              - cost_forecast_daily=${resources.jobs.cost_forecast_daily.id}
+              - --job
+              - llm_cost_rollup=${resources.jobs.llm_cost_rollup.id}

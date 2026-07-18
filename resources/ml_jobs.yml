@@ -1,6 +1,5 @@
-# AI/ML workload reports. Tasks run the same CLI you use locally:
-#   dbx-platform ml endpoint-audit / dbx-platform ml serving-cost
-# REPORT-ONLY on a schedule: no --apply here (ml checks have none by design).
+# Read-only ML/serving evidence; endpoint/model changes are not executor actions
+# in v1.
 resources:
   jobs:
     ml_serving_report:
@@ -12,11 +11,19 @@ resources:
       schedule:
         quartz_cron_expression: "0 30 7 * * ?"  # daily 07:30 UTC
         timezone_id: UTC
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -34,7 +41,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["ml", "endpoint-audit", "--stale-days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: serving_cost
           environment_key: default
           python_wheel_task:
@@ -42,7 +49,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["ml", "serving-cost", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
 
     ml_hygiene_report:
       name: "[dbx-platform] ml-hygiene-report"
@@ -53,11 +60,19 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 7 ? * MON"  # weekly Monday 07:00 UTC
         timezone_id: UTC
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -83,7 +98,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["ml", "gpu-audit", "--max-uptime-hours", "8",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: vector_search_audit
           environment_key: default
           python_wheel_task:

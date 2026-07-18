@@ -6,17 +6,20 @@ spend chart, so each section resolves to {data} or {error}.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from backend import cache, deps
 from backend.errors import payload
+from backend.identity import mask_for_viewer
 from backend.models import envelope
 from dbx_platform import cost
 from dbx_platform.system_tables import run_query
 
 router = APIRouter()
+log = logging.getLogger("platform_console")
 
 
 def _latest_findings() -> list[dict]:
@@ -32,8 +35,15 @@ def _latest_findings() -> list[dict]:
 def _section(loader):
     try:
         return {"data": loader()}
-    except Exception as e:  # noqa: BLE001 — sections degrade independently
-        return {"error": payload(type(e).__name__, str(e))}
+    except Exception as exc:  # noqa: BLE001 — sections degrade independently
+        log.info("overview dependency unavailable", exc_info=exc)
+        return {
+            "error": payload(
+                "dependency_unavailable",
+                "This data source is currently unavailable.",
+                "Check source health in Settings and run the governed collector.",
+            )
+        }
 
 
 @router.get("/api/overview")
@@ -74,8 +84,25 @@ def overview(refresh: bool = False) -> dict:
 
 
 @router.get("/api/findings")
-def findings(area: str | None = None, refresh: bool = False) -> dict:
-    data, as_of, hit = cache.cached("findings", _latest_findings, refresh)
-    if area:
-        data = [r for r in data if r["area"] == area]
-    return envelope(data, as_of, hit)
+def findings(
+    request: Request,
+    area: str | None = None,
+    pillar: str | None = None,
+    state: str | None = None,
+    limit: int = 500,
+    refresh: bool = False,
+) -> dict:
+    """Canonical findings, with ``area`` retained as a compatibility alias."""
+    selected_pillar = pillar or (area.upper() if area else None)
+
+    def load() -> list[dict]:
+        return deps.get_control_plane_repository().list_findings(
+            pillar=selected_pillar,
+            state=state,
+            limit=max(1, min(limit, 1000)),
+        )
+
+    cache_key = f"findings:{selected_pillar}:{state}:{limit}"
+    data, as_of, hit = cache.cached(cache_key, load, refresh)
+    actor = deps.require_verified_user(request)
+    return envelope([mask_for_viewer(row, actor) for row in data], as_of, hit)

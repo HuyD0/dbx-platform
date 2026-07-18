@@ -1,41 +1,39 @@
 # AI/BI (Lakeview) dashboards, adapted from the community suite
 # github.com/mohanab89/databricks-dashboard-suite (see README attribution).
 #
-# The helper functions/tables these dashboards query (in main.dbx_platform) are
-# provisioned by the `dashboards_setup` job (resources/dashboards_jobs.yml): it
-# runs daily and once per prod deploy, so a fresh deploy resolves without a
-# manual step. Run `dbx-platform dashboards setup --warehouse-id <id>` yourself
-# only to provision immediately (e.g. in dev). If you change the catalog/schema,
-# re-render and commit, and update dashboards_jobs.yml to match:
+# The deployment-only `schema_migrations` job provisions helper objects in
+# main.dbx_platform. The scheduled `dashboard-dependency-health` job is
+# read-only and reports missing dependencies. If you change catalog/schema,
+# re-render, commit, and update the migration/health configuration to match:
 #   dbx-platform dashboards render --catalog <c> --schema <s>
 resources:
   dashboards:
     unified_cost_analysis:
       display_name: "[dbx-platform] Unified Cost Analysis"
       file_path: ../dashboards/unified_cost_analysis.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
 
     job_operations_cost:
       display_name: "[dbx-platform] Job Operations & Cost Management"
       file_path: ../dashboards/job_operations_cost.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
 
     dbsql_cost_performance:
       display_name: "[dbx-platform] DBSQL Cost & Query Performance"
       file_path: ../dashboards/dbsql_cost_performance.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
 
     lineage_catalog_utilization:
       display_name: "[dbx-platform] Data Lineage & Catalog Utilization"
       file_path: ../dashboards/lineage_catalog_utilization.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
 
     azure_cost_forecast:
       display_name: "[dbx-platform] Azure Bill & Cost Forecast"
       file_path: ../dashboards/azure_cost_forecast.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false

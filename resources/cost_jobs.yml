@@ -10,11 +10,19 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 7 * * ?"  # daily 07:00 UTC
         timezone_id: UTC
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -32,7 +40,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "report", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: top_jobs_by_cost
           environment_key: default
           python_wheel_task:
@@ -40,7 +48,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "top-jobs", "--days", "30", "--limit", "20",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: cluster_utilization
           environment_key: default
           python_wheel_task:
@@ -48,7 +56,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "cluster-utilization", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: failed_run_waste
           environment_key: default
           python_wheel_task:
@@ -56,7 +64,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "failed-run-waste", "--days", "30", "--limit", "20",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
         - task_key: warehouse_utilization
           environment_key: default
           python_wheel_task:
@@ -64,4 +72,4 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "warehouse-utilization", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
