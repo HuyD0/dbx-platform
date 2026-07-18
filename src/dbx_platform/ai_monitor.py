@@ -326,7 +326,10 @@ def classify_ai_monitoring(
             spikes.append(
                 {
                     "name": f"{endpoint}/{app}",
-                    "resource_id": endpoint,
+                    # resource_id must carry the app too: finding_id hashes
+                    # (resource_id, action), and two apps spiking on one
+                    # endpoint are distinct findings.
+                    "resource_id": f"{endpoint}/{app}",
                     "endpoint_name": endpoint,
                     "app": app,
                     "resource_type": "SERVING_ENDPOINT",

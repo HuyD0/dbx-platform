@@ -75,6 +75,23 @@ def test_spike_at_exact_threshold_flagged(now_ms):
     assert spike["name"] == "churn-api/checkout"
 
 
+def test_two_apps_spiking_on_one_endpoint_stay_distinct_findings(now_ms):
+    from dbx_platform.digest import flatten_findings
+
+    rows = []
+    for app in ("checkout", "support"):
+        rows += [_day(f"2026-07-{d:02d}", 100, 0, app=app) for d in range(10, 16)]
+        rows.append(_day("2026-07-16", 100, 20, app=app))
+        rows.append(_day("2026-07-17", 10, 0, app=app))
+    findings = classify_ai_monitoring(rows, [], [], now_ms, **THRESHOLDS)
+    spikes = findings["ai-monitor/error-rate-spike"]
+    assert {s["resource_id"] for s in spikes} == {
+        "churn-api/checkout", "churn-api/support",
+    }
+    flattened = flatten_findings({"ai-monitor/error-rate-spike": spikes})
+    assert len({row["finding_id"] for row in flattened}) == 2
+
+
 def test_partial_newest_day_never_flagged(now_ms):
     rows = [_day(f"2026-07-{d:02d}", 100, 5) for d in range(10, 17)]
     rows.append(_day("2026-07-17", 100, 90))  # disastrous but still partial
