@@ -276,11 +276,15 @@ Those bindings let the app submit only executor Job parameters. Its exact
 protected-forecast ID binding requires `CAN_VIEW` so bundle reconciliation
 cannot overwrite that Job ACL; only the action executor has `CAN_MANAGE_RUN`.
 
-Required user API scopes are:
+Databricks automatically grants the two default identity scopes when user
+authorization is enabled:
 
 - `iam.current-user:read`;
-- `iam.access-control:read`;
-- `sql`.
+- `iam.access-control:read`.
+
+Do not submit those defaults explicitly in the App resource: workspaces can
+reject them as invalid explicit scopes. The only additional scope declared by
+dbx-platform is `sql`.
 
 Do not add broad workspace-management scopes to make authorization easier.
 

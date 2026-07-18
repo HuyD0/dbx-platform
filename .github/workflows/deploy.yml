@@ -107,7 +107,33 @@ jobs:
       - name: Validate
         run: databricks bundle validate -t prod
       - name: Deploy
-        run: databricks bundle deploy -t prod
+        # Existing Lakeview dashboards have stable IDs and shared URLs. Their
+        # warehouse binding cannot be changed in place by DAB, so including
+        # them here would require delete/recreate. Dashboard replacement is
+        # deliberately excluded until it has its own approved migration.
+        #
+        # Keep this allowlist explicit: production deploys may create/update
+        # the app, owned jobs, and the dedicated warehouse, but must never use
+        # --auto-approve to cross a destructive plan.
+        run: |
+          databricks bundle deploy -t prod \
+            --select apps.platform_console \
+            --select sql_warehouses.platform_console_warehouse \
+            --select jobs.action_executor \
+            --select jobs.azure_cost_pull \
+            --select jobs.cost_forecast_daily \
+            --select jobs.cost_forecast_train \
+            --select jobs.cost_usage_report \
+            --select jobs.dashboards_setup \
+            --select jobs.governance_check \
+            --select jobs.housekeeping_report \
+            --select jobs.llm_cost_rollup \
+            --select jobs.ml_hygiene_report \
+            --select jobs.ml_serving_report \
+            --select jobs.platform_digest \
+            --select jobs.power_controller \
+            --select jobs.schema_migrations \
+            --select jobs.security_audit
       - name: Apply Mission Control schema migrations
         # Runs on serverless Spark as the deployment identity. It never starts
         # the managed SQL warehouse, so deploy-while-sleeping stays asleep.

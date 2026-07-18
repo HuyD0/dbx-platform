@@ -37,6 +37,13 @@ artifacts:
     build: python3 -m build --wheel
 
 variables:
+  platform_console_name:
+    description: >
+      Stable Databricks App resource name shared with the out-of-band runtime
+      controller. Keeping this as configuration avoids an App ↔ controller Job
+      dependency cycle while preserving an exact, non-discovered target.
+    default: platform-console
+
   actions_enabled:
     description: >
       Enables approval and executor submission in the Platform Console. Keep

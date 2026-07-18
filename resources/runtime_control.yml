@@ -94,7 +94,7 @@ resources:
               - --warehouse-id
               - ${resources.sql_warehouses.platform_console_warehouse.id}
               - --app-name
-              - ${resources.apps.platform_console.name}
+              - ${var.platform_console_name}
               - --job
               - cost_usage_report=${resources.jobs.cost_usage_report.id}
               - --job
