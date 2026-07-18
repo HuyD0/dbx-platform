@@ -101,5 +101,6 @@ export interface DashboardInfo {
 export interface HealthResponse {
   status: string;
   version: string;
+  build?: { sha: string; built_at: string } | null;
   actions_enabled: boolean;
 }

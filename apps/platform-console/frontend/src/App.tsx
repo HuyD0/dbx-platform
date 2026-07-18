@@ -106,7 +106,10 @@ export default function App() {
               </Badge>
             )}
             <div className="flex items-center justify-between text-[11px] text-muted">
-              <span>{health.data ? `v${health.data.version}` : ""}</span>
+              <span>
+                {health.data ? `v${health.data.version}` : ""}
+                {health.data?.build ? ` · ${health.data.build.sha}` : ""}
+              </span>
               <button
                 type="button"
                 onClick={toggle}
