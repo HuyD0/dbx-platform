@@ -1,16 +1,19 @@
 # dbx-platform
 
-Databricks platform-management toolkit: admin CLI, scheduled jobs, AI/BI dashboards,
+Databricks platform-management toolkit: admin CLI, bundle jobs, AI/BI dashboards,
 and cluster policies as code, deployed with Databricks Asset Bundles.
 
 ## Core design invariant
 
 Every check is **one code path exposed two ways**: an ad-hoc CLI command, and a
-bundle-deployed job that runs the same code on a schedule via `python_wheel_task`
-against the `dbx-platform` entry point. When you add a check, wire up both — a CLI
-subcommand in `src/dbx_platform/cli.py` and a task in the matching `resources/*.yml`.
-Never let the scheduled path drift into a separate implementation. The **`add-check`
-skill** (`.claude/skills/add-check/`) walks the full procedure end to end — use it.
+bundle-deployed job that runs the same code via `python_wheel_task` against the
+`dbx-platform` entry point. When you add a check, wire up both — a CLI subcommand
+in `src/dbx_platform/cli.py` and a task in the matching `resources/*.yml`. Never
+let the job path drift into a separate implementation. Job schedules are committed
+`pause_status: PAUSED` — the cron documents intended cadence, but every run is
+human-initiated (console Jobs page, agent proposal, or `databricks bundle run`).
+The **`add-check` skill** (`.claude/skills/add-check/`) walks the full procedure
+end to end — use it.
 
 ## Safety model
 
@@ -63,7 +66,8 @@ dashboards and system-table tasks need it.
 
 - `dev` (default) — `mode: development`, resources prefixed `[dev <user>]`, schedules
   paused, deployed under your user folder. Safe to iterate.
-- `prod` — real names, active schedules, shared root path. Deployed by CI on push to `main`.
+- `prod` — real names, shared root path, schedules committed PAUSED (runs are
+  human-initiated). Deployed by CI on push to `main`.
 
 ## Commands
 

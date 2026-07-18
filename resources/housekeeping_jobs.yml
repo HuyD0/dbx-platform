@@ -11,6 +11,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 30 5 * * ?"  # daily 05:30 UTC
         timezone_id: UTC
+        pause_status: PAUSED  # run manually; cron above documents intended cadence
       tags:
         team: platform
         project: dbx-platform

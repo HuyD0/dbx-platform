@@ -12,7 +12,7 @@ name: Platform triage
 
 on:
   schedule:
-    - cron: "0 9 * * 1" # weekly Monday 09:00 UTC, after the digest job
+    - cron: "0 9 * * 1" # weekly Monday 09:00 UTC (runs its own checks — the bundle jobs stay paused)
   workflow_dispatch:
 
 jobs:

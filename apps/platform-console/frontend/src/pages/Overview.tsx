@@ -50,7 +50,7 @@ export function Overview() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted">
-          Findings from the scheduled checks; run any check fresh from its area page.
+          Findings from stored check runs; run any check fresh from its area page.
         </p>
         <AsOf
           asOf={query.data.as_of}
@@ -93,7 +93,7 @@ export function Overview() {
         <Card>
           <SectionTitle
             title="Findings by area"
-            subtitle="Latest stored run of the scheduled checks"
+            subtitle="Latest stored run of the platform checks"
           />
           {findings ? (
             Object.keys(findings.by_area).length > 0 ? (

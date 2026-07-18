@@ -113,13 +113,13 @@ export function Digest() {
       </Card>
 
       <Card>
-        <SectionTitle title="Stored digests" subtitle="Written by the weekly digest job" />
+        <SectionTitle title="Stored digests" subtitle="Written by the platform-digest job — run it from the Jobs page" />
         {query.isPending ? (
           <Skeleton rows={4} />
         ) : query.isError ? (
           <ErrorState error={query.error} />
         ) : query.data.data.length === 0 ? (
-          <EmptyState message="No digests stored yet — generate one above or wait for the weekly job." />
+          <EmptyState message="No digests stored yet — generate one above or run the platform-digest job from the Jobs page." />
         ) : (
           <div className="space-y-2">
             {query.data.data.map((row, i) => (
