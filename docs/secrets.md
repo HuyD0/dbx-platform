@@ -10,7 +10,7 @@ get_secret("dbx://my-scope/api-key")          # Databricks secret scope (incl. A
 get_secret("akv://corp-vault/db-password")    # Azure Key Vault directly
 ```
 
-Install the Azure extra for `akv://` refs: `pip install -e ".[azure]"` (or
+Install the Azure extra for `akv://` refs: `uv sync --extra azure` (or
 `%pip install /Volumes/.../dbx_platform-...whl azure-identity azure-keyvault-secrets`
 in a notebook).
 

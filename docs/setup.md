@@ -3,10 +3,8 @@
 ## 1. Install
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-dbx-platform --version
+uv sync --extra dev
+uv run dbx-platform --version
 ```
 
 Install Databricks CLI v0.218 or newer.
@@ -88,8 +86,8 @@ export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-client-id>
 # actions_enabled defaults to false
 
-ruff check .
-pytest
+uv run ruff check .
+uv run pytest
 databricks bundle validate -t dev -p dbx-platform
 databricks bundle deploy -t dev -p dbx-platform
 databricks bundle run schema_migrations -t dev -p dbx-platform

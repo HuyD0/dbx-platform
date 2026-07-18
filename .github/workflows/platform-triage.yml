@@ -36,8 +36,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
       - name: Install
-        run: pip install -e .
+        run: uv sync
       - name: Azure login (OIDC, keyless)
         uses: azure/login@v2
         with:

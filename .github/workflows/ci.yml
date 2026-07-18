@@ -22,14 +22,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
       - name: Install
-        run: pip install -e ".[dev]"
+        run: uv sync --extra dev
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
       - name: Test
-        run: pytest
+        run: uv run pytest
       - name: Build wheel
-        run: python -m build --wheel
+        run: uv run python -m build --wheel
       - name: Verify packaged data (queries + policies ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
