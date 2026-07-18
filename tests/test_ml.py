@@ -314,6 +314,12 @@ def test_young_endpoint_with_zero_indexes_not_flagged(now_ms):
     assert find_vector_search_findings([e], now_ms, grace_hours=24) == []
 
 
+def test_fifteen_minute_vector_search_grace_flags_older_idle_endpoint(now_ms):
+    e = _vs_endpoint(num_indexes=0, created_ms=hours_ago(1))
+    findings = find_vector_search_findings([e], now_ms, grace_hours=0.25)
+    assert [f["name"] for f in findings] == ["vs-main"]
+
+
 def test_unhealthy_endpoint_flagged_for_review(now_ms):
     findings = find_vector_search_findings(
         [_vs_endpoint(status="RED_STATE")], now_ms, grace_hours=24

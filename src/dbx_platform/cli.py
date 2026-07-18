@@ -1045,8 +1045,13 @@ def cmd_ml_gpu_audit(args) -> int:
 def cmd_ml_vector_search_audit(args) -> int:
     s = Settings.from_env()
     w = get_client(args.profile)
+    grace_hours = (
+        args.grace_minutes / 60
+        if args.grace_minutes is not None
+        else s.vector_search_grace_hours
+    )
     findings = ml.find_vector_search_findings(
-        ml.fetch_vector_search(w), _now_ms(), s.vector_search_grace_hours
+        ml.fetch_vector_search(w), _now_ms(), grace_hours
     )
     emit(
         args,
@@ -1961,6 +1966,12 @@ def build_parser() -> argparse.ArgumentParser:
         "vector-search-audit",
         parents=[common],
         help="Vector search endpoints: no indexes / unhealthy",
+    )
+    x.add_argument(
+        "--grace-minutes",
+        type=int,
+        default=None,
+        help="Minimum endpoint age before idle findings; overrides env grace hours",
     )
     x.set_defaults(func=cmd_ml_vector_search_audit)
 

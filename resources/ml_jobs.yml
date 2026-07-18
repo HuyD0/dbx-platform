@@ -30,7 +30,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "2"
+            client: "1"
             dependencies:
               - ../dist/*.whl
       tasks:
@@ -54,11 +54,12 @@ resources:
     ml_hygiene_report:
       name: "[dbx-platform] ml-hygiene-report"
       description: >
-        Weekly AI/ML hygiene: model registry (stale/ownerless/unaliased
-        models), interactive GPU clusters, and vector search endpoints.
-        Read-only; results appear in the task run output.
+        Hourly AI/ML hygiene: model registry (stale/ownerless/unaliased
+        models), interactive GPU clusters, and vector search endpoints older
+        than the 15-minute idle threshold. Read-only; results appear in the
+        task run output.
       schedule:
-        quartz_cron_expression: "0 0 7 ? * MON"  # weekly Monday 07:00 UTC
+        quartz_cron_expression: "0 0 * * * ?"  # hourly
         timezone_id: UTC
         pause_status: PAUSED
       tags:
@@ -79,7 +80,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "2"
+            client: "1"
             dependencies:
               - ../dist/*.whl
       tasks:
@@ -105,4 +106,4 @@ resources:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters:
-              ["ml", "vector-search-audit"]
+              ["ml", "vector-search-audit", "--grace-minutes", "15"]
