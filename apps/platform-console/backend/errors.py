@@ -22,6 +22,11 @@ _SETUP_HINT = (
     "Run the '[dbx-platform] dashboards-setup' job (or `dbx-platform dashboards setup`) "
     "to create the findings tables, then run the digest job."
 )
+USER_AUTH_HINT = (
+    "Confirm Databricks Apps user authorization is enabled, the app has been "
+    "restarted after scope changes, and the current browser session has "
+    "consented to the app's requested scopes."
+)
 
 
 def payload(error: str, message: str, hint: str | None = None) -> dict:
@@ -40,7 +45,7 @@ def install(app: FastAPI) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=401,
-            content=payload("unauthenticated", str(exc)),
+            content=payload("unauthenticated", str(exc), USER_AUTH_HINT),
         )
 
     @app.exception_handler(UnauthorizedError)
