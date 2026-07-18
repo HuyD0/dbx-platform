@@ -37,6 +37,25 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
 
+  frontend:
+    # Credential-free like lint-test-build — safe on PR branches.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/platform-console/frontend/package-lock.json
+      - name: Install
+        working-directory: apps/platform-console/frontend
+        run: npm ci
+      - name: Typecheck and build
+        working-directory: apps/platform-console/frontend
+        run: npm run build
+
   bundle-validate:
     # Push/dispatch only — never on pull_request. The `production` environment
     # is what the federated credential's subject is scoped to

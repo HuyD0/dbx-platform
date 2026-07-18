@@ -1,0 +1,156 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens — dark is the default theme (html.dark), light via toggle.
+   Palette follows the validated reference instance: categorical slots in
+   fixed order, reserved status colors, recessive chrome. */
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-page: #f9f9f7;
+  --color-surface: #fcfcfb;
+  --color-ink: #0b0b0b;
+  --color-ink-2: #52514e;
+  --color-muted: #898781;
+  --color-grid: #e1e0d9;
+  --color-hairline: rgba(11, 11, 11, 0.1);
+
+  --color-series-1: #2a78d6;
+  --color-series-2: #008300;
+  --color-series-3: #e87ba4;
+  --color-series-4: #eda100;
+
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  --color-accent: #2a78d6;
+}
+
+.dark {
+  --color-page: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-ink: #ffffff;
+  --color-ink-2: #c3c2b7;
+  --color-muted: #898781;
+  --color-grid: #2c2c2a;
+  --color-hairline: rgba(255, 255, 255, 0.1);
+
+  --color-series-1: #3987e5;
+  --color-series-2: #008300;
+  --color-series-3: #d55181;
+  --color-series-4: #c98500;
+
+  --color-accent: #3987e5;
+}
+
+html,
+body {
+  background-color: var(--color-page);
+  color: var(--color-ink);
+}
+
+/* Ambient glows behind the glass — without depth to blur, glassmorphism
+   reads as flat gray. Fixed so scrolling content slides over the light. */
+body {
+  background-image:
+    radial-gradient(900px 520px at 12% -8%, rgba(42, 120, 214, 0.1), transparent 60%),
+    radial-gradient(760px 480px at 92% 4%, rgba(74, 58, 167, 0.07), transparent 60%),
+    radial-gradient(700px 520px at 50% 110%, rgba(27, 175, 122, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+.dark body {
+  background-image:
+    radial-gradient(900px 520px at 12% -8%, rgba(57, 135, 229, 0.16), transparent 60%),
+    radial-gradient(760px 480px at 92% 4%, rgba(144, 133, 233, 0.1), transparent 60%),
+    radial-gradient(700px 520px at 50% 110%, rgba(25, 158, 112, 0.07), transparent 60%);
+}
+
+/* Frosted surfaces. --alpha-* are per-mode so light glass stays readable. */
+.glass {
+  background: rgba(252, 252, 251, 0.6);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(11, 11, 11, 0.08);
+}
+.dark .glass {
+  background: rgba(26, 26, 25, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+/* Higher-opacity variant for modals/panels that sit over busy content. */
+.glass-strong {
+  background: rgba(252, 252, 251, 0.85);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(11, 11, 11, 0.1);
+}
+.dark .glass-strong {
+  background: rgba(22, 22, 21, 0.82);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* These glass rules are unlayered, so Tailwind's layered utilities
+   (border-y-0, hover:border-accent/40, …) can never override them — the
+   cascade-layers spec puts any unlayered rule above any layered one. Edge
+   and hover variants therefore live here, after the base rules, where plain
+   source order settles it deterministically. */
+.glass-edge-r {
+  border-width: 0 1px 0 0; /* full-height left sidebar: right edge only */
+}
+.glass-edge-l {
+  border-width: 0 0 0 1px; /* full-height right panel: left edge only */
+}
+.glass-hover-accent:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+/* Solid focus affordance for the composer: the low-alpha ring utility alone
+   is ~1.5:1 — imperceptible — and a layered border utility could not
+   override the unlayered glass border anyway. */
+.glass-focus-accent:focus-within {
+  border-color: var(--color-accent);
+}
+
+/* Suggestion-chip icon colors. The light categorical steps for magenta and
+   yellow are chart-fill colors (~2:1 as icon strokes on their own 15% tint),
+   so light mode uses darker steps; dark mode keeps the series tokens. */
+.icon-chip-1 { color: var(--color-series-1); }
+.icon-chip-2 { color: var(--color-series-2); }
+.icon-chip-3 { color: #ab3a68; }
+.icon-chip-4 { color: #8a6200; }
+.dark .icon-chip-3 { color: var(--color-series-3); }
+.dark .icon-chip-4 { color: var(--color-series-4); }
+
+/* Markdown rendered from digests / chat */
+.prose-console {
+  line-height: 1.6;
+  font-size: 0.875rem;
+}
+.prose-console h1,
+.prose-console h2,
+.prose-console h3 {
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+}
+.prose-console h1 { font-size: 1.05rem; }
+.prose-console h2 { font-size: 1rem; }
+.prose-console h3 { font-size: 0.9rem; }
+.prose-console p { margin: 0.5em 0; }
+.prose-console ul,
+.prose-console ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.prose-console ul { list-style: disc; }
+.prose-console ol { list-style: decimal; }
+.prose-console li { margin: 0.2em 0; }
+.prose-console code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8em;
+  background: var(--color-hairline);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.prose-console strong { font-weight: 600; }
+.prose-console a { color: var(--color-accent); text-decoration: underline; }

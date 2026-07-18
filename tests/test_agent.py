@@ -45,10 +45,19 @@ def test_system_prompt_forbids_mutation_claims():
 
 
 def test_agent_tools_wrap_no_mutating_functions():
-    """The tool module must never wrap an apply/mutate/pause/revoke function."""
+    """The tool module must never wrap an apply/mutate/pause/revoke function.
+    The propose_* tools are dry-runs: they classify and emit a marker, and the
+    mutation happens only in the Platform Console's confirm-gated apply."""
     source = (
         Path(__file__).resolve().parent.parent
         / "agents" / "platform_agent" / "tools.py"
     ).read_text()
-    for forbidden in ("apply_", "pause_job", "revoke_", "run_setup", "permanent_delete"):
+    for forbidden in ("apply_", "pause_job", "revoke_", "run_setup", "permanent_delete",
+                      "run_now", "jobs.update", "jobs.delete"):
         assert forbidden not in source, f"agent tools reference {forbidden}"
+
+
+def test_system_prompt_teaches_the_proposal_convention():
+    assert "ACTION_PROPOSAL" in formatting.SYSTEM_PROMPT
+    assert "JOB_PROPOSAL" in formatting.SYSTEM_PROMPT
+    assert "only after they confirm" in formatting.SYSTEM_PROMPT

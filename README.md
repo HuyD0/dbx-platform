@@ -87,11 +87,16 @@ setup` yourself only to provision immediately or for a custom catalog/schema (se
 
 ### Platform Console app
 
-A Databricks App (`apps/platform-console`, Streamlit) deployed by the bundle
-(`resources/app.yml`) — the third surface of the same code path. It shows
-stored findings and AI digests, runs checks live, charts AI/ML spend, and can
-kick off the report jobs. Deliberately report-only: nothing in the app can
-pass `--apply`.
+A Databricks App (`apps/platform-console`, FastAPI + React) deployed by the
+bundle (`resources/app.yml`) — the third surface of the same code path. A
+dark-mode dashboard with an overview of stored findings, per-area pages that
+run every check live (cost, housekeeping, security, governance, AI/ML), AI
+digests, job kick-off, and a chat page backed by the served platform agent.
+Report-only by default; four conservative remediation actions (stale-cluster
+cleanup, orphaned-job pause, over-age token revoke, policy sync) exist behind
+an off-by-default env gate plus a dry-run plan and typed confirmation — see
+docs/runbook.md. Local dev: `python main.py` for the API, `npm run dev` in
+`frontend/` for the UI.
 
 ### AI layer
 
@@ -108,7 +113,9 @@ pass `--apply`.
   read-only LangGraph agent over the same checks, deployed to model serving
   via the Mosaic AI Agent Framework (`python agents/platform_agent/deploy_agent.py`).
   Its tool set wraps no mutating function, so it can diagnose and recommend
-  but never change the workspace.
+  but never change the workspace. The Platform Console's Chat page talks to
+  it; its `propose_*` tools emit dry-run proposals the console renders as
+  confirm-gated action cards — a human always performs the apply.
 
 ### Secrets helper
 
