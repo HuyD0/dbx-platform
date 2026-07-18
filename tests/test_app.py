@@ -351,12 +351,15 @@ def test_parse_proposals_handles_both_kinds_and_strips_markers():
         'JOB_PROPOSAL:{"job_id": 12, "name": "[dbx-platform] security-audit"}\n'
         "And revoke the old tokens:\n"
         'ACTION_PROPOSAL:{"action": "token-revoke", "count": 3}\n'
+        "Or kick everything off:\n"
+        'JOB_PROPOSAL:{"all": true, "count": 11}\n'
     )
     clean, proposals = parse_proposals(text)
     assert "PROPOSAL" not in clean
     assert proposals == [
         {"kind": "job", "job_id": 12, "name": "[dbx-platform] security-audit"},
         {"kind": "action", "action": "token-revoke", "count": 3},
+        {"kind": "job", "all": True, "count": 11},
     ]
 
 

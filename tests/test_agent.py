@@ -61,3 +61,16 @@ def test_system_prompt_teaches_the_proposal_convention():
     assert "ACTION_PROPOSAL" in formatting.SYSTEM_PROMPT
     assert "JOB_PROPOSAL" in formatting.SYSTEM_PROMPT
     assert "only after they confirm" in formatting.SYSTEM_PROMPT
+    assert "propose_run_all_jobs" in formatting.SYSTEM_PROMPT
+
+
+def test_run_all_tool_proposes_without_running():
+    """propose_run_all_jobs emits the {"all": true} JOB_PROPOSAL variant the
+    console maps to /api/jobs/run_all — the tool itself must not run anything
+    (the forbidden-substring test above already bans run_now et al.)."""
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "agents" / "platform_agent" / "tools.py"
+    ).read_text()
+    assert "def propose_run_all_jobs" in source
+    assert '"all": True' in source

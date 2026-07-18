@@ -83,6 +83,7 @@ export interface Proposal {
   count?: number;
   job_id?: number;
   name?: string;
+  all?: boolean;
 }
 
 export interface ChatResponse {
