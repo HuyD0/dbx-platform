@@ -99,6 +99,8 @@ resources:
               - ${resources.sql_warehouses.platform_console_warehouse.id}
               - --app-name
               - ${var.platform_console_name}
+              - --app-source-code-path
+              - ${workspace.file_path}/apps/platform-console
               - --job
               - cost_usage_report=${resources.jobs.cost_usage_report.id}
               - --job

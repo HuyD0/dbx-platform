@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import io
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from databricks.sdk.service import jobs, sql
+from databricks.sdk.service import apps, jobs, sql
 
 from dbx_platform import runtime_control
 from dbx_platform.runtime_control import (
@@ -87,6 +89,7 @@ def inventory() -> RuntimeInventory:
                 "platform-console",
                 "platform-console",
                 200,
+                source_code_path="/Workspace/Users/ci/.bundle/app",
             ),
         )
     )
@@ -246,6 +249,17 @@ class FakeRuntimeAdapter:
                 "state": "ACTIVE",
                 "config_hash": "app-v1",
                 "config": {},
+                "deployment": {
+                    "deployment_id": "deployment-old",
+                    "source_code_path": "/Workspace/Shared/.bundle/app",
+                    "snapshot_path": "/Workspace/Users/app/src/deployment-old",
+                    "build_sha": "old-sha",
+                },
+                "desired_deployment": {
+                    "source_code_path": "/Workspace/Users/ci/.bundle/app",
+                    "build_sha": "new-sha",
+                    "built_at": "2026-07-18T19:21:24Z",
+                },
                 "health": {
                     "compute_state": "ACTIVE",
                     "application_state": "RUNNING",
@@ -261,7 +275,7 @@ class FakeRuntimeAdapter:
 
     def observe(self, resource: ManagedResource) -> dict[str, Any]:
         self.observe_count += 1
-        return dict(self.resources[resource.resource_key])
+        return deepcopy(self.resources[resource.resource_key])
 
     def set_job_paused(self, job_id: str, paused: bool) -> None:
         resource = next(
@@ -314,6 +328,26 @@ class FakeRuntimeAdapter:
             "application_state": "RUNNING",
             "deployment_state": "SUCCEEDED",
             "running_instances": 1,
+        }
+
+    def deploy_app(
+        self, app_name: str, source_code_path: str, expected_build_sha: str
+    ) -> None:
+        resource = self.resources["platform_console"]
+        deployment = resource["deployment"]
+        if (
+            deployment["source_code_path"] == source_code_path
+            and deployment["build_sha"] == expected_build_sha
+        ):
+            return
+        self.calls.append(
+            ("deploy_app", app_name, source_code_path, expected_build_sha)
+        )
+        resource["deployment"] = {
+            "deployment_id": "deployment-new",
+            "source_code_path": source_code_path,
+            "snapshot_path": "/Workspace/Users/app/src/deployment-new",
+            "build_sha": expected_build_sha,
         }
 
 
@@ -670,6 +704,7 @@ def test_runtime_mutation_intent_audit_failure_prevents_resource_change() -> Non
         "stop_warehouse",
         "start_warehouse",
         "stop_app",
+        "deploy_app",
         "start_app",
     }
     assert all(call[0] not in mutators for call in adapter.calls)
@@ -685,6 +720,24 @@ def test_config_drift_marks_plan_stale_before_any_mutation() -> None:
         execute_reviewed(value, record)
 
     assert store.actions[record.action_id].status == STATUS_STALE
+    assert adapter.calls == []
+
+
+def test_uploaded_app_build_drift_marks_wake_stale_before_any_mutation() -> None:
+    value, adapter, store, _ = controller()
+    hibernate = value.plan_hibernate(APPROVER)
+    execute_reviewed(value, hibernate)
+    wake = value.plan_wake(APPROVER)
+    adapter.calls.clear()
+
+    app = adapter.resources["platform_console"]
+    app["desired_deployment"]["build_sha"] = "newer-unapproved-sha"
+    app["config_hash"] = "app-v2"
+
+    with pytest.raises(StalePlanError, match="configuration changed"):
+        execute_reviewed(value, wake)
+
+    assert store.actions[wake.action_id].status == STATUS_STALE
     assert adapter.calls == []
 
 
@@ -846,6 +899,12 @@ def test_wake_restores_only_previously_unpaused_schedules_in_safe_order() -> Non
     assert store.actions[wake.action_id].status == STATUS_SUCCEEDED
     assert adapter.calls == [
         ("start_warehouse", "wh-1"),
+        (
+            "deploy_app",
+            "platform-console",
+            "/Workspace/Users/ci/.bundle/app",
+            "new-sha",
+        ),
         ("start_app", "platform-console"),
         ("set_job_paused", "101", False),
     ]
@@ -874,6 +933,7 @@ def test_bundle_inventory_bootstraps_schedules_only_through_approved_wake() -> N
         ["cost_usage_report=101", "security_audit=102"],
         "wh-1",
         "platform-console",
+        "/Workspace/Users/ci/.bundle/app",
     )
     value = RuntimeController(
         adapter,
@@ -903,6 +963,42 @@ def test_bundle_inventory_bootstraps_schedules_only_through_approved_wake() -> N
     assert state.desired_state.value == "ON"
     assert adapter.resources["cost_usage_report"]["state"] == "UNPAUSED"
     assert adapter.resources["security_audit"]["state"] == "UNPAUSED"
+
+
+def test_reconciliation_requires_the_desired_app_snapshot_to_be_healthy() -> None:
+    value, adapter, _, _ = controller()
+    app = adapter.resources["platform_console"]
+    app["deployment"] = {
+        "deployment_id": "deployment-new",
+        "source_code_path": "/Workspace/Users/ci/.bundle/app",
+        "snapshot_path": "/Workspace/Users/app/src/deployment-new",
+        "build_sha": "new-sha",
+    }
+    app["health"] = {
+        "compute_state": "ACTIVE",
+        "application_state": "UNAVAILABLE",
+        "deployment_state": "FAILED",
+        "running_instances": 0,
+    }
+
+    reconciliation = value.plan_reconciliation(APPROVER)
+
+    assert reconciliation is not None
+    assert reconciliation.action_type == ACTION_WAKE
+    assert reconciliation.plan["parameters"]["app_build_sha"] == "new-sha"
+
+
+def test_reconciliation_is_complete_for_healthy_desired_app_snapshot() -> None:
+    value, adapter, _, _ = controller()
+    app = adapter.resources["platform_console"]
+    app["deployment"] = {
+        "deployment_id": "deployment-new",
+        "source_code_path": "/Workspace/Users/ci/.bundle/app",
+        "snapshot_path": "/Workspace/Users/app/src/deployment-new",
+        "build_sha": "new-sha",
+    }
+
+    assert value.plan_reconciliation(APPROVER) is None
 
 
 def test_expired_plan_fails_closed_without_resource_changes() -> None:
@@ -1105,6 +1201,34 @@ def test_sdk_adapter_lists_only_active_queries_on_exact_warehouse() -> None:
         sql.QueryStatus.STARTED,
     }
     assert call.kwargs["max_results"] == 999
+
+
+def test_sdk_adapter_does_not_redeploy_active_approved_snapshot() -> None:
+    source_path = "/Workspace/Users/ci/.bundle/app"
+    snapshot_path = "/Workspace/Users/app/src/deployment-1"
+    deployment = apps.AppDeployment(
+        deployment_id="deployment-1",
+        source_code_path=source_path,
+        deployment_artifacts=apps.AppDeploymentArtifacts(
+            source_code_path=snapshot_path
+        ),
+        status=apps.AppDeploymentStatus(
+            state=apps.AppDeploymentState.SUCCEEDED
+        ),
+    )
+    workspace = MagicMock()
+    workspace.apps.get.return_value = apps.App(
+        name="platform-console",
+        active_deployment=deployment,
+    )
+    workspace.workspace.download.side_effect = lambda _path: io.BytesIO(
+        b'{"sha":"approved-sha","built_at":"2026-07-18T19:21:24Z"}'
+    )
+    adapter = DatabricksRuntimeAdapter(workspace)
+
+    adapter.deploy_app("platform-console", source_path, "approved-sha")
+
+    workspace.apps.deploy_and_wait.assert_not_called()
 
 
 def test_inventory_merge_tombstones_resources_removed_from_bundle_scope() -> None:

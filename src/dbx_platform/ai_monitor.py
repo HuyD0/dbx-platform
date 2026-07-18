@@ -321,7 +321,11 @@ def classify_ai_monitoring(
                 if d in daily and daily[d]["requests"] > 0
             ]
             baseline = sum(base_rates) / len(base_rates) if base_rates else 0.0
-            if baseline > 0 and rate < baseline * (1 + spike_pct / 100):
+            # Decimal rates such as 5% are not exact binary floats. Keep the
+            # documented inclusive threshold inclusive (10% is a +100% spike
+            # over 5%) instead of losing it to a 0.10000000000000002 boundary.
+            threshold_rate = baseline * (1 + spike_pct / 100)
+            if baseline > 0 and rate + 1e-12 < threshold_rate:
                 continue
             spikes.append(
                 {
