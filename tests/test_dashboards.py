@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -68,49 +69,15 @@ def test_setup_statements_cover_all_dashboard_dependencies():
     assert "CREATE SCHEMA" not in fq_objects
 
 
-def test_setup_creates_catalog_before_schema():
-    """A fresh workspace may have no `main` catalog at all (auto-enabled UC ships
-    a workspace-named catalog instead) — setup must try to create it first."""
-    statements = [sql for _, sql in setup_statements("c", "s", ["team"])]
-    assert statements[0] == "CREATE CATALOG IF NOT EXISTS c"
-    assert statements[1] == "CREATE SCHEMA IF NOT EXISTS c.s"
-
-
-def test_run_setup_tolerates_catalog_create_failure(monkeypatch):
-    """CREATE CATALOG may fail for lack of metastore rights even when the catalog
-    exists; only the CREATE SCHEMA that follows is the real existence gate."""
+def test_direct_setup_is_disabled_without_querying(monkeypatch):
+    """Schema changes run only in the deployment migration job."""
     from dbx_platform import dashboards
 
-    executed = []
-
-    def fake_run_query(w, sql, warehouse_id, parameters=None):
-        if sql.startswith("CREATE CATALOG"):
-            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
-        executed.append(sql)
-        return []
-
-    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
-    done = dashboards.run_setup(None, "wh", "c", "s", ["team"])
-    assert any(d.startswith("catalog c (skipped:") for d in done)
-    assert executed[0] == "CREATE SCHEMA IF NOT EXISTS c.s"
-
-
-def test_run_setup_fails_loudly_when_catalog_missing(monkeypatch):
-    """The deploy-time failure this repo actually hit: no `main` catalog, so
-    CREATE SCHEMA dies with NO_SUCH_CATALOG_EXCEPTION. The error must propagate
-    (not be swallowed) and explain the remediation."""
-    from dbx_platform import dashboards
-
-    def fake_run_query(w, sql, warehouse_id, parameters=None):
-        if sql.startswith("CREATE CATALOG"):
-            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
-        if sql.startswith("CREATE SCHEMA"):
-            raise RuntimeError("[NO_SUCH_CATALOG_EXCEPTION] Catalog 'c' was not found")
-        return []
-
-    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
-    with pytest.raises(RuntimeError, match="dashboards\nrender --catalog|render --catalog"):
+    query = MagicMock()
+    monkeypatch.setattr(dashboards, "run_query", query)
+    with pytest.raises(RuntimeError, match="schema_migrations"):
         dashboards.run_setup(None, "wh", "c", "s", ["team"])
+    query.assert_not_called()
 
 
 def test_wheel_entry_point_raises_on_failure(monkeypatch):

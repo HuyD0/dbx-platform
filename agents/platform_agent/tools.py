@@ -416,28 +416,6 @@ def propose_job_run(job_name: str) -> str:
     return f"Ready to run {matches[0]['name']}.\nJOB_PROPOSAL:{marker}"
 
 
-@tool
-def propose_run_all_jobs() -> str:
-    """Propose kicking off every [dbx-platform] report job at once (the jobs
-    ship with paused schedules — every run is human-initiated). Changes
-    nothing — the user confirms the batch in the Platform Console. Copy the
-    JOB_PROPOSAL line verbatim into your final answer."""
-    jobs = [
-        {"job_id": j.job_id, "name": (j.settings.name if j.settings else "") or ""}
-        for j in _client().jobs.list()
-        if "dbx-platform" in ((j.settings.name if j.settings else "") or "")
-    ]
-    if not jobs:
-        return "No [dbx-platform] jobs are visible — deploy the bundle first."
-    jobs.sort(key=lambda r: r["name"])
-    marker = json.dumps({"all": True, "count": len(jobs)})
-    return (
-        f"Ready to kick off all {len(jobs)} [dbx-platform] jobs:\n"
-        + rows_to_text(jobs)
-        + f"\nJOB_PROPOSAL:{marker}"
-    )
-
-
 ALL_TOOLS = [
     get_cost_report,
     get_top_jobs,
@@ -457,5 +435,4 @@ ALL_TOOLS = [
     get_recent_runs,
     propose_remediation,
     propose_job_run,
-    propose_run_all_jobs,
 ]

@@ -21,4 +21,4 @@ env:
   # Override when the platform agent's serving endpoint name differs from the
   # default agents_<catalog>-<schema>-platform_agent.
   # - name: DBX_PLATFORM_AGENT_ENDPOINT
-  #   value: "agents_main-dbx_platform-platform_agent"
+  #   value: "agents_dbx_dev-dbx_platform-platform_agent"

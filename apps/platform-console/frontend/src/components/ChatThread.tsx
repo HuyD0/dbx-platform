@@ -49,40 +49,16 @@ function JobProposalCard({ proposal }: { proposal: Proposal }) {
   );
 }
 
-function RunAllProposalCard({ proposal }: { proposal: Proposal }) {
-  const runAll = useMutation({
-    mutationFn: () => apiPost<RunAllResponse>("/api/jobs/run_all"),
-  });
+function BatchJobProposalCard({ proposal }: { proposal: Proposal }) {
   return (
     <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
-        Run all{" "}
+        Batch proposal for{" "}
         <span className="font-medium text-ink">
           {typeof proposal.count === "number" ? proposal.count : ""} [dbx-platform] jobs
         </span>
-        ?
+        . Batch execution is unsupported; review and approve each exact job target separately.
       </span>
-      {runAll.data ? (
-        <>
-          <Badge tone="good">started {runAll.data.count} runs</Badge>
-          {runAll.data.failed.length > 0 && (
-            <span title={runAll.data.failed.map((f) => `${f.name}: ${f.error}`).join("\n")}>
-              <Badge tone="critical">{runAll.data.failed.length} failed</Badge>
-            </span>
-          )}
-        </>
-      ) : (
-        <button
-          type="button"
-          onClick={() => runAll.mutate()}
-          disabled={runAll.isPending}
-          className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 font-medium text-ink hover:bg-hairline disabled:opacity-50"
-        >
-          <Play className="h-3 w-3" />
-          Run all jobs
-        </button>
-      )}
-      {runAll.isError && <ErrorState error={runAll.error} />}
     </div>
   );
 }
@@ -232,7 +208,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                     {turn.proposals?.map((p, j) =>
                       p.kind === "job" ? (
                         p.all ? (
-                          <RunAllProposalCard key={j} proposal={p} />
+                          <BatchJobProposalCard key={j} proposal={p} />
                         ) : (
                           <JobProposalCard key={j} proposal={p} />
                         )

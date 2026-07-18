@@ -184,7 +184,7 @@ const errorGuidance: Record<string, string> = {
     "System tables are not enabled or not granted to the app's identity.",
   warehouse_not_configured: "No SQL warehouse is configured for this deployment.",
   findings_table_missing:
-    "The findings tables don't exist yet — run the dashboards-setup job first.",
+    "Mission Control tables are not migrated yet. Run the reviewed deployment migration job.",
   permission_missing: "The app's identity lacks a permission for this check.",
   unauthenticated: "Your Databricks user identity could not be verified.",
   unauthorized: "Your identity is not authorized for this governed operation.",
@@ -192,40 +192,6 @@ const errorGuidance: Record<string, string> = {
   agent_unavailable: "The platform agent's serving endpoint is not reachable.",
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
 };
-
-/** One-click escape hatch for findings_table_missing: find the
- * dashboards-setup job and kick it off right from the error box. */
-function RunSetupJobButton() {
-  const jobs = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => apiGet<Envelope<JobInfo[]>>("/api/jobs"),
-    staleTime: 60_000,
-    retry: false,
-  });
-  const setup = jobs.data?.data.find((j) => j.name.includes("dashboards-setup"));
-  const run = useMutation({
-    mutationFn: (jobId: number) => apiPost<{ run_id: number }>(`/api/jobs/${jobId}/run_now`),
-  });
-  if (!setup) return null;
-  if (run.data) {
-    return (
-      <div className="mt-2">
-        <Badge tone="good">setup started — refresh in a minute or two</Badge>
-      </div>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => run.mutate(setup.job_id)}
-      disabled={run.isPending}
-      className="mt-2 inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
-    >
-      <Play className="h-3 w-3" />
-      Run setup job now
-    </button>
-  );
-}
 
 export function ErrorState({ error }: { error: unknown }) {
   const apiErr = error instanceof ApiError ? error : null;

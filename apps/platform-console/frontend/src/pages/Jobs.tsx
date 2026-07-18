@@ -3,37 +3,8 @@ import { useState } from "react";
 import { ActionPlanDialog } from "../components/ActionPlanDialog";
 import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
-import type { Envelope, JobInfo, RunAllResponse, RunInfo } from "../lib/types";
+import type { Envelope, JobInfo, RunInfo } from "../lib/types";
 import { AsOf, Badge, Card, EmptyState, ErrorState, SectionTitle, Skeleton } from "../components/ui";
-
-function RunAllButton({ jobCount }: { jobCount: number }) {
-  const [arming, setArming] = useState(false);
-  const runAll = useMutation({
-    mutationFn: () => apiPost<RunAllResponse>("/api/jobs/run_all"),
-    onSettled: () => setArming(false),
-  });
-  return (
-    <div className="flex items-center gap-2">
-      {runAll.data && <Badge tone="good">started {runAll.data.count} runs</Badge>}
-      {runAll.data && runAll.data.failed.length > 0 && (
-        <span title={runAll.data.failed.map((f) => `${f.name}: ${f.error}`).join("\n")}>
-          <Badge tone="critical">{runAll.data.failed.length} failed</Badge>
-        </span>
-      )}
-      {runAll.isError && <Badge tone="critical">run all failed</Badge>}
-      <button
-        type="button"
-        onClick={() => (arming ? runAll.mutate() : setArming(true))}
-        onBlur={() => setArming(false)}
-        disabled={runAll.isPending || jobCount === 0}
-        className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
-      >
-        <Play className="h-3 w-3" />
-        {arming ? `Run all ${jobCount} jobs?` : "Run all"}
-      </button>
-    </div>
-  );
-}
 
 function RunHistory({ jobId }: { jobId: number }) {
   const query = useQuery({
@@ -84,15 +55,12 @@ export function Jobs() {
           subtitle="Owned schedules and run history. Every manual run requires exact-plan approval."
           right={
             query.data && (
-              <div className="flex items-center gap-3">
-                <RunAllButton jobCount={query.data.data.length} />
-                <AsOf
-                  asOf={query.data.as_of}
-                  cached={query.data.cached}
-                  onRefresh={() => query.refetch()}
-                  refreshing={query.isFetching}
-                />
-              </div>
+              <AsOf
+                asOf={query.data.as_of}
+                cached={query.data.cached}
+                onRefresh={() => query.refetch()}
+                refreshing={query.isFetching}
+              />
             )
           }
         />

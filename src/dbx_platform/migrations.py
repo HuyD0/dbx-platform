@@ -18,7 +18,7 @@ from dbx_platform.dashboards import setup_statements
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--catalog", default="main")
+    parser.add_argument("--catalog", default="dbx_dev")
     parser.add_argument("--schema", default="dbx_platform")
     parser.add_argument("--team-tags", default="team,cost-center,environment")
     parser.add_argument("--operator-group", default="dbx-platform-operators")

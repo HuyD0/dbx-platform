@@ -26,7 +26,7 @@ resources:
             python_file: ../src/dbx_platform/migrations.py
             parameters:
               - --catalog
-              - main
+              - dbx_dev
               - --schema
               - dbx_platform
               - --operator-group

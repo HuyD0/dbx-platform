@@ -181,7 +181,6 @@ def test_every_mutating_route_is_post_only(client):
         "/api/action-requests/{action_id}/approve",
         "/api/action-requests/{action_id}/reject",
         "/api/jobs/{job_id}/run_now",
-        "/api/jobs/run_all",
         "/api/digest/generate",
         "/api/chat",
     }
@@ -337,48 +336,12 @@ def test_protected_manual_job_is_admitted_only_by_exact_bound_id(
     ws.jobs.run_now.assert_not_called()
 
 
-def _mock_job(job_id: int, name: str) -> MagicMock:
-    job = MagicMock()
-    job.job_id = job_id
-    job.settings.name = name
-    return job
+def test_run_all_endpoint_is_not_available(client, ws):
+    response = client.post("/api/jobs/run_all")
 
-
-def test_run_all_triggers_only_platform_jobs_setup_first(client, ws):
-    ws.jobs.list.return_value = [
-        _mock_job(7, "[dbx-platform] cost-usage-report"),
-        _mock_job(5, "[dbx-platform] dashboards-setup"),
-        _mock_job(8, "someone-elses-etl"),
-    ]
-    run_ids = iter([101, 102])
-    ws.jobs.run_now.side_effect = lambda job_id: MagicMock(run_id=next(run_ids))
-    body = client.post("/api/jobs/run_all").json()
-    assert body["count"] == 2
-    assert body["failed"] == []
-    submitted = [c.kwargs["job_id"] for c in ws.jobs.run_now.call_args_list]
-    assert submitted == [5, 7], "dashboards-setup must be submitted first, job 8 never"
-
-
-def test_run_all_captures_per_job_failures_and_continues(client, ws):
-    ws.jobs.list.return_value = [
-        _mock_job(5, "[dbx-platform] dashboards-setup"),
-        _mock_job(7, "[dbx-platform] cost-usage-report"),
-    ]
-
-    def run_now(job_id):
-        if job_id == 5:
-            raise RuntimeError("PERMISSION_DENIED")
-        return MagicMock(run_id=200)
-
-    ws.jobs.run_now.side_effect = run_now
-    body = client.post("/api/jobs/run_all").json()
-    assert body["count"] == 1
-    assert [r["job_id"] for r in body["runs"]] == [7]
-    assert body["failed"] == [{
-        "job_id": 5,
-        "name": "[dbx-platform] dashboards-setup",
-        "error": "PERMISSION_DENIED",
-    }]
+    assert response.status_code == 404
+    assert response.json()["error"] == "capability_not_available"
+    ws.jobs.run_now.assert_not_called()
 
 
 def test_system_tables_error_maps_to_friendly_503(client, monkeypatch):

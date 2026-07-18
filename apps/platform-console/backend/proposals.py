@@ -2,12 +2,10 @@
 
 The platform agent's proposal tools end their output with a marker line
 (ACTION_PROPOSAL:{...} or JOB_PROPOSAL:{...}) that the agent copies verbatim
-into its final answer. A JOB_PROPOSAL of {"all": true, "count": N} proposes
-kicking off every [dbx-platform] job via /api/jobs/run_all. The console
-strips the markers from the displayed markdown and returns them as
-structured proposals the UI renders as confirm-gated cards. The agent's
-numbers are never trusted for the apply — the card triggers a fresh
-server-side dry-run.
+into its final answer. The console strips markers from displayed markdown and
+returns structured proposals that the UI turns into immutable, exact-target
+plans. Legacy batch markers remain parseable but are display-only; there is no
+batch execution endpoint.
 """
 
 from __future__ import annotations

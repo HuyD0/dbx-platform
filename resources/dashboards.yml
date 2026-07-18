@@ -2,7 +2,7 @@
 # github.com/mohanab89/databricks-dashboard-suite (see README attribution).
 #
 # The deployment-only `schema_migrations` job provisions helper objects in
-# main.dbx_platform. The scheduled `dashboard-dependency-health` job is
+# dbx_dev.dbx_platform. The scheduled `dashboard-dependency-health` job is
 # read-only and reports missing dependencies. If you change catalog/schema,
 # re-render, commit, and update the migration/health configuration to match:
 #   dbx-platform dashboards render --catalog <c> --schema <s>
@@ -45,5 +45,5 @@ resources:
     platform_command_center:
       display_name: "[dbx-platform] Platform Command Center"
       file_path: ../dashboards/platform_command_center.lvdash.json
-      warehouse_id: ${var.warehouse_id}
+      warehouse_id: ${resources.sql_warehouses.platform_console_warehouse.id}
       embed_credentials: false
