@@ -74,7 +74,7 @@ export default function App() {
   return (
     <ChatProvider>
       <div className="flex min-h-screen">
-        <aside className="glass fixed inset-y-0 z-20 flex w-52 flex-col border-y-0 border-l-0 px-3 py-4">
+        <aside className="glass glass-edge-r fixed inset-y-0 z-20 flex w-52 flex-col px-3 py-4">
           <div className="mb-6 px-2">
             <div className="text-sm font-semibold text-ink">Platform Console</div>
             <div className="text-[11px] text-muted">dbx-platform</div>

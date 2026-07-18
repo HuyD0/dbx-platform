@@ -91,6 +91,21 @@ body {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
+/* These glass rules are unlayered, so Tailwind's layered utilities
+   (border-y-0, hover:border-accent/40, …) can never override them — the
+   cascade-layers spec puts any unlayered rule above any layered one. Edge
+   and hover variants therefore live here, after the base rules, where plain
+   source order settles it deterministically. */
+.glass-edge-r {
+  border-width: 0 1px 0 0; /* full-height left sidebar: right edge only */
+}
+.glass-edge-l {
+  border-width: 0 0 0 1px; /* full-height right panel: left edge only */
+}
+.glass-hover-accent:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
 /* Markdown rendered from digests / chat */
 .prose-console {
   line-height: 1.6;

@@ -171,7 +171,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                   key={title}
                   type="button"
                   onClick={() => send(prompt)}
-                  className={`glass group rounded-2xl p-4 text-left shadow-lg shadow-black/5 transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-xl dark:shadow-black/20 ${
+                  className={`glass glass-hover-accent group rounded-2xl p-4 text-left shadow-lg shadow-black/5 transition-all hover:-translate-y-0.5 hover:shadow-xl dark:shadow-black/20 ${
                     compact ? "flex items-center gap-3 p-3" : ""
                   }`}
                 >
