@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, Database, Moon, Power, ServerCog, TimerReset } from "lucide-react";
+import { AppWindow, Database, Moon, Power, Search, ServerCog, TimerReset } from "lucide-react";
 import { PlanActionButton } from "../components/ActionPlanDialog";
 import { DataTable } from "../components/DataTable";
 import {
@@ -48,6 +48,12 @@ export function ResourcesRuntime() {
     staleTime: 60_000,
     retry: false,
   });
+  const vectorSearch = useQuery({
+    queryKey: ["/api/ml/vector-search-audit"],
+    queryFn: () => apiGet<Envelope<Row[]>>("/api/ml/vector-search-audit"),
+    staleTime: 60_000,
+    retry: false,
+  });
 
   const runtime = state.data?.data;
   const resources = inventory.data ? normalizedInventory(inventory.data.data).resources ?? [] : [];
@@ -56,6 +62,7 @@ export function ResourcesRuntime() {
     (state.isError && isUnavailable(state.error)) ||
     (inventory.isError && isUnavailable(inventory.error));
   const sleeping = runtime?.desired_state === "SLEEPING" || runtime?.current_state === "SLEEPING";
+  const vectorFindings = vectorSearch.data?.data ?? [];
 
   return (
     <div className="space-y-5">
@@ -133,6 +140,54 @@ export function ResourcesRuntime() {
           <p className="mt-1 text-[11px] text-muted">Unity Catalog, dashboards and storage stay intact</p>
         </Card>
       </div>
+
+      <Card>
+        <SectionTitle
+          title="15-minute idle auto-sleep readiness"
+          subtitle="Hourly serverless checks identify idle owned runtime and vector search endpoints; stopping still flows through the approved hibernate plan."
+          right={
+            vectorSearch.data ? (
+              <AsOf
+                asOf={vectorSearch.data.as_of}
+                cached={vectorSearch.data.cached}
+                onRefresh={() => vectorSearch.refetch()}
+                refreshing={vectorSearch.isFetching}
+              />
+            ) : undefined
+          }
+        />
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-hairline/70 bg-canvas-2/60 p-3">
+            <div className="flex items-center gap-2 text-accent">
+              <TimerReset className="h-4 w-4" />
+              <span className="text-xs font-semibold text-ink">Idle threshold</span>
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-ink">15 min</p>
+            <p className="mt-1 text-[11px] leading-5 text-muted">Checked hourly on the lowest serverless Jobs client.</p>
+          </div>
+          <div className="rounded-xl border border-hairline/70 bg-canvas-2/60 p-3">
+            <div className="flex items-center gap-2 text-accent">
+              <Search className="h-4 w-4" />
+              <span className="text-xs font-semibold text-ink">Vector search</span>
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-ink">{vectorFindings.length}</p>
+            <p className="mt-1 text-[11px] leading-5 text-muted">Endpoint finding(s) with no indexes or unhealthy state.</p>
+          </div>
+          <div className="rounded-xl border border-hairline/70 bg-canvas-2/60 p-3">
+            <div className="flex items-center gap-2 text-accent">
+              <Moon className="h-4 w-4" />
+              <span className="text-xs font-semibold text-ink">Guardrail</span>
+            </div>
+            <p className="mt-2 text-sm font-semibold text-ink">Approval-gated</p>
+            <p className="mt-1 text-[11px] leading-5 text-muted">The app drafts hibernate plans; durable approver confirmation executes the stop.</p>
+          </div>
+        </div>
+        {vectorSearch.isError && !isUnavailable(vectorSearch.error) && (
+          <div className="mt-3">
+            <ErrorState error={vectorSearch.error} />
+          </div>
+        )}
+      </Card>
 
       <Card>
         <SectionTitle

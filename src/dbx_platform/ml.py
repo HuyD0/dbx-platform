@@ -338,7 +338,7 @@ def fetch_vector_search(w: WorkspaceClient) -> list[dict]:
 
 
 def find_vector_search_findings(
-    endpoints: list[dict], now_ms: int, grace_hours: int
+    endpoints: list[dict], now_ms: int, grace_hours: float
 ) -> list[dict]:
     """Pure decision logic: vector search endpoints billing while idle or
     unhealthy. Endpoints younger than grace_hours are never flagged."""
