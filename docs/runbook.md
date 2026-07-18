@@ -43,7 +43,7 @@ it. Three equivalent ways:
   (`dbx-platform security token-audit`).
 
 Ordering: on a fresh workspace run `dashboards-setup` first — it creates the
-`main.dbx_platform` helper objects and the `platform_findings`/`platform_digest`
+`dbx_dev.dbx_platform` helper objects and the `platform_findings`/`platform_digest`
 tables the digest and forecast jobs write to. Run `cost-forecast-train` once
 before `cost-forecast-daily` has a model to predict with. "Run all" submits
 `dashboards-setup` and `cost-forecast-train` first, but does not wait for them
@@ -261,7 +261,7 @@ and on each task swap `environment_key: default` for:
 The dashboards' helper functions/reference tables are provisioned by the
 `dashboards-setup` job (`resources/dashboards_jobs.yml`) — the deploy workflow runs it
 once per prod deploy (its cron is committed paused). If a dashboard shows
-`TABLE_OR_VIEW_NOT_FOUND` for `main.dbx_platform.*`, that job either has not run yet
+`TABLE_OR_VIEW_NOT_FOUND` for `dbx_dev.dbx_platform.*`, that job either has not run yet
 (deploy hasn't happened) or lacks grants — trigger it from the console Jobs page, with
 `databricks bundle run dashboards_setup`, or run `dbx-platform dashboards setup
 --warehouse-id <id>`, and check the SP's grants in docs/cloud-setup.md.

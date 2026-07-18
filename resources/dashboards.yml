@@ -1,7 +1,7 @@
 # AI/BI (Lakeview) dashboards, adapted from the community suite
 # github.com/mohanab89/databricks-dashboard-suite (see README attribution).
 #
-# The helper functions/tables these dashboards query (in main.dbx_platform) are
+# The helper functions/tables these dashboards query (in dbx_dev.dbx_platform) are
 # provisioned by the `dashboards_setup` job (resources/dashboards_jobs.yml): it
 # runs once per prod deploy (its cron is committed paused), so a fresh deploy
 # resolves without a manual step. Run `dbx-platform dashboards setup

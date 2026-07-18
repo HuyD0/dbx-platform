@@ -2,15 +2,16 @@
 # query (see resources/dashboards.yml). This is the bundle-job second surface of
 # the `dbx-platform dashboards setup` CLI command, per the repo's "one code path,
 # two ways" invariant: the bundle deploys dashboards that read
-# main.dbx_platform.{workspace_reference,warehouse_reference,job_type_from_sku,
+# dbx_dev.dbx_platform.{workspace_reference,warehouse_reference,job_type_from_sku,
 # sql_type_from_sku,team_name_from_tags}, and this job creates/refreshes them so
 # they exist on a fresh deploy instead of relying on a manual setup step (the
 # deploy workflow runs it once per prod deploy; its cron is committed paused).
 #
 # Idempotent: CREATE OR REPLACE FUNCTION / CREATE TABLE IF NOT EXISTS, plus MERGEs
 # that pick up new workspaces/warehouses over time. The --catalog/--schema below
-# MUST match what the rendered dashboards/*.lvdash.json reference (default
-# main.dbx_platform); if you move the helpers, re-render and update both.
+# MUST match what the rendered dashboards/*.lvdash.json reference (dbx_dev.dbx_platform
+# — this workspace has no `main` catalog); if you move the helpers, re-render and
+# update both.
 resources:
   jobs:
     dashboards_setup:
@@ -18,7 +19,7 @@ resources:
       description: >
         Provisions/refreshes the dashboards' helper schema, SQL functions, and
         reference tables (workspace_reference, warehouse_reference) in
-        main.dbx_platform via the Statement Execution API. Writes only its own
+        dbx_dev.dbx_platform via the Statement Execution API. Writes only its own
         UC objects; reads system.billing.usage and system.access.audit.
       schedule:
         quartz_cron_expression: "0 0 5 ? * *"  # daily 05:00 UTC
@@ -46,5 +47,5 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["dashboards", "setup",
-               "--catalog", "main", "--schema", "dbx_platform",
+               "--catalog", "dbx_dev", "--schema", "dbx_platform",
                "--warehouse-id", "${var.warehouse_id}"]
