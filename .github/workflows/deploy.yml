@@ -15,10 +15,15 @@ concurrency:
 #
 # Repo secrets (see docs/cloud-setup.md):
 #   DATABRICKS_HOST           https://adb-<id>.<n>.azuredatabricks.net
-#   DATABRICKS_WAREHOUSE_ID   SQL warehouse for dashboards + system-table tasks
 #   AZURE_CLIENT_ID           github-actions-dbx-platform application ID
 #   AZURE_TENANT_ID
 #   AZURE_SUBSCRIPTION_ID
+#
+# Repository/environment variables:
+#   DBX_PLATFORM_RUNTIME_EXECUTOR_SP  application ID of the dedicated
+#                                     power-controller service principal
+#   DBX_PLATFORM_ACTION_EXECUTOR_SP   application ID of the separate
+#                                     allowlisted remediation executor
 #
 # There is no skip-when-unconfigured guard: a deploy that cannot authenticate
 # must fail loudly rather than exit green having done nothing.
@@ -33,9 +38,10 @@ jobs:
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_AUTH_TYPE: azure-cli
-      BUNDLE_VAR_warehouse_id: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
       BUNDLE_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       BUNDLE_VAR_azure_service_credential: ${{ vars.DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL }}
+      BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
+      BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,6 +75,18 @@ jobs:
         # unaffected — they resolve variables properly.
         working-directory: ${{ runner.temp }}
         run: databricks current-user me
+      - name: Verify executor identity separation
+        run: |
+          if [ -z "$BUNDLE_VAR_runtime_executor_service_principal_name" ] ||
+             [ -z "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
+            echo "Both executor service-principal variables are required." >&2
+            exit 1
+          fi
+          if [ "$BUNDLE_VAR_runtime_executor_service_principal_name" = \
+               "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
+            echo "Runtime and action executors must use separate service principals." >&2
+            exit 1
+          fi
       - name: Stage the wheel for the Platform Console app
         # The app's requirements.txt resolves dbx-platform from ./wheels via
         # --find-links, so the exact package the jobs run also powers the app.
@@ -98,14 +116,13 @@ jobs:
         run: databricks bundle validate -t prod
       - name: Deploy
         run: databricks bundle deploy -t prod
-      - name: Provision dashboard helper objects
-        # bundle deploy uploads the dashboards but does NOT create the schema,
-        # functions, and reference tables their queries read. Run the setup job
-        # once now so the dashboards resolve immediately instead of waiting for
-        # its daily schedule (resources/dashboards_jobs.yml). Idempotent.
-        run: databricks bundle run dashboards_setup -t prod
-      - name: Deploy and start the Platform Console app
-        # bundle deploy only creates the app resource and uploads its source;
-        # bundle run pushes the source into the app and starts it. First run
-        # provisions app compute (takes a few minutes); idempotent afterwards.
-        run: databricks bundle run platform_console -t prod
+      - name: Apply Mission Control schema migrations
+        # Runs on serverless Spark as the deployment identity. It never starts
+        # the managed SQL warehouse, so deploy-while-sleeping stays asleep.
+        run: databricks bundle run schema_migrations -t prod
+      - name: Reconcile the durable runtime intent (proposal only)
+        # Deploy always leaves schedules paused and never starts the app.
+        # This unscheduled serverless controller compares exact bundle IDs with
+        # the last approved ON/SLEEPING state. Drift creates a new immutable
+        # AWAITING_APPROVAL plan; it never changes resource state in CI.
+        run: databricks bundle run power_controller -t prod --params operation=reconcile

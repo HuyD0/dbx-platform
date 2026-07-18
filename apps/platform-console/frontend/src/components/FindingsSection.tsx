@@ -3,7 +3,15 @@ import type { ReactNode } from "react";
 import { apiGet } from "../lib/api";
 import type { Envelope, Row } from "../lib/types";
 import { DataTable } from "./DataTable";
-import { AsOf, Card, EmptyState, ErrorState, SectionTitle, Skeleton } from "./ui";
+import {
+  AsOf,
+  CapabilityNotice,
+  Card,
+  EmptyState,
+  ErrorState,
+  SectionTitle,
+  Skeleton,
+} from "./ui";
 
 /** One check = one card: fetch → skeleton → table/empty/error, with an
  * as-of stamp and explicit refresh. The workhorse of every findings page. */
@@ -62,6 +70,16 @@ export function FindingsSection({
         <Skeleton rows={3} />
       ) : query.isError ? (
         <ErrorState error={query.error} />
+      ) : rows.length === 0 &&
+        query.data.source_status &&
+        query.data.source_status.status !== "healthy" ? (
+        <CapabilityNotice
+          title={`${query.data.source_status.source ?? "Evidence source"} coverage is ${query.data.source_status.status}`}
+          description={
+            query.data.source_status.notes ??
+            "No finding can be asserted until this source is available."
+          }
+        />
       ) : rows.length === 0 ? (
         <EmptyState message={emptyMessage} />
       ) : render ? (

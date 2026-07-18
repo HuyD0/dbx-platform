@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -34,6 +35,7 @@ def health() -> dict:
         "version": dbx_platform.__version__,
         "build": _build_info(),
         "actions_enabled": deps.actions_enabled(),
+        "environment": os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev"),
     }
 
 

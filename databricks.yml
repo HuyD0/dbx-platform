@@ -37,16 +37,40 @@ artifacts:
     build: python3 -m build --wheel
 
 variables:
-  warehouse_id:
+  actions_enabled:
     description: >
-      SQL warehouse ID used by the dashboards and system-table job tasks.
-      Find one with: databricks warehouses list. Set via
-      BUNDLE_VAR_warehouse_id or --var warehouse_id=...
-    default: ""
+      Enables approval and executor submission in the Platform Console. Keep
+      false through proposal-only validation; setting true does not bypass any
+      immutable-plan, identity, TTL, drift, or executor checks.
+    default: "false"
 
   notification_email:
     description: Recipient for job failure notifications.
     default: huyydo@gmail.com
+
+  approver_group:
+    description: >
+      Workspace group allowed to review and approve exact Mission Control
+      action plans and launch the out-of-band power controller.
+    default: dbx-platform-approvers
+
+  operator_group:
+    description: >
+      Account group allowed to create immutable Mission Control proposals.
+      Security-definer procedures re-check this membership at every write.
+    default: dbx-platform-operators
+
+  runtime_executor_service_principal_name:
+    description: >
+      Application/client ID of the dedicated, least-privileged service
+      principal that runs the power controller. This deliberately has no
+      default: a deployment must explicitly name the executor identity.
+
+  action_executor_service_principal_name:
+    description: >
+      Application/client ID of the separate remediation executor. It must not
+      be the runtime controller identity and receives only the permissions for
+      explicitly enabled non-runtime action packs.
 
   azure_subscription_id:
     description: >
@@ -70,9 +94,9 @@ targets:
     default: true
     mode: development
 
-  # Production: real names, shared root path. Schedules are committed PAUSED —
-  # jobs run when a human triggers them (console Jobs page, agent proposal, or
-  # `databricks bundle run <resource_key> -t prod`).
+  # Production: real names, schedules deployed paused, identity-owned root.
+  # The power controller proposes reconciliation; a human approves the exact
+  # plan before any ON/SLEEPING state is restored.
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
   # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:
@@ -80,4 +104,10 @@ targets:
   prod:
     mode: production
     workspace:
-      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+      # Keep controller source out of /Workspace/Shared, which is writable by
+      # every workspace user and would undermine immutable-plan execution.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      # Preserve the existing production deployment lineage while source and
+      # artifacts move to the identity-owned root. Move the state itself only
+      # through a separately rehearsed bundle-state migration.
+      state_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}/state

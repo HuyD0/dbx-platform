@@ -1,0 +1,76 @@
+# Dedicated unscheduled executor for approved non-runtime actions. The app can
+# submit only an action ID; all plan, approval, TTL and drift checks are repeated
+# inside this narrowly privileged serverless job before any mutation.
+resources:
+  jobs:
+    action_executor:
+      name: "[dbx-platform] action-executor"
+      description: >
+        Executes one durable, approved, allowlisted Mission Control action by
+        action ID. This job has no schedule, no idle compute, and is excluded
+        from the Hibernate inventory.
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      run_as:
+        service_principal_name: ${var.action_executor_service_principal_name}
+      tags:
+        team: platform
+        project: dbx-platform
+        control_plane: action-executor
+      permissions:
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_MANAGE_RUN
+        - group_name: ${var.approver_group}
+          # Recovery path when App submission fails. The human can pass only
+          # an action ID; the executor still reloads and validates the exact
+          # durable approval, scope, hash, TTL, target versions, and allowlist.
+          level: CAN_MANAGE_RUN
+      parameters:
+        - name: action_id
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: execute_approved_action
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/dbx_platform/action_executor.py
+            parameters:
+              - --action-id
+              - "{{job.parameters.action_id}}"
+              - --run-id
+              - "{{job.run_id}}"
+              - --environment
+              - ${bundle.target}
+              - --expected-executor
+              - ${var.action_executor_service_principal_name}
+              - --approver-group
+              - ${var.approver_group}
+              - --governed-job-id
+              - ${resources.jobs.cost_forecast_train.id}
+              - --governed-job-id
+              - ${resources.jobs.cost_usage_report.id}
+              - --governed-job-id
+              - ${resources.jobs.housekeeping_report.id}
+              - --governed-job-id
+              - ${resources.jobs.security_audit.id}
+              - --governed-job-id
+              - ${resources.jobs.governance_check.id}
+              - --governed-job-id
+              - ${resources.jobs.platform_digest.id}
+              - --governed-job-id
+              - ${resources.jobs.ml_serving_report.id}
+              - --governed-job-id
+              - ${resources.jobs.ml_hygiene_report.id}
+              - --governed-job-id
+              - ${resources.jobs.dashboards_setup.id}
+              - --governed-job-id
+              - ${resources.jobs.azure_cost_pull.id}
+              - --governed-job-id
+              - ${resources.jobs.cost_forecast_daily.id}
+              - --governed-job-id
+              - ${resources.jobs.llm_cost_rollup.id}

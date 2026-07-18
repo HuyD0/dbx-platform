@@ -1,299 +1,332 @@
-# Runbook
+# Mission Control runbook
 
-Every check runs two ways from the same code: ad-hoc via the CLI and as a
-bundle-deployed job. Job schedules are committed **paused** — the cron only
-documents intended cadence, and every run is human-initiated (see "Running
-jobs" below). Bundle jobs are **report-only**; destructive actions are
-deliberate local commands with `--apply --yes`.
+## Operating rule
 
-Reports print to the task's run output (Jobs UI → run → task output). A failed
-task emails `${var.notification_email}`. Exit codes: `0` success (findings are
-not failures), `1` runtime error, `2` refused `--apply` without confirmation,
-`3` system tables unavailable.
+The only mutation path is:
 
-## Job catalog
+`durable plan → authorized approval → dedicated executor → verification event`
 
-| Job | Cadence (paused — run manually) | Tasks | Needs |
-|---|---|---|---|
-| `cost-usage-report` | daily 07:00 | `cost report`, `cost top-jobs`, `cluster-utilization`, `failed-run-waste`, `warehouse-utilization` | warehouse + system.billing/lakeflow/compute/query |
-| `housekeeping-report` | daily 05:30 | `stale-clusters`, `orphaned-jobs`, `jobs-on-all-purpose` | REST APIs only |
-| `security-audit` | weekly Mon 06:00 | `token-audit`, `inactive-users` | admin; warehouse + system.access |
-| `governance-check` | weekly Mon 06:30 | `policy-sync` (drift), `tag-compliance`, `tag-recommendations` | warehouse + system.billing |
-| `ml-serving-report` | daily 07:30 | `endpoint-audit`, `serving-cost` | warehouse + system.billing (+ system.serving where enabled) |
-| `ml-hygiene-report` | weekly Mon 07:00 | `model-hygiene`, `gpu-audit`, `vector-search-audit` | REST APIs (+ warehouse for GPU spend) |
-| `platform-digest` | weekly Mon 08:00 | `ai-digest` | warehouse + an `ai_query`-capable foundation-model endpoint |
-| `azure-cost-pull` | daily 06:30 | `azure-cost pull` (3d re-merge), `azure-cost spikes` | UC service credential w/ Cost Management Reader + warehouse (see docs/cloud-setup.md) |
-| `cost-forecast-train` | weekly Mon 05:00 | `forecast train` | warehouse + MLflow/UC registry; serverless env installs the `[forecast]` extras |
-| `cost-forecast-daily` | daily 07:15 | `forecast build-features` → `predict` → `monitor` | warehouse + the `@champion` model (train once first) |
+The app and assistant can investigate and propose. They cannot execute target
+APIs. Legacy `--apply`, direct dashboard setup, direct wheel publication, and
+direct model/agent deployment are disabled. Resource deletion is not an
+allowlisted v1 action.
 
-Thresholds are task parameters in `resources/*.yml` — change them in git, not
-in the Jobs UI, so the config stays reviewable.
+Scheduled jobs may read platform sources and append findings, cost/usage
+ledger rows, forecasts, and audit telemetry. Budget/configuration changes,
+training/model promotion, manual stateful job runs, remediation, Hibernate,
+and Wake always require approval.
 
-## Running jobs
+## Action lifecycle
 
-All schedules ship `pause_status: PAUSED`, so nothing runs until you trigger
-it. Three equivalent ways:
+Normal:
 
-- **Console Jobs page** — per-job "Run now", or "Run all" to kick off every
-  `[dbx-platform]` job in one click.
-- **Agent chat** — ask for a run in plain language ("run the security audit",
-  "run all jobs"); the agent proposes, you confirm on the card.
-- **CLI** — `databricks bundle run <resource_key> -t prod` (e.g.
-  `dashboards_setup`), or the underlying command directly
-  (`dbx-platform security token-audit`).
+`AWAITING_APPROVAL → APPROVED → EXECUTING → VERIFYING → SUCCEEDED`
 
-Ordering: on a fresh workspace run `dashboards-setup` first — it creates the
-`dbx_dev.dbx_platform` helper objects and the `platform_findings`/`platform_digest`
-tables the digest and forecast jobs write to. Run `cost-forecast-train` once
-before `cost-forecast-daily` has a model to predict with. "Run all" submits
-`dashboards-setup` and `cost-forecast-train` first, but does not wait for them
-to finish — on a first-ever run, re-run `platform-digest` if it raced setup.
-The one automatic run left: the deploy workflow triggers `dashboards_setup`
-once per prod deploy.
+Terminal/retry outcomes:
 
-## Acting on findings
+`REJECTED`, `EXPIRED`, `STALE`, `FAILED`, `ROLLED_BACK`
 
-### Stale / long-running clusters
+Every action stores the canonical plan JSON and SHA-256 hash, exact targets,
+resource versions/preconditions, before/after state, impact, rollback,
+verification, proposer, workspace/environment, 15-minute expiry, and
+single-use idempotency key. Every approval stores the same plan hash, verified
+approver identity/role, decision, timestamp, and typed confirmation when
+required. Execution and verification produce append-only events.
 
-```bash
-dbx-platform housekeeping stale-clusters                  # re-check (dry run)
-dbx-platform housekeeping stale-clusters --apply --yes    # terminate/permanently delete
-```
+Any payload change, target drift, expiry before executor claim, replay, missing
+SCIM identity, lost approver-group membership, unavailable audit storage, or
+failed precondition invalidates the action without a target mutation.
 
-- Terminated ≥ 30d (non-pinned) → **permanent delete**; running ≥ 24h or
-  autotermination disabled → **terminate** (recoverable).
-- The pinned check relies on the API exposing `pinned_by_user_name`. Review the
-  dry-run list before your first `--apply`, and keep the bundle job
-  report-only.
+## Human approval
+
+1. Open **Action Center → Awaiting Approval**.
+2. Confirm workspace/environment, exact target count, before/after state,
+   source freshness, blast radius, rollback, and verification.
+3. For medium/high risk, type the displayed action and target count.
+4. Approve or reject. One current member of `dbx-platform-approvers` is
+   sufficient and may approve their own proposal.
+5. Follow Activity through execution and verification. Do not retry by
+   resubmitting a payload; create a fresh plan after `STALE`, `EXPIRED`, or a
+   changed target.
+
+PAT revocation explicitly has no rollback. Cluster termination is recoverable;
+permanent deletion is unsupported.
+
+## Proposal-only enablement
+
+Keep bundle variable `actions_enabled=false` until all of these pass:
+
+1. `schema_migrations` succeeds under the deployment identity.
+2. One complete reporting cycle writes canonical findings and cost ledgers.
+3. Source-health cards show their real freshness/coverage; unavailable preview
+   sources are visible rather than silently omitted.
+4. `dbx-platform-approvers` membership resolves through Databricks user
+   authorization/SCIM.
+5. Runtime and action executors are distinct identities with the grants in
+   [service-principal.md](service-principal.md).
+6. Spoofed identity, altered hash, unauthorized approval, expiry, replay,
+   target drift, and missing audit storage tests fail without mutation.
+7. A valid low-risk test action executes once and produces a complete plan,
+   approval, execution, and verification trail.
+
+Then set `BUNDLE_VAR_actions_enabled=true` through a reviewed deployment.
+Turning on this flag only permits approval/executor submission; it does not
+bypass any durable checks.
+
+## Safe Hibernate
+
+The exact managed scope is generated from bundle output:
+
+- Platform Console app;
+- eleven declared schedules;
+- dedicated `[dbx-platform] mission-control` 2X-Small serverless warehouse.
+
+Protected/out of scope:
+
+- shared Starter and every unrelated warehouse;
+- unscheduled `power-controller`, `action-executor`, and `schema_migrations`;
+- protected manual `cost-forecast-train`;
+- dashboards, UC data, models, storage/networking, workspace, and unrelated
+  projects.
+
+The controller never discovers targets by substring, tag, or broad workspace
+scan.
+
+### Plan and execute Hibernate
+
+Use **Workflows → `[dbx-platform] power-controller`**:
+
+1. Run `operation=plan-hibernate`.
+2. Review resources to stop, already-stopped resources, exclusions, active
+   runs/queries, dependencies, estimated idle savings, retained data, wake
+   procedure, inverse state, expiry, hash, and confirmation phrase.
+3. Before expiry, rerun with:
+   - `operation=execute-hibernate`
+   - `plan_id=<reviewed action id>`
+   - `plan_hash=<reviewed hash>`
+   - `confirmation=<exact displayed phrase>`
+
+Execution:
+
+1. Persist exact before state and inverse Wake plan.
+2. Pause only schedules previously unpaused.
+3. Wait up to 15 minutes for owned runs and dedicated-warehouse statements.
+4. If activity remains, abort and restore schedules/runtime state. Cancellation
+   requires a separate action and is unsupported in v1.
+5. Stop the dedicated warehouse.
+6. Persist checkpoints and desired `SLEEPING`.
+7. Stop the app last.
+
+On partial failure the controller restores captured state where possible and
+records the exact result. Drift becomes `STALE`; there is no best-effort
+mutation.
+
+## Wake while the app is stopped
+
+Use the same out-of-band controller in the Jobs UI:
+
+1. Run `operation=plan-wake`.
+2. Review the exact 15-minute plan/hash.
+3. Rerun with `operation=execute-wake`, plan ID, plan hash, and exact
+   confirmation.
+
+The controller verifies the launcher’s current approver-group membership,
+starts the dedicated warehouse, starts and health-checks the currently
+deployed app revision, then restores only schedules enabled before Hibernate.
+Repeated Wake/Hibernate calls are idempotent.
+
+The controller does not deploy source. Releasing a different app revision is a
+separate reviewed deployment.
+
+## Deployment reconciliation
+
+Every bundle schedule declares `pause_status: PAUSED`; the app and dedicated
+warehouse declare `started: false`.
+
+CI performs:
+
+1. build wheel and frontend;
+2. validate/deploy the bundle;
+3. run unscheduled `schema_migrations` on serverless Spark;
+4. run `power_controller operation=reconcile`.
+
+The migration is the sole bootstrap path for schemas, tables, and dashboard
+helper functions. It does not start the managed SQL warehouse. Reconciliation
+reads durable desired state and either reports `ALREADY_RECONCILED` or creates
+an `AWAITING_APPROVAL` plan. CI never executes it.
+
+Deploying while desired state is `SLEEPING` leaves the toolkit asleep.
+
+## Protected forecast training
+
+`cost-forecast-train` is unscheduled and runs as the action executor identity.
+It is exact-bound into the app as a governed manual Job but is absent from the
+Hibernate inventory.
+
+To train/promote:
+
+1. Create a `run-job` action for the exact bundle Job ID.
+2. Review the full Job settings hash and run-as identity.
+3. Approve the plan.
+4. The action executor revalidates the Job, launches it once with an
+   idempotency token, and records the resulting Databricks run ID.
+5. Before MLflow logging, registration, or alias changes, the task re-reads
+   `action_requests`, `action_approvals`, and `action_events`; recomputes the
+   plan hash; and verifies exact workspace, environment, Job ID, and current
+   run ID.
+
+A manual rerun, copied action parameters, old successful action, renamed Job,
+changed task/compute settings, or mismatched run ID fails before training.
+
+Direct `dbx-platform forecast train` is therefore blocked unless running as
+the exact executor-launched action.
+
+## Findings and remediations
+
+### Stale clusters
+
+The scheduled check proposes recoverable termination for running clusters
+over threshold or without auto-termination. Old terminated clusters produce a
+`review-retention` finding only. They are never deleted by v1.
+
+Create a `stale-clusters` plan in Action Center. The executor re-reads state and
+can terminate only exact approved cluster IDs that remain eligible.
 
 ### Orphaned jobs
 
-`--apply` only **pauses** schedules/triggers — it never deletes a job. Reassign
-ownership in the Jobs UI (or `databricks jobs update`) and unpause.
+The action pauses existing schedules/triggers; it never deletes Jobs.
+Reassign ownership, then use a new approved action to change schedule state.
 
-### Token audit
+### PATs
 
-```bash
-dbx-platform security token-audit --apply --yes   # revokes tokens OVER the age limit only
-```
-
-"Expiring soon" findings are rotation reminders, never revoked. Warn owners
-before revoking — running integrations break immediately.
-
-### Inactive users
-
-Report-only by design. Deactivation belongs in your IdP/SCIM flow: removing a
-user here does not reassign their jobs or UC objects (that's exactly how
-orphans are created). Use the orphaned-jobs report after any offboarding.
+“Expiring soon” is advisory. A `token-revoke` action can contain only exact
+over-age PAT findings and has no rollback. Notify owners first. This pack
+requires a powerful token-management permission and should remain
+proposal-only unless its risk is explicitly accepted.
 
 ### Policy drift
 
-```bash
-dbx-platform governance policy-sync                # drift report
-dbx-platform governance policy-sync --apply --yes  # create/update from policies/*.json
-```
+Git remains the source for managed policy JSON. The executor creates/updates
+only exact approved policies and never deletes unmanaged policies. Any new
+drift after planning produces `STALE`.
 
-Policies present in the workspace but not in git are listed as **unmanaged**
-and never touched. To adopt one into git: copy its JSON into `policies/`,
-re-run the drift report, confirm "unchanged".
+### Budgets
 
-### Tag compliance
+Budget alerts are autonomous/read-only. A budget change uses
+`configure-budget`, stores exact before/desired state, and is applied by the
+action executor to `llm_budgets`. Alerts never stop endpoints or change model
+routing.
 
-Fix by adding `custom_tags` (clusters) / `tags` (jobs). The cluster policies in
-`policies/` make `team` and `project` mandatory for new compute, so the list
-should shrink over time.
+### ML/serving
 
-### Tag recommendations
+Audit only customer-managed/configurable endpoints and AI Gateway services.
+Built-in pay-per-token endpoints are excluded from findings that cannot apply
+to them. Serving reconfiguration, endpoint/model deletion, model promotion,
+and agent deployment are not general executor actions in v1.
 
-```bash
-dbx-platform governance tag-recommendations   # advisory, report-only
-```
+`agents/platform_agent/deploy_agent.py` intentionally exits without logging,
+registering, or deploying. Add a narrowly scoped, tested model-deploy action
+before enabling it.
 
-For each resource missing a required tag, suggests a concrete fix from three
-offline signals (no AI/ML): a **near-match key** rename when the value is already
-present under a typo/differently-formatted key (`costcenter` -> `cost_center`),
-an **inferred value** when a value already used elsewhere for that key appears in
-the resource name (cluster `atlas-nightly` -> `project=atlas`), and the resource
-**creator** for ownership-type keys (`owner`/`email`/`contact`). Suggestions are
-advisory — apply them by editing the resource's tags. Tune the typo threshold
-with `DBX_PLATFORM_TAG_SUGGESTION_MIN_RATIO_PCT` (default 80).
+## LLM Cost & Value operations
 
-### Serving endpoints (ml endpoint-audit)
+`llm-cost-rollup` writes provider-aware daily cost and hourly usage ledgers.
+Interpret labels literally:
 
-Report-only on purpose: any `update_config` call redeploys the endpoint, and
-`environment_vars` with secret references do not round-trip through a GET.
-Act via the Serving UI or an IaC change, endpoint by endpoint:
+- `Azure actual`: Azure billing, including later adjustments;
+- `Databricks list`: usage joined to list prices, not an invoice;
+- `provider estimate`: AI Gateway/provider estimate, never silently combined
+  with actual billed cost.
 
-- **enable-scale-to-zero** — small CPU workloads idling between calls.
-- **enable-inference-table** — without it there is no payload/audit trail;
-  required before any quality monitoring.
-- **add-ai-gateway-rate-limits / enable-usage-tracking** — external and
-  foundation-model endpoints are pay-per-token; unlimited callers are an
-  unbounded bill.
-- GPU endpoints are exempt from the scale-to-zero flag (cold starts).
+Do not add currencies without a documented conversion source/rate/time.
+Request telemetry allocates billed totals to workloads but does not claim
+invoice-accurate per-request cost. Keep an explicit `unallocated/uncovered`
+bucket.
 
-### Model hygiene / GPU / vector search
+When preview sources such as AI Gateway usage/cost tables are absent, the UI
+must show `unavailable` and the fallback source. Verify actual/detail
+reconciliation, request/token coverage, currency, freshness, and the true
+retention boundary before trusting optimization findings.
 
-All report-only: archiving models, terminating someone's GPU cluster, and
-deleting a vector search endpoint are owner decisions. GPU terminations can
-reuse `housekeeping stale-clusters --apply` once confirmed. Note:
-`system.compute.node_timeline` has no GPU metrics, so GPU right-sizing stays
-at the spend/idle level.
+Suggested investigation order:
 
-### Right-sizing (cluster/warehouse utilization, jobs on all-purpose)
+1. spend anomaly and late billing adjustments;
+2. retry storms or agent loops;
+3. context/input growth and output growth;
+4. expensive-model drift;
+5. cache effectiveness;
+6. idle customer-managed endpoints;
+7. missing/unallocated attribution;
+8. cost per successful task versus quality/latency.
 
-Findings are ranked by list cost — work top-down. `downsize-node-or-workers`
-and `lower-autoscale-max` are cluster-spec changes owned by the cluster's
-team; `move-to-job-cluster` is a job-spec change (all-purpose compute costs
-roughly double the job-compute DBU rate). Warehouse findings cut both ways:
-idle spend → shorter auto-stop or smaller size; sustained queueing →
-undersized.
+All optimization changes still require approval and must state savings range
+plus quality/latency risk.
 
-### AI digest & triage loop
+## Dependency health
 
-`report ai-digest` needs the `platform_digest`/`platform_findings` tables —
-created by `dbx-platform dashboards setup` — and a pay-per-token
-foundation-model endpoint (`DBX_PLATFORM_DIGEST_MODEL`, default
-`databricks-claude-sonnet-4-5`; list candidates under Serving → built-in).
-If `ai_query` is unavailable the digest degrades to raw findings and still
-exits 0. The weekly `platform-triage.yml` workflow files findings into a
-rolling `platform-triage` GitHub issue and asks `@claude` for fixes **as
-pull requests** — never workspace mutations.
+The scheduled `dashboard-dependency-health` Job runs `dashboards health` and
+performs only `SHOW` queries. Missing helpers are repaired only by the next
+reviewed deployment’s `schema_migrations` run.
 
-### Platform Console app
+Do not run `dashboards setup`; it is a disabled compatibility command.
 
-A FastAPI backend + React SPA, deployed by the bundle (`resources/app.yml`)
-and found under **Compute → Apps** (not the workspace file tree). Two steps
-are required and CI runs both: `bundle deploy` creates the app and uploads
-its source, then `databricks bundle run platform_console` pushes the source
-into the app and starts it — without the run step the app sits stopped with
-no URL. For a manual deploy, stage **both** build artifacts first (each is
-git-ignored, re-included by `databricks.yml` sync):
+System-table and preview-source failures should be shown as dependency-health
+states with source, freshness, and setup guidance. Mission Control must not
+render raw backend/SQL exceptions.
 
-```bash
-python -m build --wheel && cp dist/*.whl apps/platform-console/wheels/
-cd apps/platform-console/frontend && npm ci && npm run build && cd -
-databricks bundle deploy -t prod && databricks bundle run platform_console -t prod
-```
+## Audit and incident response
 
-After the first deploy, grant the app's service principal CAN_MANAGE_RUN on
-the `[dbx-platform]` jobs so the Jobs page can trigger them. Note: apps are
-currently prod-target resources — if `bundle deploy -t dev` rejects the app
-name prefix, deploy the app from prod only.
+For a failed action, collect:
 
-Local development: `uvicorn` serves the API (`cd apps/platform-console &&
-python main.py`), `npm run dev` in `frontend/` proxies `/api` to it.
+- action ID/hash and status;
+- exact workspace/environment;
+- proposal/approval/executor identities;
+- `action_events` in timestamp order;
+- expected/current resource version;
+- mutation checkpoint and verification;
+- rollback outcome;
+- relevant Job run ID and task output.
 
-#### Remediation actions (off by default)
+Do not edit an action record to retry it. Preserve it and create a fresh plan.
+If audit writes fail, keep actions disabled until storage is restored and the
+preflight append/update checks pass.
 
-The console ships four remediation actions — stale-cluster cleanup,
-orphaned-job **pause**, over-age token revoke, and policy sync — but a fresh
-deployment is report-only: the apply endpoint refuses until
-`DBX_PLATFORM_CONSOLE_ACTIONS=true` is uncommented in
-`apps/platform-console/app.yaml` (a git-reviewed change). Even then every
-apply requires a server-side dry-run plan (single-use, 15-minute expiry) and
-a typed confirm phrase, mirroring the CLI's `--apply --yes`. Plans and
-applies are logged with the clicking user's forwarded identity.
+Every successful action emits an immediate `IMPACT_MEASUREMENT` verification
+checkpoint with a 24-hour observation window. The existing daily LLM ledger
+schedule and weekly `platform-digest` schedule both run
+`report impact-followup`; the weekly run follows a canonical finding refresh.
+If an exact target has not appeared in a fresh finding yet, the collector
+records `IMPACT_FOLLOW_UP_PENDING` and retries instead of permanently storing
+an empty outcome. It appends `IMPACT_FOLLOW_UP_MEASURED` once target evidence
+is available or the seven-day source-correlation grace period has elapsed.
+Financial or SLO attribution that the available sources cannot prove remains
+explicitly `UNATTRIBUTED`/unavailable; it is never filled with an estimate.
 
-Enabling actions has real permission implications for the app's service
-principal — in practice these amount to workspace admin, which is why the
-gate defaults to off:
+For suspected identity spoofing or executor credential exposure:
 
-| Action | APIs used | Realistic grant |
-|---|---|---|
-| stale-clusters | `clusters/delete`, `permanent-delete` | CAN_MANAGE on the clusters — practically admin |
-| orphaned-jobs (pause) | `jobs/get`, `jobs/update` | IS_OWNER or CAN_MANAGE per job (CAN_MANAGE_RUN is not enough) |
-| token-revoke | `token-management/delete` | workspace admin |
-| policy-sync | `cluster-policies/create`, `edit` | workspace admin |
+1. disable action submission (`actions_enabled=false`);
+2. stop/disable the affected executor credential;
+3. preserve action/audit tables and workspace audit logs;
+4. review executor grants and recent exact targets;
+5. rotate credentials where applicable;
+6. restore proposal-only mode and repeat negative acceptance tests.
 
-If you don't want to grant that, leave the gate off: the console still plans
-(dry-runs) everything and the CLI keeps the apply path.
-
-#### Agent chat
-
-The Chat page calls the served platform agent. Deploy it first (below),
-grant the app's SP **CAN_QUERY** on the resulting serving endpoint, and set
-`DBX_PLATFORM_AGENT_ENDPOINT` in `app.yaml` if the endpoint name differs
-from `agents_<catalog>-<schema>-platform_agent`. Until then the Chat page
-shows a setup hint instead of a conversation. The agent is read-only by
-construction — its `propose_*` tools are dry-runs whose proposals the
-console turns into the same confirm-gated plan dialog.
-
-### Served agent (optional)
-
-`pip install -e ".[agent]"`, then `python agents/platform_agent/deploy_agent.py`
-with workspace credentials. The agent's tools are read-only by construction;
-verify the mlflow `ResponsesAgent` interface matches your workspace's mlflow
-version at deploy time. Chat via the Platform Console's Chat page, the AI
-Playground, or the endpoint review app. Re-run the deploy script after
-changing `tools.py`/`formatting.py` — the console talks to the deployed
-endpoint, not the repo copy.
-
-## Serverless fallback
-
-Jobs use serverless job compute (`environments` block). If serverless jobs
-aren't available in your region/workspace, in each `resources/*_jobs.yml`
-replace the `environments:` block with:
-
-```yaml
-      job_clusters:
-        - job_cluster_key: single_node
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            node_type_id: Standard_D4ds_v5
-            num_workers: 0
-            spark_conf:
-              spark.databricks.cluster.profile: singleNode
-              spark.master: "local[*]"
-            custom_tags: {ResourceClass: SingleNode, team: platform, project: dbx-platform}
-```
-
-and on each task swap `environment_key: default` for:
-
-```yaml
-          job_cluster_key: single_node
-          libraries:
-            - whl: ./dist/*.whl
-```
-
-## Updating dashboards
-
-The dashboards' helper functions/reference tables are provisioned by the
-`dashboards-setup` job (`resources/dashboards_jobs.yml`) — the deploy workflow runs it
-once per prod deploy (its cron is committed paused). If a dashboard shows
-`TABLE_OR_VIEW_NOT_FOUND` for `dbx_dev.dbx_platform.*`, that job either has not run yet
-(deploy hasn't happened) or lacks grants — trigger it from the console Jobs page, with
-`databricks bundle run dashboards_setup`, or run `dbx-platform dashboards setup
---warehouse-id <id>`, and check the SP's grants in docs/cloud-setup.md.
-
-Upstream templates live in `dashboards/templates/` (pristine, with
-`{catalog}.{schema}` placeholders). Rendered, deployable copies live in
-`dashboards/`. To move helper objects to a different catalog/schema (also update the
-`--catalog/--schema` in `resources/dashboards_jobs.yml` to match):
+## Validation commands
 
 ```bash
-dbx-platform dashboards render --catalog analytics --schema platform_obs
-dbx-platform dashboards setup  --catalog analytics --schema platform_obs
-git add dashboards && git commit -m "Move dashboard helpers"
-databricks bundle deploy
+ruff check .
+pytest
+python -m build --wheel
+databricks bundle validate -t dev \
+  --var runtime_executor_service_principal_name=<runtime-client-id> \
+  --var action_executor_service_principal_name=<action-client-id>
 ```
 
-If you customize a dashboard in the UI, export its JSON back into
-`dashboards/templates/` (re-inserting `{catalog}.{schema}` where applicable) so
-git stays the source of truth.
+Frontend:
 
-### Embedded dashboards in the console
-
-The console's Dashboards page embeds each `[dbx-platform]` dashboard in an
-iframe (`<host>/embed/dashboardsv3/<id>`). Two prerequisites, both manual:
-
-- A workspace admin must add the app's domain to the workspace's **approved
-  domains for dashboard embedding** (Settings → Security → embedding approved
-  domains) — the specific app URL, or `*.databricksapps.com`. Until then the
-  iframe renders blank/refused; the page's "Open in workspace" link is the
-  fallback. Local dev (`npm run dev`) won't embed unless localhost is also
-  approved.
-- `resources/dashboards.yml` publishes with `embed_credentials: false`, so
-  each viewer authenticates as themselves: they need an active workspace
-  session, CAN_VIEW on the dashboard, and access to the warehouse. The app
-  never proxies its own credentials into the iframe.
+```bash
+cd apps/platform-console/frontend
+npm ci
+npm test
+npm run build
+```

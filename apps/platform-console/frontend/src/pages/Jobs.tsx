@@ -1,39 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Play } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import { ActionPlanDialog } from "../components/ActionPlanDialog";
+import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
-import type { Envelope, JobInfo, RunAllResponse, RunInfo } from "../lib/types";
+import type { Envelope, JobInfo, RunInfo } from "../lib/types";
 import { AsOf, Badge, Card, EmptyState, ErrorState, SectionTitle, Skeleton } from "../components/ui";
-
-function RunAllButton({ jobCount }: { jobCount: number }) {
-  const [arming, setArming] = useState(false);
-  const runAll = useMutation({
-    mutationFn: () => apiPost<RunAllResponse>("/api/jobs/run_all"),
-    onSettled: () => setArming(false),
-  });
-  return (
-    <div className="flex items-center gap-2">
-      {runAll.data && <Badge tone="good">started {runAll.data.count} runs</Badge>}
-      {runAll.data && runAll.data.failed.length > 0 && (
-        <span title={runAll.data.failed.map((f) => `${f.name}: ${f.error}`).join("\n")}>
-          <Badge tone="critical">{runAll.data.failed.length} failed</Badge>
-        </span>
-      )}
-      {runAll.isError && <Badge tone="critical">run all failed</Badge>}
-      <button
-        type="button"
-        onClick={() => (arming ? runAll.mutate() : setArming(true))}
-        onBlur={() => setArming(false)}
-        disabled={runAll.isPending || jobCount === 0}
-        className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
-      >
-        <Play className="h-3 w-3" />
-        {arming ? `Run all ${jobCount} jobs?` : "Run all"}
-      </button>
-    </div>
-  );
-}
 
 function RunHistory({ jobId }: { jobId: number }) {
   const query = useQuery({
@@ -74,29 +45,22 @@ export function Jobs() {
     retry: false,
   });
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [started, setStarted] = useState<Record<number, number>>({});
-  const run = useMutation({
-    mutationFn: (jobId: number) => apiPost<{ run_id: number }>(`/api/jobs/${jobId}/run_now`),
-    onSuccess: (d, jobId) => setStarted((s) => ({ ...s, [jobId]: d.run_id })),
-  });
+  const [plannedJob, setPlannedJob] = useState<JobInfo | null>(null);
 
   return (
     <div className="space-y-4">
       <Card>
         <SectionTitle
           title="Report jobs"
-          subtitle="The bundle's [dbx-platform] jobs — report-only and unscheduled by design; runs start here"
+          subtitle="Owned schedules and run history. Every manual run requires exact-plan approval."
           right={
             query.data && (
-              <div className="flex items-center gap-3">
-                <RunAllButton jobCount={query.data.data.length} />
-                <AsOf
-                  asOf={query.data.as_of}
-                  cached={query.data.cached}
-                  onRefresh={() => query.refetch()}
-                  refreshing={query.isFetching}
-                />
-              </div>
+              <AsOf
+                asOf={query.data.as_of}
+                cached={query.data.cached}
+                onRefresh={() => query.refetch()}
+                refreshing={query.isFetching}
+              />
             )
           }
         />
@@ -105,7 +69,7 @@ export function Jobs() {
         ) : query.isError ? (
           <ErrorState error={query.error} />
         ) : query.data.data.length === 0 ? (
-          <EmptyState message="No [dbx-platform] jobs visible — deploy the bundle and grant the app CAN_MANAGE_RUN (docs/runbook.md)." />
+          <EmptyState message="No bundle-owned jobs are visible — deploy the bundle and grant the app CAN_VIEW on the exact job IDs (docs/runbook.md)." />
         ) : (
           <ul className="divide-y divide-grid">
             {query.data.data.map((job) => (
@@ -122,17 +86,12 @@ export function Jobs() {
                     {job.name}
                   </button>
                   <div className="flex shrink-0 items-center gap-2">
-                    {started[job.job_id] && (
-                      <Badge tone="good">started run {started[job.job_id]}</Badge>
-                    )}
                     <button
                       type="button"
-                      onClick={() => run.mutate(job.job_id)}
-                      disabled={run.isPending}
+                      onClick={() => setPlannedJob(job)}
                       className="inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
                     >
-                      <Play className="h-3 w-3" />
-                      Run now
+                      Plan run
                     </button>
                   </div>
                 </div>
@@ -145,12 +104,16 @@ export function Jobs() {
             ))}
           </ul>
         )}
-        {run.isError && (
-          <div className="mt-2">
-            <ErrorState error={run.error} />
-          </div>
-        )}
       </Card>
+      {plannedJob && (
+        <ActionPlanDialog
+          action="run-job"
+          title={`Run ${plannedJob.name}`}
+          parameters={{ job_id: plannedJob.job_id, job_name: plannedJob.name }}
+          allowLegacy={false}
+          onClose={() => setPlannedJob(null)}
+        />
+      )}
     </div>
   );
 }

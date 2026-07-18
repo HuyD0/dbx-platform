@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from dbx_platform.forecast_features import (
     FEATURE_COLUMNS,
     TOTAL_SERIES,
@@ -8,6 +10,7 @@ from dbx_platform.forecast_features import (
     daily_series,
     features_for_date,
     merge_features_sql,
+    store_features,
 )
 
 
@@ -110,3 +113,18 @@ def test_features_merge_keys():
     sql = merge_features_sql("main", "dbx_platform")
     assert "t.series = s.series AND t.feature_date = s.feature_date" in sql
     assert ":rows" in sql
+
+
+def test_store_features_missing_storage_has_migration_guidance(monkeypatch):
+    monkeypatch.setattr(
+        "dbx_platform.forecast_features.run_query",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(Exception("TABLE_NOT_FOUND")),
+    )
+    with pytest.raises(RuntimeError, match="schema_migrations"):
+        store_features(
+            object(),
+            "warehouse",
+            "main",
+            "dbx_platform",
+            [{"series": "total", "feature_date": "2026-07-01"}],
+        )

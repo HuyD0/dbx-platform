@@ -1,6 +1,6 @@
 """AI/BI dashboard support: render templates and provision their dependencies.
 
-Four dashboards under dashboards/templates/ are adapted from the community
+The five dashboards under dashboards/templates/ include four adapted from the community
 suite github.com/mohanab89/databricks-dashboard-suite (system-table dashboards,
 provided as-is, no license file — see README attribution); azure_cost_forecast
 and platform_command_center (the consolidated tabbed successor) are authored
@@ -10,10 +10,9 @@ helper objects the suite's notebook normally creates:
 - functions ``job_type_from_sku``, ``sql_type_from_sku``, ``team_name_from_tags``
 - reference tables ``workspace_reference`` and ``warehouse_reference``
 
-``dbx-platform dashboards setup`` provisions all of those through the
-Statement Execution API (works from a laptop — no Spark required), and
-``dbx-platform dashboards render`` writes the deployable .lvdash.json files
-that the bundle's resources/dashboards.yml points at.
+The deployment-only ``schema_migrations`` Job provisions these objects.
+``dbx-platform dashboards health`` checks them without writing, while
+``dbx-platform dashboards render`` writes only local deployable JSON files.
 """
 
 from __future__ import annotations
@@ -31,6 +30,18 @@ TEMPLATE_NAMES = (
     "lineage_catalog_utilization",
     "azure_cost_forecast",
     "platform_command_center",
+)
+
+REQUIRED_TABLES = (
+    "workspace_reference",
+    "warehouse_reference",
+    "platform_findings",
+    "platform_digest",
+)
+REQUIRED_FUNCTIONS = (
+    "job_type_from_sku",
+    "sql_type_from_sku",
+    "team_name_from_tags",
 )
 
 
@@ -58,6 +69,43 @@ def render_all(dashboards_dir: str | Path, catalog: str, schema: str) -> list[Pa
         dest.write_text(rendered)
         written.append(dest)
     return written
+
+
+def dependency_health(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+) -> list[dict]:
+    """Return read-only availability rows for dashboard helper objects."""
+
+    tables = run_query(w, f"SHOW TABLES IN `{catalog}`.`{schema}`", warehouse_id)
+    functions = run_query(
+        w,
+        f"SHOW USER FUNCTIONS IN `{catalog}`.`{schema}`",
+        warehouse_id,
+    )
+    present_tables = {
+        str(row.get("tableName") or row.get("table_name") or "").split(".")[-1].lower()
+        for row in tables
+    }
+    present_functions = {
+        str(next(iter(row.values()), "")).split(".")[-1].lower()
+        for row in functions
+    }
+    return [
+        {
+            "dependency": name,
+            "kind": kind,
+            "status": "AVAILABLE" if name.lower() in present else "MISSING",
+            "source": f"{catalog}.{schema}",
+        }
+        for kind, names, present in (
+            ("TABLE", REQUIRED_TABLES, present_tables),
+            ("FUNCTION", REQUIRED_FUNCTIONS, present_functions),
+        )
+        for name in names
+    ]
 
 
 # --- setup (schema, functions, reference tables) -------------------------------
@@ -96,14 +144,22 @@ def build_team_name_function_sql(catalog: str, schema: str, tag_keys: list[str])
 def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tuple[str, str]]:
     """All (description, sql) statements needed by the dashboards. Pure function."""
     # Same DDL the ingest/forecast jobs use — one code path, no schema drift.
+    from dbx_platform.azure_cost import (
+        create_detail_table_sql as azure_cost_details_ddl,
+    )
     from dbx_platform.azure_cost import create_table_sql as azure_costs_ddl
+    from dbx_platform.forecast_features import create_features_table_sql
     from dbx_platform.forecast_infer import create_forecasts_table_sql
+    from dbx_platform.llm_cost import create_ledger_table_statements
 
     fq = f"{catalog}.{schema}"
-    return [
-        (f"catalog {catalog}", f"CREATE CATALOG IF NOT EXISTS {catalog}"),
-        (f"schema {fq}", f"CREATE SCHEMA IF NOT EXISTS {fq}"),
+    statements = [
         (f"table {fq}.azure_costs", azure_costs_ddl(catalog, schema)),
+        (
+            f"table {fq}.azure_cost_details",
+            azure_cost_details_ddl(catalog, schema),
+        ),
+        (f"table {fq}.cost_features", create_features_table_sql(catalog, schema)),
         (f"table {fq}.cost_forecasts", create_forecasts_table_sql(catalog, schema)),
         (
             f"function {fq}.job_type_from_sku",
@@ -158,8 +214,8 @@ WHEN NOT MATCHED THEN INSERT (workspace_id, workspace_name)
         (
             f"table {fq}.platform_digest",
             f"CREATE TABLE IF NOT EXISTS {fq}.platform_digest "
-            f"(run_ts TIMESTAMP, days INT, model STRING, digest STRING, "
-            f"findings_json STRING)",
+            f"(run_ts TIMESTAMP, workspace_id STRING, environment STRING, "
+            f"days INT, model STRING, digest STRING, findings_json STRING)",
         ),
         (
             f"table {fq}.warehouse_reference",
@@ -185,6 +241,10 @@ WHEN NOT MATCHED THEN INSERT (workspace_id, warehouse_id, warehouse_name)
   VALUES (src.workspace_id, src.warehouse_id, src.warehouse_name)""",
         ),
     ]
+    return [
+        *create_ledger_table_statements(catalog, schema),
+        *statements,
+    ]
 
 
 def run_setup(
@@ -195,38 +255,14 @@ def run_setup(
     tag_keys: list[str],
     workspace_name: str | None = None,
 ) -> list[str]:
-    """Execute all setup statements; optionally name the current workspace."""
-    done = []
-    catalog_error: str | None = None
-    for description, sql in setup_statements(catalog, schema, tag_keys):
-        try:
-            run_query(w, sql, warehouse_id)
-        except RuntimeError as e:
-            # CREATE CATALOG needs metastore-level rights the running identity
-            # may lack even when the catalog already exists. Tolerate that one
-            # failure: CREATE SCHEMA right after is the real existence gate.
-            if description == f"catalog {catalog}":
-                catalog_error = str(e)
-                done.append(f"{description} (skipped: {e})")
-                continue
-            if catalog_error and description == f"schema {catalog}.{schema}":
-                raise RuntimeError(
-                    f"{e}\nCatalog '{catalog}' does not exist and could not be "
-                    f"created ({catalog_error}). Create it manually, or point the "
-                    "dashboards at an existing catalog: dbx-platform dashboards "
-                    "render --catalog <c> (then update resources/dashboards_jobs.yml "
-                    "and redeploy)."
-                ) from e
-            raise
-        done.append(description)
-    if workspace_name:
-        ws_id = w.get_workspace_id()
-        run_query(
-            w,
-            f"UPDATE {catalog}.{schema}.workspace_reference "
-            "SET workspace_name = :name WHERE workspace_id = :ws_id",
-            warehouse_id,
-            {"name": workspace_name, "ws_id": str(ws_id)},
-        )
-        done.append(f"named workspace {ws_id} -> {workspace_name}")
-    return done
+    """Disabled compatibility entrypoint.
+
+    The deployment-only ``schema_migrations`` Job consumes
+    :func:`setup_statements` through serverless Spark. Keeping DDL executable
+    here would recreate an unapproved local mutation path.
+    """
+
+    del w, warehouse_id, catalog, schema, tag_keys, workspace_name
+    raise RuntimeError(
+        "Direct dashboard setup is disabled; run the deployment schema_migrations Job."
+    )

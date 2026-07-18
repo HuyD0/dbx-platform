@@ -41,7 +41,8 @@ def classify_clusters(
     """Pure decision logic. Returns findings with a proposed action.
 
     - Terminated (non-pinned, non-job) clusters idle >= stale_days:
-      candidates for permanent delete.
+      candidates for an owner-reviewed retention decision. Resource deletion
+      is unsupported in Mission Control v1.
     - Running clusters up >= max_uptime_hours, or with autotermination
       disabled: candidates for terminate / review.
     """
@@ -62,7 +63,7 @@ def classify_clusters(
                         "cluster_name": c["cluster_name"],
                         "creator": c["creator"],
                         "reason": f"terminated {idle_days:.0f}d ago (threshold {stale_days}d)",
-                        "action": "permanent-delete",
+                        "action": "review-retention",
                     }
                 )
         elif c.get("state") == "RUNNING":
@@ -87,14 +88,21 @@ def classify_clusters(
 
 
 def apply_cluster_findings(w: WorkspaceClient, findings: list[dict]) -> list[str]:
+    """Terminate recoverable clusters only.
+
+    Permanent resource deletion is deliberately unsupported by Mission Control
+    v1. Old terminated clusters remain findings for owner review.
+    """
     done = []
     for f in findings:
         if f["action"] == "terminate":
             w.clusters.delete(cluster_id=f["cluster_id"])  # delete == terminate, recoverable
             done.append(f"terminated {f['cluster_id']} ({f['cluster_name']})")
-        elif f["action"] == "permanent-delete":
-            w.clusters.permanent_delete(cluster_id=f["cluster_id"])
-            done.append(f"permanently deleted {f['cluster_id']} ({f['cluster_name']})")
+        elif f["action"] == "review-retention":
+            done.append(
+                f"left terminated cluster {f['cluster_id']} unchanged "
+                "(resource deletion is unsupported)"
+            )
     return done
 
 
@@ -104,6 +112,15 @@ def fetch_jobs(w: WorkspaceClient) -> list[dict]:
     out = []
     for j in w.jobs.list():
         settings = j.settings
+        pause_states = {
+            name: (
+                getattr(getattr(settings, name), "pause_status", None).value
+                if getattr(getattr(settings, name), "pause_status", None)
+                else ""
+            )
+            for name in ("schedule", "trigger", "continuous")
+            if settings is not None and getattr(settings, name, None) is not None
+        }
         out.append(
             {
                 "job_id": j.job_id,
@@ -111,6 +128,7 @@ def fetch_jobs(w: WorkspaceClient) -> list[dict]:
                 "creator": j.creator_user_name or "",
                 "has_schedule": bool(settings and (settings.schedule or settings.trigger
                                                    or settings.continuous)),
+                "pause_states": pause_states,
             }
         )
     return out

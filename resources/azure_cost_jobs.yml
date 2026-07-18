@@ -1,5 +1,5 @@
-# Daily Azure bill ingestion. Same CLI you can run locally:
-#   dbx-platform azure-cost pull / report / spikes
+# Daily Azure bill ingestion. The pull writes only from its periodic run or an
+# exact executor-approved manual run; report/spikes remain read-only.
 # Auth: the job identity resolves a UC service credential (keyless) and needs
 # Cost Management Reader on the subscription — see docs/cloud-setup.md.
 resources:
@@ -15,12 +15,24 @@ resources:
       schedule:
         quartz_cron_expression: "0 30 6 * * ?"  # daily 06:30 UTC, before cost jobs
         timezone_id: UTC
-        pause_status: PAUSED  # run manually; cron above documents intended cadence
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -40,7 +52,13 @@ resources:
               ["azure-cost", "pull", "--days", "3",
                "--subscription-id", "${var.azure_subscription_id}",
                "--service-credential", "${var.azure_service_credential}",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
         - task_key: spend_spikes
           depends_on:
             - task_key: pull_bill
@@ -50,4 +68,4 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["azure-cost", "spikes",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]

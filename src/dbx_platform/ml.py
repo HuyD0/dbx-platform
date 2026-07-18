@@ -43,6 +43,13 @@ def fetch_serving_endpoints(w: WorkspaceClient) -> list[dict]:
             {
                 "name": e.name,
                 "creator": e.creator or "",
+                # Databricks-provided pay-per-token endpoints appear in the
+                # serving API but are not customer-configurable resources.
+                # Auditing them for inference tables, rate limits or
+                # scale-to-zero creates dozens of false positives.
+                "is_system_endpoint": bool(
+                    not e.creator and (e.name or "").startswith("databricks-")
+                ),
                 "task": e.task or "",
                 "ready": e.state.ready.value if e.state and e.state.ready else "",
                 "config_update": (
@@ -86,6 +93,8 @@ def classify_serving_endpoints(
         )
 
     for e in endpoints:
+        if e.get("is_system_endpoint"):
+            continue
         age_h = (now_ms - e["created_ms"]) / MS_PER_HOUR if e.get("created_ms") else 0
         stuck = e.get("ready") == "NOT_READY" or e.get("config_update") == "UPDATE_FAILED"
         if stuck and age_h >= failed_grace_hours:
@@ -124,6 +133,8 @@ def find_stale_endpoints(
     active = {r.get("endpoint_name") for r in usage_rows}
     stale = []
     for e in endpoints:
+        if e.get("is_system_endpoint"):
+            continue
         age_days = (now_ms - e["created_ms"]) / MS_PER_DAY if e.get("created_ms") else 0
         if e["name"] not in active and age_days >= stale_days:
             stale.append(

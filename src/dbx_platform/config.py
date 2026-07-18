@@ -17,6 +17,8 @@ ENV_PREFIX = "DBX_PLATFORM_"
 
 @dataclass
 class Settings:
+    # Deployment scope (stored on control-plane and cost-ledger rows)
+    environment: str = "prod"
     # Housekeeping
     stale_cluster_days: int = 30
     max_uptime_hours: int = 24

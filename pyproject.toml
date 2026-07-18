@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dbx-platform"
-description = "Databricks platform management toolkit: admin CLI, scheduled jobs, and dashboards"
+description = "AI Mission Control for governed Databricks cost, security, risk, and performance"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

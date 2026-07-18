@@ -1,0 +1,91 @@
+# Canonical LLM cost/value ledger. The job writes only platform-owned
+# observability tables; it never changes serving endpoints or model policies.
+resources:
+  jobs:
+    llm_cost_rollup:
+      name: "[dbx-platform] llm-cost-rollup"
+      description: >
+        Normalizes Databricks list cost, Unity AI Gateway request/external
+        provider telemetry, and Azure Cost Management actuals into
+        llm_cost_daily and llm_usage_hourly. Financial bases remain separate.
+      schedule:
+        quartz_cron_expression: "0 45 7 * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: rollup
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              - llm-cost
+              - rollup
+              - --days
+              - "3"
+              - --warehouse-id
+              - ${resources.sql_warehouses.platform_console_warehouse.id}
+              - --approved-action-id
+              - "{{job.parameters.approved_action_id}}"
+              - --approved-plan-hash
+              - "{{job.parameters.approved_plan_hash}}"
+              - --approved-job-id
+              - "{{job.id}}"
+              - --approved-run-id
+              - "{{job.run_id}}"
+              - --trigger-type
+              - "{{job.trigger.type}}"
+              - --environment
+              - ${bundle.target}
+        - task_key: impact_followup
+          depends_on:
+            - task_key: rollup
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              - report
+              - impact-followup
+              - --limit
+              - "100"
+              - --warehouse-id
+              - ${resources.sql_warehouses.platform_console_warehouse.id}
+              - --approved-action-id
+              - "{{job.parameters.approved_action_id}}"
+              - --approved-plan-hash
+              - "{{job.parameters.approved_plan_hash}}"
+              - --approved-job-id
+              - "{{job.id}}"
+              - --approved-run-id
+              - "{{job.run_id}}"
+              - --trigger-type
+              - "{{job.trigger.type}}"
+              - --environment
+              - ${bundle.target}

@@ -1,24 +1,38 @@
-# Weekly AI digest: collects every area's findings and summarizes them with
-# ai_query() on the SQL warehouse, storing digest + findings for the Platform
-# Console app. Runs after the Monday hygiene/security/governance reports.
-# Read-only against workspace resources; writes only its own UC tables.
+# Weekly operational findings + AI digest. Both tasks observe workspace state
+# and write only canonical platform-owned UC evidence tables. Keeping the
+# operational collector here avoids adding a twelfth managed schedule.
 resources:
   jobs:
     platform_digest:
       name: "[dbx-platform] platform-digest"
       description: >
-        Weekly AI-summarized platform health digest across housekeeping,
-        security, governance, ml and cost checks. Results appear in the task
-        run output and in the platform_digest/platform_findings tables.
+        Weekly deterministic job, query, serving, PAT/inactive-user and bounded
+        Unity Catalog security findings, followed by the AI-summarized platform
+        health digest. Results appear in task output and the
+        platform_digest/platform_findings tables. Due action outcomes are
+        measured after their observation window. Operational checks are
+        report-only and label partial or unsupported telemetry explicitly.
       schedule:
         quartz_cron_expression: "0 0 8 ? * MON"  # weekly Monday 08:00 UTC
         timezone_id: UTC
-        pause_status: PAUSED  # run manually; cron above documents intended cadence
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -29,11 +43,53 @@ resources:
             dependencies:
               - ../dist/*.whl
       tasks:
+        - task_key: operational_findings
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["report", "operational-findings",
+               "--recent-days", "7",
+               "--baseline-days", "28",
+               "--limit", "100",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
+        - task_key: impact_followup
+          depends_on:
+            - task_key: operational_findings
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["report", "impact-followup",
+               "--limit", "100",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
         - task_key: ai_digest
+          depends_on:
+            - task_key: impact_followup
           environment_key: default
           python_wheel_task:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters:
               ["report", "ai-digest", "--days", "30",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

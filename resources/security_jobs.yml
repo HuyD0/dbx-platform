@@ -1,6 +1,5 @@
-# Weekly security audit. REPORT-ONLY on schedule: no --apply here.
-# Token revocation is a manual, local action:
-#   dbx-platform security token-audit --apply --yes
+# Weekly security evidence. PAT revocation requires an immutable approved action
+# with no rollback; the direct CLI mutation path is disabled.
 resources:
   jobs:
     security_audit:
@@ -8,16 +7,24 @@ resources:
       description: >
         Weekly PAT audit (no-expiry / over-age / expiring-soon tokens) and
         inactive-user report from system.access.audit. Report-only.
-        Requires the job to run as a workspace admin (token audit API).
+        Token listing may require an administrative entitlement; keep this pack
+        disabled if the read permission cannot be granted narrowly.
       schedule:
         quartz_cron_expression: "0 0 6 ? * MON"  # weekly Monday 06:00 UTC
         timezone_id: UTC
-        pause_status: PAUSED  # run manually; cron above documents intended cadence
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -41,4 +48,4 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["security", "inactive-users", "--days", "90",
-               "--warehouse-id", "${var.warehouse_id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]

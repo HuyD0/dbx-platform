@@ -173,13 +173,20 @@ _MERGE_BATCH_ROWS = 1000
 def store_features(
     w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str, rows: list[dict]
 ) -> int:
-    run_query(w, create_features_table_sql(catalog, schema), warehouse_id)
+    """MERGE into the feature table created by deployment migrations."""
+
     sql = merge_features_sql(catalog, schema)
-    for i in range(0, len(rows), _MERGE_BATCH_ROWS):
-        run_query(
-            w, sql, warehouse_id,
-            {"rows": json.dumps(rows[i:i + _MERGE_BATCH_ROWS], default=str)},
-        )
+    try:
+        for i in range(0, len(rows), _MERGE_BATCH_ROWS):
+            run_query(
+                w, sql, warehouse_id,
+                {"rows": json.dumps(rows[i:i + _MERGE_BATCH_ROWS], default=str)},
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to write required table {catalog}.{schema}.cost_features; "
+            "run the deployment schema_migrations job and verify writer grants."
+        ) from exc
     return len(rows)
 
 

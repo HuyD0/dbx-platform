@@ -32,23 +32,71 @@ def payload(error: str, message: str, hint: str | None = None) -> dict:
 
 
 def install(app: FastAPI) -> None:
+    from backend.identity import UnauthenticatedError, UnauthorizedError
+
+    @app.exception_handler(UnauthenticatedError)
+    def _unauthenticated(
+        request: Request, exc: UnauthenticatedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            content=payload("unauthenticated", str(exc)),
+        )
+
+    @app.exception_handler(UnauthorizedError)
+    def _unauthorized(request: Request, exc: UnauthorizedError) -> JSONResponse:
+        return JSONResponse(
+            status_code=403,
+            content=payload("unauthorized", str(exc)),
+        )
+
     @app.exception_handler(SystemTablesUnavailableError)
     def _system_tables(request: Request, exc: SystemTablesUnavailableError) -> JSONResponse:
-        return JSONResponse(status_code=503, content=payload(
-            "system_tables_unavailable", str(exc)))
+        log.info("system tables unavailable", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            content=payload(
+                "system_tables_unavailable",
+                "Required Databricks system-table data is unavailable.",
+                _RUNBOOK_HINT,
+            ),
+        )
 
     @app.exception_handler(PermissionDenied)
     def _permission(request: Request, exc: PermissionDenied) -> JSONResponse:
-        return JSONResponse(status_code=403, content=payload(
-            "permission_missing", str(exc), _RUNBOOK_HINT))
+        log.info("workspace permission denied", exc_info=exc)
+        return JSONResponse(
+            status_code=403,
+            content=payload(
+                "permission_missing",
+                "The app does not have permission to read this dependency.",
+                _RUNBOOK_HINT,
+            ),
+        )
 
     @app.exception_handler(NotFound)
     def _not_found(request: Request, exc: NotFound) -> JSONResponse:
-        return JSONResponse(status_code=404, content=payload("not_found", str(exc)))
+        log.info("workspace dependency not found", exc_info=exc)
+        return JSONResponse(
+            status_code=404,
+            content=payload(
+                "not_found",
+                "The requested workspace dependency was not found.",
+                _RUNBOOK_HINT,
+            ),
+        )
 
     @app.exception_handler(TimeoutError)
     def _timeout(request: Request, exc: TimeoutError) -> JSONResponse:
-        return JSONResponse(status_code=504, content=payload("query_timeout", str(exc)))
+        log.warning("workspace dependency timed out", exc_info=exc)
+        return JSONResponse(
+            status_code=504,
+            content=payload(
+                "query_timeout",
+                "The dependency did not respond before the timeout.",
+                "Retry shortly or check source health in Settings.",
+            ),
+        )
 
     @app.exception_handler(ValueError)
     def _value_error(request: Request, exc: ValueError) -> JSONResponse:
@@ -63,12 +111,33 @@ def install(app: FastAPI) -> None:
     def _runtime(request: Request, exc: RuntimeError) -> JSONResponse:
         message = str(exc)
         if "TABLE_OR_VIEW_NOT_FOUND" in message:
-            return JSONResponse(status_code=404, content=payload(
-                "findings_table_missing", message, _SETUP_HINT))
+            log.info("platform table is missing", exc_info=exc)
+            return JSONResponse(
+                status_code=404,
+                content=payload(
+                    "findings_table_missing",
+                    "A required Mission Control table has not been created.",
+                    _SETUP_HINT,
+                ),
+            )
         log.exception("unhandled RuntimeError", exc_info=exc)
-        return JSONResponse(status_code=500, content=payload("internal", message))
+        return JSONResponse(
+            status_code=500,
+            content=payload(
+                "internal",
+                "Mission Control could not load this capability.",
+                "Check dependency health in Settings and retry.",
+            ),
+        )
 
     @app.exception_handler(Exception)
     def _internal(request: Request, exc: Exception) -> JSONResponse:
         log.exception("unhandled error", exc_info=exc)
-        return JSONResponse(status_code=500, content=payload("internal", str(exc)))
+        return JSONResponse(
+            status_code=500,
+            content=payload(
+                "internal",
+                "Mission Control could not load this capability.",
+                "Check dependency health in Settings and retry.",
+            ),
+        )

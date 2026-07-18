@@ -64,19 +64,13 @@ You can also pass any azure-identity credential explicitly:
 code path you'll run in a job. Values fetched this way are plain strings in
 your process: never print or log them.
 
-## Distributing this package to notebooks via a UC Volume
+## Wheel distribution
 
-```bash
-python -m build --wheel
-dbx-platform release publish-wheel --volume /Volumes/main/dbx_platform/wheels
-```
+Bundle-deployed Jobs do not need a Unity Catalog Volume; the bundle uploads the
+exact built wheel. Direct `release publish-wheel` is disabled because a Volume
+upload is a stateful external write without a durable approval record.
 
-Then from any notebook:
-
-```python
-%pip install /Volumes/main/dbx_platform/wheels/dbx_platform-0.1.0-py3-none-any.whl
-from dbx_platform.secrets import get_secret
-```
-
-(Create the volume once: `CREATE VOLUME dbx_dev.dbx_platform.wheels;` — and note
-that bundle-deployed jobs do *not* need this; the bundle ships its own wheel.)
+If notebook distribution is required, add a narrowly scoped allowlisted release
+action or reviewed deployment workflow that records the artifact hash,
+destination Volume path, overwrite precondition, approver, and verification.
+Do not restore an unrestricted local upload command.

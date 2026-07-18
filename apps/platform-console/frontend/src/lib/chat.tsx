@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { apiPost } from "./api";
 import type { ChatResponse, Proposal } from "./types";
 
@@ -24,12 +25,24 @@ const ChatContext = createContext<ChatState | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [turns, setTurns] = useState<Turn[]>([]);
+  const location = useLocation();
 
   const mutation = useMutation({
-    mutationFn: (history: Turn[]) =>
-      apiPost<ChatResponse>("/api/chat", {
+    mutationFn: (history: Turn[]) => {
+      const search = new URLSearchParams(location.search);
+      const filters = Object.fromEntries(
+        Array.from(search.entries()).slice(0, 30),
+      );
+      return apiPost<ChatResponse>("/api/chat", {
         messages: history.map(({ role, content }) => ({ role, content })),
-      }),
+        context: {
+          route: location.pathname,
+          query: location.search,
+          filters,
+          selected_resources: [],
+        },
+      });
+    },
     onSuccess: (resp) =>
       setTurns((t) => [
         ...t,

@@ -37,3 +37,7 @@ export function apiPost<T>(path: string, body?: unknown) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+export function isUnavailable(error: unknown): boolean {
+  return error instanceof ApiError && [404, 405, 501].includes(error.status);
+}

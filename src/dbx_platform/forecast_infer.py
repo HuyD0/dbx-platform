@@ -108,9 +108,20 @@ def merge_forecasts_sql(catalog: str, schema: str) -> str:
 def store_forecasts(
     w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str, rows: list[dict]
 ) -> int:
-    run_query(w, create_forecasts_table_sql(catalog, schema), warehouse_id)
-    run_query(w, merge_forecasts_sql(catalog, schema), warehouse_id,
-              {"rows": json.dumps(rows, default=str)})
+    """MERGE into the forecast table created by deployment migrations."""
+
+    try:
+        run_query(
+            w,
+            merge_forecasts_sql(catalog, schema),
+            warehouse_id,
+            {"rows": json.dumps(rows, default=str)},
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to write required table {catalog}.{schema}.cost_forecasts; "
+            "run the deployment schema_migrations job and verify writer grants."
+        ) from exc
     return len(rows)
 
 

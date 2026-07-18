@@ -5,12 +5,20 @@ command: ["python", "main.py"]
 env:
   - name: DBX_PLATFORM_WAREHOUSE_ID
     valueFrom: sql-warehouse
-  # Guarded remediation actions are OFF by default (report-only deployment).
-  # Enabling them is a git-reviewed decision with real permission implications —
-  # read docs/runbook.md before uncommenting.
+  - name: DBX_PLATFORM_POWER_CONTROLLER_JOB_ID
+    valueFrom: power-controller
+  - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
+    valueFrom: action-executor
+  # Bundle deployments inject the exact protected manual-Job IDs. A source-only
+  # run intentionally has no governed stateful Job targets.
+  # Bundle deployments inject the target-aware environment and approval gate
+  # through resources/app.yml. A source-only local run defaults to dev.
+  # Approval/executor submission is OFF by default (proposal-only deployment).
+  # Bundle config enables it only after the durable identity/grant checks in
+  # docs/runbook.md; source-only local runs never authorize execution.
   # - name: DBX_PLATFORM_CONSOLE_ACTIONS
-  #   value: "true"
+  #   value: "false"
   # Override when the platform agent's serving endpoint name differs from the
   # default agents_<catalog>-<schema>-platform_agent.
   # - name: DBX_PLATFORM_AGENT_ENDPOINT
-  #   value: "agents_main-dbx_platform-platform_agent"
+  #   value: "agents_dbx_dev-dbx_platform-platform_agent"

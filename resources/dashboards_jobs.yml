@@ -1,35 +1,31 @@
-# Provisions the helper functions and reference tables the AI/BI dashboards
-# query (see resources/dashboards.yml). This is the bundle-job second surface of
-# the `dbx-platform dashboards setup` CLI command, per the repo's "one code path,
-# two ways" invariant: the bundle deploys dashboards that read
-# dbx_dev.dbx_platform.{workspace_reference,warehouse_reference,job_type_from_sku,
-# sql_type_from_sku,team_name_from_tags}, and this job creates/refreshes them so
-# they exist on a fresh deploy instead of relying on a manual setup step (the
-# deploy workflow runs it once per prod deploy; its cron is committed paused).
-#
-# Idempotent: CREATE OR REPLACE FUNCTION / CREATE TABLE IF NOT EXISTS, plus MERGEs
-# that pick up new workspaces/warehouses over time. The --catalog/--schema below
-# MUST match what the rendered dashboards/*.lvdash.json reference (dbx_dev.dbx_platform
-# — this workspace has no `main` catalog); if you move the helpers, re-render and
-# update both.
+# Read-only dashboard dependency monitor. Schema/function/table creation belongs
+# exclusively to the unscheduled deployment bootstrap in resources/migrations.yml.
+# Autonomous schedules may observe and append evidence but may not change
+# configuration.
 resources:
   jobs:
     dashboards_setup:
-      name: "[dbx-platform] dashboards-setup"
+      name: "[dbx-platform] dashboard-dependency-health"
       description: >
-        Provisions/refreshes the dashboards' helper schema, SQL functions, and
-        reference tables (workspace_reference, warehouse_reference) in
-        dbx_dev.dbx_platform via the Statement Execution API. Writes only its own
-        UC objects; reads system.billing.usage and system.access.audit.
+        Read-only availability check for the dashboard helper functions and
+        reference tables in main.dbx_platform. Missing dependencies are fixed
+        only through the deployment migration.
       schedule:
         quartz_cron_expression: "0 0 5 ? * *"  # daily 05:00 UTC
         timezone_id: UTC
-        pause_status: PAUSED  # run manually; cron above documents intended cadence
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
@@ -40,12 +36,12 @@ resources:
             dependencies:
               - ../dist/*.whl
       tasks:
-        - task_key: dashboards_setup
+        - task_key: dependency_health
           environment_key: default
           python_wheel_task:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters:
-              ["dashboards", "setup",
-               "--catalog", "dbx_dev", "--schema", "dbx_platform",
-               "--warehouse-id", "${var.warehouse_id}"]
+              ["dashboards", "health",
+               "--catalog", "main", "--schema", "dbx_platform",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]

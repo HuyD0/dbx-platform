@@ -1,9 +1,15 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Info, Play, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleHelp,
+  Clock3,
+  DatabaseZap,
+  Info,
+  RefreshCw,
+} from "lucide-react";
+import { useId, type KeyboardEvent, type ReactNode } from "react";
 import { ApiError } from "../lib/types";
-import type { Envelope, JobInfo } from "../lib/types";
+import type { SourceHealth } from "../lib/types";
 import { timeAgo } from "../lib/format";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -24,13 +30,40 @@ export function SectionTitle({
   right?: ReactNode;
 }) {
   return (
-    <div className="mb-3 flex items-start justify-between gap-3">
-      <div>
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
         {subtitle && <p className="mt-0.5 text-xs text-muted">{subtitle}</p>}
       </div>
       {right}
     </div>
+  );
+}
+
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  actions,
+}: {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-4 pb-1">
+      <div className="max-w-3xl">
+        {eyebrow && (
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+            {eyebrow}
+          </p>
+        )}
+        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{title}</h1>
+        <p className="mt-1.5 text-sm leading-6 text-ink-2">{description}</p>
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
   );
 }
 
@@ -94,6 +127,29 @@ export function Badge({
   );
 }
 
+export function statusTone(
+  status: unknown,
+): "critical" | "serious" | "warning" | "good" | "info" {
+  const value = String(status ?? "").toLowerCase();
+  if (["failed", "critical", "unavailable", "rejected", "high"].some((s) => value.includes(s))) {
+    return "critical";
+  }
+  if (["stale", "expired", "rollback", "serious"].some((s) => value.includes(s))) {
+    return "serious";
+  }
+  if (
+    ["pending", "awaiting", "warning", "degraded", "executing", "verifying"].some((s) =>
+      value.includes(s),
+    )
+  ) {
+    return "warning";
+  }
+  if (["healthy", "success", "approved", "on", "good"].some((s) => value.includes(s))) {
+    return "good";
+  }
+  return "info";
+}
+
 export function Skeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="animate-pulse space-y-2" role="status" aria-label="Loading">
@@ -104,10 +160,20 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-export function EmptyState({ message }: { message: string }) {
+export function EmptyState({
+  message,
+  positive = true,
+}: {
+  message: string;
+  positive?: boolean;
+}) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-dashed border-grid px-3 py-4 text-sm text-muted">
-      <CheckCircle2 className="h-4 w-4 shrink-0 text-status-good" />
+      {positive ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-status-good" />
+      ) : (
+        <CircleHelp className="h-4 w-4 shrink-0 text-muted" />
+      )}
       {message}
     </div>
   );
@@ -118,59 +184,180 @@ const errorGuidance: Record<string, string> = {
     "System tables are not enabled or not granted to the app's identity.",
   warehouse_not_configured: "No SQL warehouse is configured for this deployment.",
   findings_table_missing:
-    "The findings tables don't exist yet — run the dashboards-setup job first.",
+    "Mission Control tables are not migrated yet. Run the reviewed deployment migration job.",
   permission_missing: "The app's identity lacks a permission for this check.",
+  unauthenticated: "Your Databricks user identity could not be verified.",
+  unauthorized: "Your identity is not authorized for this governed operation.",
+  control_plane_unavailable: "Mission Control storage is temporarily unavailable.",
   agent_unavailable: "The platform agent's serving endpoint is not reachable.",
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
 };
 
-/** One-click escape hatch for findings_table_missing: find the
- * dashboards-setup job and kick it off right from the error box. */
-function RunSetupJobButton() {
-  const jobs = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => apiGet<Envelope<JobInfo[]>>("/api/jobs"),
-    staleTime: 60_000,
-    retry: false,
-  });
-  const setup = jobs.data?.data.find((j) => j.name.includes("dashboards-setup"));
-  const run = useMutation({
-    mutationFn: (jobId: number) => apiPost<{ run_id: number }>(`/api/jobs/${jobId}/run_now`),
-  });
-  if (!setup) return null;
-  if (run.data) {
-    return (
-      <div className="mt-2">
-        <Badge tone="good">setup started — refresh in a minute or two</Badge>
-      </div>
-    );
-  }
+export function ErrorState({ error }: { error: unknown }) {
+  const apiErr = error instanceof ApiError ? error : null;
+  const unavailable = apiErr && [404, 405, 501].includes(apiErr.status);
+  const title = unavailable
+    ? "This capability is not connected in this deployment."
+    : apiErr
+      ? (errorGuidance[apiErr.code] ?? "The data source could not be read.")
+      : "The data source could not be read.";
+  const detail = apiErr ? apiErr.message : String(error);
   return (
-    <button
-      type="button"
-      onClick={() => run.mutate(setup.job_id)}
-      disabled={run.isPending}
-      className="mt-2 inline-flex items-center gap-1 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
+    <div
+      className={`rounded-lg border px-3 py-3 text-sm ${
+        unavailable
+          ? "border-grid bg-hairline/30"
+          : "border-status-serious/30 bg-status-serious/5"
+      }`}
+      role="status"
     >
-      <Play className="h-3 w-3" />
-      Run setup job now
-    </button>
+      <div
+        className={`flex items-center gap-2 font-medium ${
+          unavailable ? "text-ink-2" : "text-status-serious"
+        }`}
+      >
+        {unavailable ? (
+          <DatabaseZap className="h-4 w-4 shrink-0" />
+        ) : (
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+        )}
+        {title}
+      </div>
+      <p className="mt-1 text-xs text-muted">
+        {unavailable
+          ? "The interface is ready and will populate when its backend endpoint is enabled."
+          : "Check data access and source health, then try refreshing."}
+      </p>
+      {apiErr?.hint && <p className="mt-1 text-xs text-muted">{apiErr.hint}</p>}
+      {!unavailable && detail && (
+        <details className="mt-2 text-xs text-muted">
+          <summary className="cursor-pointer select-none hover:text-ink-2">Technical detail</summary>
+          <p className="mt-1 max-h-28 overflow-auto break-words rounded bg-hairline/40 p-2 font-mono">
+            {detail.slice(0, 500)}
+            {detail.length > 500 ? "…" : ""}
+          </p>
+        </details>
+      )}
+    </div>
   );
 }
 
-export function ErrorState({ error }: { error: unknown }) {
-  const apiErr = error instanceof ApiError ? error : null;
-  const title = apiErr ? (errorGuidance[apiErr.code] ?? "Request failed.") : "Request failed.";
-  const detail = apiErr ? apiErr.message : String(error);
+export function CapabilityNotice({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
-    <div className="rounded-lg border border-status-serious/30 bg-status-serious/5 px-3 py-3 text-sm">
-      <div className="flex items-center gap-2 font-medium text-status-serious">
-        <AlertTriangle className="h-4 w-4 shrink-0" />
+    <div className="rounded-xl border border-grid bg-hairline/20 p-4" role="status">
+      <div className="flex items-center gap-2 text-sm font-medium text-ink">
+        <DatabaseZap className="h-4 w-4 text-accent" />
         {title}
       </div>
-      <p className="mt-1 break-words text-xs text-ink-2">{detail}</p>
-      {apiErr?.hint && <p className="mt-1 text-xs text-muted">{apiErr.hint}</p>}
-      {apiErr?.code === "findings_table_missing" && <RunSetupJobButton />}
+      <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+    </div>
+  );
+}
+
+export function DataHealthList({ sources }: { sources: SourceHealth[] }) {
+  if (sources.length === 0) {
+    return (
+      <CapabilityNotice
+        title="Coverage has not been reported"
+        description="Source-level freshness and retention will appear after the next successful collection."
+      />
+    );
+  }
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2" aria-label="Data source health">
+      {sources.map((source) => (
+        <li key={source.source} className="rounded-xl border border-grid bg-page/30 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-xs font-medium text-ink">{source.source}</span>
+            <Badge tone={statusTone(source.status)}>{source.status}</Badge>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">
+            {source.freshness && (
+              <span className="inline-flex items-center gap-1">
+                <Clock3 className="h-3 w-3" />
+                {timeAgo(source.freshness)}
+              </span>
+            )}
+            {source.retention_days != null && <span>{source.retention_days}d retention</span>}
+          </div>
+          {source.notes && <p className="mt-1 text-[11px] leading-4 text-muted">{source.notes}</p>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export interface TabOption {
+  id: string;
+  label: string;
+  badge?: number;
+}
+
+export function Tabs({
+  tabs,
+  active,
+  onChange,
+  label,
+}: {
+  tabs: TabOption[];
+  active: string;
+  onChange: (id: string) => void;
+  label: string;
+}) {
+  const id = useId();
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const current = tabs.findIndex((tab) => tab.id === active);
+    let next = current;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = tabs.length - 1;
+    if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+    if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+    const tab = tabs[next];
+    if (tab) {
+      onChange(tab.id);
+      window.requestAnimationFrame(() =>
+        document.getElementById(`${id}-${tab.id}`)?.focus(),
+      );
+    }
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className="flex gap-1 overflow-x-auto rounded-xl border border-grid bg-hairline/20 p-1"
+    >
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          id={`${id}-${tab.id}`}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.id}
+          tabIndex={active === tab.id ? 0 : -1}
+          onClick={() => onChange(tab.id)}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
+            active === tab.id
+              ? "bg-surface text-ink shadow-sm"
+              : "text-muted hover:bg-hairline hover:text-ink-2"
+          }`}
+        >
+          {tab.label}
+          {tab.badge != null && (
+            <span className="rounded-full bg-hairline px-1.5 text-[10px] tabular-nums">
+              {tab.badge}
+            </span>
+          )}
+        </button>
+      ))}
     </div>
   );
 }

@@ -1,185 +1,209 @@
-# dbx-platform
+# dbx-platform AI Mission Control
 
-Toolkit for managing a Databricks platform: an admin CLI, scheduled jobs,
-AI/BI dashboards, and cluster policies as code — deployed with
-[Databricks Asset Bundles](https://docs.databricks.com/dev-tools/bundles/).
+dbx-platform is a single-workspace control tower for operating Azure
+Databricks across cost, security, risk, and performance.
 
-Every check is one code path exposed two ways: run it ad-hoc from your laptop,
-or let the bundle-deployed job run it on a schedule (`python_wheel_task`
-invoking the same `dbx-platform` entry point). Everything is **read-only by
-default** — destructive actions require `--apply --yes`.
+It continuously observes the platform, normalizes evidence into findings, and
+uses AI to correlate symptoms and draft proposals. AI is never an executor.
+Every Databricks/Azure resource, credential, policy, budget, schedule, model,
+training, or runtime mutation follows:
 
-## Quickstart
+`Observe → correlate → propose → human approve → execute → verify → measure`
+
+The Platform Console is a FastAPI + React Databricks App. Scheduled jobs gather
+evidence and append findings/cost telemetry. Dedicated, unscheduled executor
+jobs are the only mutation boundary.
+
+## Safety model
+
+- The app service principal is read-only. It may submit an approved action ID
+  to an executor; it cannot submit an execution payload or mutate targets.
+- An authorized member of `dbx-platform-approvers` approves one immutable,
+  SHA-256-hashed plan. Self-approval is allowed for group members.
+- Plans expire after 15 minutes, are single-use, name exact targets, and carry
+  before state, preconditions, rollback, verification, impact, and blast
+  radius.
+- Executors reload the durable Unity Catalog record, verify current approver
+  membership, hash, TTL, allowlist, workspace/environment, target versions, and
+  current state before writing.
+- Payload drift, target drift, replay, missing identity, or unavailable audit
+  storage fails closed.
+- Legacy `--apply`/`--yes` paths cannot authorize changes. Resource deletion is
+  unsupported in v1.
+- Autonomous schedules may read sources and append internal findings, usage,
+  cost, and audit telemetry. Training, model promotion, budget/config changes,
+  manual stateful job runs, remediation, and runtime control require approval.
+
+See [docs/runbook.md](docs/runbook.md) for the operator flow and
+[docs/service-principal.md](docs/service-principal.md) for the exact identity
+and grant matrix.
+
+## Product surfaces
+
+The console navigation is organized around decisions rather than source
+systems:
+
+1. **Mission Control** — scope, source health, cost/security/risk/performance
+   outcomes, pending approvals, what changed, and the top decisions.
+2. **Action Center** — recommendations, awaiting approval, activity, failures,
+   and rollback outcomes.
+3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, and unit
+   economics.
+4. **Security & Risk** — identity, credentials, grants, ownership, policies,
+   egress, and audit anomalies.
+5. **Performance** — job/query regressions, queueing, retry waste,
+   utilization, serving latency/errors, and SLO risk.
+6. **Resources & Runtime** — exact owned inventory, dependencies, Hibernate,
+   and Wake.
+7. **Automations** — report schedules, monitors, and playbooks.
+8. **Assistant**, with Settings and Audit available globally.
+
+All operational observations use the canonical `platform_findings` schema:
+pillar, severity, likelihood, financial/SLO impact, confidence, owner,
+affected resources, evidence, freshness, first/last seen, blast radius, and
+lifecycle state. Ranking is deterministic: critical security/SLO impact,
+estimated financial impact, then age.
+
+The contextual assistant receives the current page/filter/resource context. It
+can explain evidence and draft structured proposals, but cannot call an
+executor. Responses must cite a source table/query, timestamp, or resource.
+
+## LLM Cost & Value
+
+The provider-aware ledger separates, rather than silently blending:
+
+- `Azure actual` billing;
+- `Databricks list` cost from billing usage/list prices;
+- `provider estimate` from AI Gateway preview sources.
+
+It combines those sources with serving/AI Gateway request telemetry for
+requests, input/output/cached/reasoning tokens when present, latency, errors,
+retries, cost/request, cost/1M tokens, and cost per successful task. Missing
+preview sources, uncovered spend, incomplete token coverage, and currency
+boundaries are visible data-health states.
+
+The rollup keeps 90 days of hourly detail and 400 days of daily aggregates.
+Budgets default to 80% warning and 100% critical alerts; changing a budget is
+an approved action and an alert never changes resources automatically.
+
+## Safe Hibernate and Wake
+
+The bundle creates a dedicated 2X-Small serverless SQL warehouse with a
+five-minute auto-stop. It never manages or reuses the shared Starter warehouse.
+
+The exact v1 Hibernate inventory is:
+
+- the Platform Console app;
+- eleven bundle-declared schedules;
+- the dedicated Mission Control warehouse.
+
+The unscheduled `power-controller` and `action-executor` jobs, manual forecast
+training, dashboards, Unity Catalog data, models, shared compute, storage,
+networking, and unrelated projects are protected/out of scope.
+
+Hibernate records exact prior state, pauses only schedules that were enabled,
+waits up to 15 minutes for owned runs/queries to drain, stops the warehouse,
+then stops the app. Wake starts the warehouse, starts and health-checks the
+app, and restores only the schedules enabled before Hibernate. Partial failure
+restores captured state where possible and records the result.
+
+All bundle schedules deploy PAUSED and the app/warehouse deploy stopped.
+Deployments run schema migrations on serverless Spark, then produce a
+proposal-only runtime reconciliation. Deploying while `SLEEPING` does not wake
+the toolkit.
+
+## Commands and jobs
+
+Read-only/advisory CLI examples:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+dbx-platform cost report --days 30
+dbx-platform security token-audit
+dbx-platform governance policy-sync
+dbx-platform dashboards health
+```
+
+The legacy mutator flags remain parseable only to fail with a migration
+message:
+
+```bash
+dbx-platform housekeeping stale-clusters --apply --yes  # exits 2; no mutation
+```
+
+Dashboard DDL is applied only by the unscheduled `schema_migrations` deployment
+job. `dashboards setup`, direct UC Volume wheel publication, and direct agent
+registration/deployment are disabled. Forecast training is an unscheduled,
+protected manual job whose task verifies the exact approved action, plan hash,
+workspace/environment, Job ID, and executor-recorded run ID before MLflow
+logging, registration, or alias promotion.
+
+LLM/Azure rollups, forecast feature/inference/monitoring, and the AI digest are
+scheduled governed writers. A direct/manual invocation is rejected unless an
+approved `run-job` action launched that exact Job run.
+
+The scheduled evidence jobs are:
+
+| Pack | Evidence |
+|---|---|
+| Cost | DBU/list cost, expensive jobs, utilization, failed-run waste, SQL queueing |
+| Azure | actual cost ingestion, detailed AI allocation, anomaly evidence |
+| LLM/AI | provider-aware costs, tokens, request quality/latency, coverage |
+| Security | PAT/user activity and audit evidence |
+| Governance | policy/tag drift and tag recommendations |
+| ML | customer-managed endpoint, model, GPU, and vector-search hygiene |
+| Performance | job/query/serving regressions and cost-versus-SLO evidence |
+| Digest | canonical findings and AI summary |
+| Dashboard health | read-only helper-object availability |
+
+## Quick start
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 
-databricks auth login --host https://adb-<id>.<n>.azuredatabricks.net --profile dbx-platform
-export DATABRICKS_CONFIG_PROFILE=dbx-platform
+databricks auth login \
+  --host https://adb-<workspace-id>.<n>.azuredatabricks.net \
+  --profile dbx-platform
 
-dbx-platform housekeeping stale-clusters        # first report, REST-only
+export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-executor-client-id>
+export BUNDLE_VAR_action_executor_service_principal_name=<action-executor-client-id>
+
+ruff check .
+pytest
+databricks bundle validate -t dev -p dbx-platform
+databricks bundle deploy -t dev -p dbx-platform
+databricks bundle run schema_migrations -t dev -p dbx-platform
 ```
 
-Full setup (system tables, warehouse, dashboards): **[docs/setup.md](docs/setup.md)**.
+Leave `actions_enabled=false` through proposal-only validation. Before
+controlled enablement, create the approver group, apply the least-privilege
+grants, and validate one complete scheduled reporting cycle. Full setup:
+[docs/setup.md](docs/setup.md).
 
-Prefer not to use a local machine at all? **[docs/cloud-setup.md](docs/cloud-setup.md)**
-wires up the browser-only loop: comment `@claude` on an issue → PR → CI → merge → deploy.
+## Repository layout
 
-## What you get
-
-### CLI / scheduled jobs
-
-| Area | Command | Scheduled job | What it does |
-|---|---|---|---|
-| Cost | `cost report` | `cost-usage-report` (daily) | DBU + list-price cost by SKU/workspace (`system.billing`) |
-| Cost | `cost top-jobs` | 〃 | Most expensive jobs, joined to `system.lakeflow.jobs` |
-| Housekeeping | `housekeeping stale-clusters` | `housekeeping-report` (daily) | Long-terminated clusters, long-running/no-autoterm clusters. `--apply` terminates/deletes |
-| Housekeeping | `housekeeping orphaned-jobs` | 〃 | Jobs owned by deleted/inactive principals. `--apply` pauses (never deletes) |
-| Security | `security token-audit` | `security-audit` (weekly) | No-expiry / over-age / expiring-soon PATs. `--apply` revokes over-age |
-| Security | `security inactive-users` | 〃 | Active users with zero audited activity (`system.access.audit`) |
-| Governance | `governance policy-sync` | `governance-check` (weekly, drift report) | `policies/*.json` vs workspace. `--apply` creates/updates; never deletes unmanaged |
-| Governance | `governance tag-compliance` | 〃 | Resources missing required tags + % of spend untagged |
-| Governance | `governance tag-recommendations` | 〃 | Suggests fixes for missing tags: typo/format near-match key renames + inferred values (report-only) |
-| Cost | `cost cluster-utilization` | `cost-usage-report` (daily) | Under-utilized clusters (CPU/memory vs size, `system.compute.node_timeline`), ranked by cost |
-| Cost | `cost failed-run-waste` | 〃 | $ burned on failed/timed-out job runs |
-| Cost | `cost warehouse-utilization` | 〃 | SQL warehouses: idle spend or sustained queueing |
-| Housekeeping | `housekeeping jobs-on-all-purpose` | `housekeeping-report` (daily) | Jobs paying the all-purpose premium / pinning large fixed clusters |
-| ML | `ml endpoint-audit` | `ml-serving-report` (daily) | Serving endpoints: failed state, scale-to-zero, inference tables, AI Gateway, no traffic |
-| ML | `ml serving-cost` | 〃 | AI/ML spend by product/SKU/endpoint + token usage (`system.serving`) |
-| ML | `ml model-hygiene` | `ml-hygiene-report` (weekly) | UC models: stale, ownerless, unaliased, never served |
-| ML | `ml gpu-audit` | 〃 | Interactive GPU clusters + GPU spend share |
-| ML | `ml vector-search-audit` | 〃 | Vector search endpoints with no indexes / unhealthy |
-| Report | `report ai-digest` | `platform-digest` (weekly) | AI-summarized digest of all checks via `ai_query()`, stored to UC tables |
-| Dashboards | `dashboards setup` / `render` | `dashboards-setup` (daily) | Provision dashboard helper objects / re-render templates |
-| Release | `release publish-wheel` | — | Upload the wheel to a UC Volume for notebook reuse |
-| Azure Cost | `azure-cost pull` | `azure-cost-pull` (daily) | Pull the Azure bill (Cost Management Query API, daily by service/RG) into `dbx_dev.dbx_platform.azure_costs` — keyless via a UC service credential + Cost Management Reader |
-| Azure Cost | `azure-cost report` / `spikes` | 〃 | Spend by platform bucket (databricks / foundry_ai / search / storage) and per-bucket spike detection |
-| Forecast | `forecast build-features` | `cost-forecast-daily` (daily) | Lag/rolling/calendar features from the ingested bill (leakage-safe, versioned feature set) |
-| Forecast | `forecast predict` | 〃 | Batch P10/P50/P90 forecasts from the UC `@champion` model into `cost_forecasts` |
-| Forecast | `forecast monitor` | 〃 | PSI feature drift + matured-forecast accuracy; fails the job on a retrain verdict |
-| Forecast | `forecast train` | `cost-forecast-train` (weekly) | Rolling-origin backtest (seasonal-naive vs LightGBM quantile), MLflow tracking, champion/challenger promotion gate |
-| Forecast | `forecast status` | — | Champion/challenger registry state (`dbx_dev.dbx_platform.azure_cost_forecaster`) |
-
-All ML and right-sizing checks are report-only by design (endpoint config
-changes redeploy the endpoint; model/endpoint deletion is irreversible).
-
-Operational details, thresholds, and how to act on findings: **[docs/runbook.md](docs/runbook.md)**.
-
-### Dashboards
-
-Six AI/BI dashboards deployed by the bundle (`resources/dashboards.yml`). The
-**Platform Command Center** is the consolidated, in-repo-authored successor:
-one dashboard whose six pages render as tabs — Overview, Azure Bill & Forecast,
-Databricks Cost, Jobs, SQL Warehouses, Governance & Lineage — each opening with
-a KPI counter row, then one full-width trend, then action tables, with page
-filters bound to every dataset they claim to filter. The five standalone
-dashboards it curates remain deployed until you drop them from
-`resources/dashboards.yml`: Unified Cost Analysis, Job Operations & Cost
-Management, DBSQL Cost & Query Performance, Data Lineage & Catalog Utilization,
-and Azure Bill & Cost Forecast (the ingested Azure bill by platform component —
-Databricks / Foundry-AI / Search / Storage — with the P10/P50/P90 ML forecast
-and the drift monitor's findings; also authored in-repo).
-
-Adapted from the community
-[databricks-dashboard-suite](https://github.com/mohanab89/databricks-dashboard-suite)
-by mohanab89 (system-table dashboards, provided as-is; the upstream repo has
-**no license file** — JSON is vendored under `dashboards/templates/` with this
-attribution). Their helper functions/tables are provisioned automatically by the
-`dashboards-setup` job (`resources/dashboards_jobs.yml`) — daily and once per prod
-deploy — so a fresh deploy works without a manual step. Run `dbx-platform dashboards
-setup` yourself only to provision immediately or for a custom catalog/schema (see
-[docs/setup.md](docs/setup.md) §6).
-
-### Platform Console app
-
-A Databricks App (`apps/platform-console`, FastAPI + React) deployed by the
-bundle (`resources/app.yml`) — the third surface of the same code path. A
-dark-mode dashboard with an overview of stored findings, per-area pages that
-run every check live (cost, housekeeping, security, governance, AI/ML), AI
-digests, job kick-off, and a chat page backed by the served platform agent.
-Report-only by default; four conservative remediation actions (stale-cluster
-cleanup, orphaned-job pause, over-age token revoke, policy sync) exist behind
-an off-by-default env gate plus a dry-run plan and typed confirmation — see
-docs/runbook.md. Local dev: `python main.py` for the API, `npm run dev` in
-`frontend/` for the UI.
-
-### AI layer
-
-- **`report ai-digest`** summarizes every area's findings with one
-  `ai_query()` call to a Databricks-hosted foundation model on your SQL
-  warehouse — no extra credentials. Digest + findings persist to
-  `platform_digest` / `platform_findings` (created by `dashboards setup`).
-- **Triage loop**: `.github/workflows/platform-triage.yml` runs the checks
-  weekly and upserts a rolling GitHub issue mentioning `@claude`, which
-  proposes fixes as pull requests (policy drift → `policies/*.json`, job
-  right-sizing → job specs). The agent only proposes git changes; `--apply`
-  stays human-invoked.
-- **Served agent** (`agents/platform_agent`, optional `[agent]` extra): a
-  read-only LangGraph agent over the same checks, deployed to model serving
-  via the Mosaic AI Agent Framework (`python agents/platform_agent/deploy_agent.py`).
-  Its tool set wraps no mutating function, so it can diagnose and recommend
-  but never change the workspace. The Platform Console's Chat page talks to
-  it; its `propose_*` tools emit dry-run proposals the console renders as
-  confirm-gated action cards — a human always performs the apply.
-
-### Secrets helper
-
-```python
-from dbx_platform.secrets import get_secret
-get_secret("dbx://scope/key")      # Databricks secret scope — works locally AND in jobs
-get_secret("akv://vault/name")     # Azure Key Vault via UC service credential / managed identity
-```
-
-Setup and the decision table Databricks-vs-Azure constructs: **[docs/secrets.md](docs/secrets.md)**.
-
-## Swapping workspaces
-
-The workspace URL exists in **exactly one place**: `workspace.host` in
-[databricks.yml](databricks.yml) (convention: `adb-` appears in no other file).
-It cannot be a bundle variable — the CLI rejects interpolation for fields that
-configure authentication — so override it at runtime instead:
-
-```bash
-# bundle: env var or profile (the CLI's documented overrides)
-DATABRICKS_HOST=https://adb-<other>.azuredatabricks.net databricks bundle deploy
-databricks bundle deploy -p other
-# CLI: one profile per workspace
-databricks auth login --host https://adb-<other>... --profile other
-dbx-platform cost report --profile other
-```
-
-Inside a Databricks job, `WorkspaceClient()` uses the runtime's own
-credentials — nothing to configure.
-
-## Repo layout
-
-```
-databricks.yml          bundle: workspace.host, variables (warehouse_id), dev/prod targets
-resources/              job + dashboard definitions (schedules/thresholds live here, in git)
-dashboards/             rendered .lvdash.json (deployed) + templates/ (upstream, pristine)
-policies/               cluster policies as code — git is the source of truth
-src/dbx_platform/       the package: cli, client, config, area modules, queries/*.sql
-tests/                  offline unit tests for all decision logic
-docs/                   setup, runbook, secrets, service-principal (CI) guides
-.github/workflows/      ci.yml (lint/test/build on PRs; bundle validate on push), deploy.yml, claude.yml
+```text
+apps/platform-console/     React/FastAPI Mission Control
+agents/platform_agent/     read-only contextual assistant
+src/dbx_platform/          evidence packs, ledger, migrations, executors
+resources/                 Asset Bundle jobs, app, warehouse, dashboards
+dashboards/                AI/BI templates and rendered definitions
+policies/                  reviewable policy source
+tests/                     offline safety, decision, API, and runtime tests
+docs/                      setup, grants, runbook, secrets, cloud CI
 ```
 
 ## Development
 
 ```bash
-ruff check . && pytest            # what CI runs; tests are offline (no workspace needed)
+ruff check .
+pytest
+python -m build --wheel
 databricks bundle validate -t dev
-databricks bundle deploy   -t dev # "[dev <you>]"-prefixed resources, schedules paused
 ```
 
-CI deploys to prod on merge to `main`, authenticating with keyless GitHub OIDC (no
-service-principal secret) — **[docs/cloud-setup.md](docs/cloud-setup.md)**.
-[docs/service-principal.md](docs/service-principal.md) covers the older
-client-secret setup and the non-admin variant.
-
-## Future work
-
-- Persist job findings to a UC Delta table and chart trends in the dashboards
-- Budget alerts (`system.billing.usage` vs monthly targets)
-- SCIM-integrated offboarding automation (deactivate + reassign in one step)
+The frontend production build runs from
+`apps/platform-console/frontend` with `npm ci && npm run build`.
+CI authenticates to Databricks only on protected workspace-touching jobs; PR
+tests remain credential-free and offline.

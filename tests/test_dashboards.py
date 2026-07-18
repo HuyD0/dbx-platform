@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -8,6 +9,7 @@ import yaml
 from dbx_platform.dashboards import (
     TEMPLATE_NAMES,
     build_team_name_function_sql,
+    dependency_health,
     render_template,
     setup_statements,
 )
@@ -21,7 +23,7 @@ _HELPER_OBJECT = re.compile(r"dbx_dev\.dbx_platform\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def test_render_replaces_all_placeholders():
-    text = 'SELECT * FROM {catalog}.{schema}.workspace_reference, {catalog}.{schema}.t2'
+    text = "SELECT * FROM {catalog}.{schema}.workspace_reference, {catalog}.{schema}.t2"
     out = render_template(text, "main", "dbx_platform")
     assert "{catalog}" not in out and "{schema}" not in out
     assert "main.dbx_platform.workspace_reference" in out
@@ -48,54 +50,34 @@ def test_team_name_function_uses_all_tag_keys():
 
 def test_setup_statements_cover_all_dashboard_dependencies():
     fq_objects = "\n".join(sql for _, sql in setup_statements("c", "s", ["team"]))
-    for obj in ("job_type_from_sku", "sql_type_from_sku", "team_name_from_tags",
-                "workspace_reference", "warehouse_reference"):
+    for obj in (
+        "job_type_from_sku",
+        "sql_type_from_sku",
+        "team_name_from_tags",
+        "workspace_reference",
+        "warehouse_reference",
+        "azure_costs",
+        "azure_cost_details",
+        "cost_features",
+        "cost_forecasts",
+        "llm_cost_daily",
+        "llm_usage_hourly",
+        "llm_budgets",
+        "llm_source_health",
+    ):
         assert f"c.s.{obj}" in fq_objects
+    assert "CREATE SCHEMA" not in fq_objects
 
 
-def test_setup_creates_catalog_before_schema():
-    """A fresh workspace may have no `main` catalog at all (auto-enabled UC ships
-    a workspace-named catalog instead) — setup must try to create it first."""
-    statements = [sql for _, sql in setup_statements("c", "s", ["team"])]
-    assert statements[0] == "CREATE CATALOG IF NOT EXISTS c"
-    assert statements[1] == "CREATE SCHEMA IF NOT EXISTS c.s"
-
-
-def test_run_setup_tolerates_catalog_create_failure(monkeypatch):
-    """CREATE CATALOG may fail for lack of metastore rights even when the catalog
-    exists; only the CREATE SCHEMA that follows is the real existence gate."""
+def test_direct_setup_is_disabled_without_querying(monkeypatch):
+    """Schema changes run only in the deployment migration job."""
     from dbx_platform import dashboards
 
-    executed = []
-
-    def fake_run_query(w, sql, warehouse_id, parameters=None):
-        if sql.startswith("CREATE CATALOG"):
-            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
-        executed.append(sql)
-        return []
-
-    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
-    done = dashboards.run_setup(None, "wh", "c", "s", ["team"])
-    assert any(d.startswith("catalog c (skipped:") for d in done)
-    assert executed[0] == "CREATE SCHEMA IF NOT EXISTS c.s"
-
-
-def test_run_setup_fails_loudly_when_catalog_missing(monkeypatch):
-    """The deploy-time failure this repo actually hit: no `main` catalog, so
-    CREATE SCHEMA dies with NO_SUCH_CATALOG_EXCEPTION. The error must propagate
-    (not be swallowed) and explain the remediation."""
-    from dbx_platform import dashboards
-
-    def fake_run_query(w, sql, warehouse_id, parameters=None):
-        if sql.startswith("CREATE CATALOG"):
-            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
-        if sql.startswith("CREATE SCHEMA"):
-            raise RuntimeError("[NO_SUCH_CATALOG_EXCEPTION] Catalog 'c' was not found")
-        return []
-
-    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
-    with pytest.raises(RuntimeError, match="dashboards\nrender --catalog|render --catalog"):
+    query = MagicMock()
+    monkeypatch.setattr(dashboards, "run_query", query)
+    with pytest.raises(RuntimeError, match="schema_migrations"):
         dashboards.run_setup(None, "wh", "c", "s", ["team"])
+    query.assert_not_called()
 
 
 def test_wheel_entry_point_raises_on_failure(monkeypatch):
@@ -178,25 +160,36 @@ def _wheel_task_parameters():
                     yield resource_file.name, pw["parameters"]
 
 
-def test_dashboards_setup_is_wired_as_a_bundle_job():
-    """The invariant: dashboards setup must be a bundle job, not CLI-only.
+def test_dashboard_schedule_is_health_only_and_migration_owns_setup():
+    """Scheduled dashboard work reads health; only bootstrap applies DDL."""
 
-    Guards against the deploy-time failure where the bundle ships dashboards that
-    query helper tables nothing ever provisions (the deploy workflow triggers this
-    job once per prod deploy; its cron is committed paused).
-    """
-    setup_params = [
-        params
-        for _, params in _wheel_task_parameters()
-        if params[:2] == ["dashboards", "setup"]
+    health_params = [
+        params for _, params in _wheel_task_parameters() if params[:2] == ["dashboards", "health"]
     ]
-    assert setup_params, (
-        "No bundle job runs `dashboards setup` — the dashboards' helper tables "
-        "(dbx_dev.dbx_platform.workspace_reference, etc.) would never be provisioned. "
-        "Add the task to resources/dashboards_jobs.yml."
+    assert health_params
+    assert not [
+        params for _, params in _wheel_task_parameters() if params[:2] == ["dashboards", "setup"]
+    ]
+    migration_source = (REPO_ROOT / "src/dbx_platform/migrations.py").read_text()
+    assert "setup_statements" in migration_source
+
+
+def test_dependency_health_reports_missing_objects(monkeypatch):
+    responses = [
+        [{"tableName": "workspace_reference"}, {"tableName": "platform_findings"}],
+        [{"function": "main.dbx_platform.job_type_from_sku"}],
+    ]
+
+    monkeypatch.setattr(
+        "dbx_platform.dashboards.run_query",
+        lambda *_args, **_kwargs: responses.pop(0),
     )
-    for params in setup_params:
-        assert "--warehouse-id" in params, "dashboards setup job needs --warehouse-id"
+    rows = dependency_health(object(), "warehouse", "main", "dbx_platform")
+    by_name = {row["dependency"]: row["status"] for row in rows}
+    assert by_name["workspace_reference"] == "AVAILABLE"
+    assert by_name["warehouse_reference"] == "MISSING"
+    assert by_name["job_type_from_sku"] == "AVAILABLE"
+    assert by_name["team_name_from_tags"] == "MISSING"
 
 
 def test_rendered_dashboards_only_reference_objects_setup_creates():

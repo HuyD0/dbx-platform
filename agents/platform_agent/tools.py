@@ -19,11 +19,14 @@ from importlib import resources
 
 from langchain_core.tools import tool
 
-from dbx_platform import cost, governance, housekeeping, ml, security
+from dbx_platform import cost, governance, housekeeping, llm_cost, ml, security
 from dbx_platform.client import get_client
 from dbx_platform.config import Settings
 
-from .formatting import rows_to_text
+try:
+    from .formatting import rows_to_text
+except ImportError:  # pragma: no cover - MLflow standalone code layout
+    from formatting import rows_to_text
 
 
 @lru_cache(maxsize=1)
@@ -39,18 +42,30 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _render(rows: list[dict], tool_name: str, source: str) -> str:
+    return rows_to_text(rows, tool_name=tool_name, source=source)
+
+
 @tool
 def get_cost_report(days: int = 30) -> str:
     """DBU and list-price cost by SKU and workspace over the last N days."""
     s = _settings()
-    return rows_to_text(cost.usage_report(_client(), s.warehouse_id, days))
+    return _render(
+        cost.usage_report(_client(), s.warehouse_id, days),
+        "get_cost_report",
+        "system.billing.usage + system.billing.list_prices",
+    )
 
 
 @tool
 def get_top_jobs(days: int = 30, limit: int = 20) -> str:
     """The most expensive jobs by list cost over the last N days."""
     s = _settings()
-    return rows_to_text(cost.top_jobs(_client(), s.warehouse_id, days, limit))
+    return _render(
+        cost.top_jobs(_client(), s.warehouse_id, days, limit),
+        "get_top_jobs",
+        "system.billing.usage + system.lakeflow jobs",
+    )
 
 
 @tool
@@ -58,15 +73,78 @@ def get_cluster_utilization(days: int = 30) -> str:
     """Under-utilized clusters (low CPU/memory for their size), ranked by cost."""
     s = _settings()
     rows = cost.cluster_utilization(_client(), s.warehouse_id, days)
-    return rows_to_text(cost.classify_cluster_utilization(
-        rows, s.util_cpu_threshold_pct, s.util_mem_threshold_pct))
+    return _render(
+        cost.classify_cluster_utilization(
+            rows,
+            s.util_cpu_threshold_pct,
+            s.util_mem_threshold_pct,
+        ),
+        "get_cluster_utilization",
+        "system.compute.node_timeline + system.billing.usage",
+    )
 
 
 @tool
 def get_failed_run_waste(days: int = 30) -> str:
     """List cost burned on failed or timed-out job runs over the last N days."""
     s = _settings()
-    return rows_to_text(cost.failed_run_waste(_client(), s.warehouse_id, days, 20))
+    return _render(
+        cost.failed_run_waste(_client(), s.warehouse_id, days, 20),
+        "get_failed_run_waste",
+        "system.lakeflow.job_run_timeline + system.billing.usage",
+    )
+
+
+@tool
+def get_llm_cost_and_efficiency(days: int = 30) -> str:
+    """LLM list cost, tokens, requests and efficiency recommendations.
+
+    Financial bases are reported separately and requesters are not returned.
+    """
+
+    s = _settings()
+    w = _client()
+    try:
+        cost_rows = llm_cost.databricks_cost(
+            w, s.warehouse_id, days, gateway_enriched=True
+        )
+    except Exception:  # noqa: BLE001 - compatibility with pre-Gateway schemas
+        cost_rows = llm_cost.databricks_cost(
+            w, s.warehouse_id, days, gateway_enriched=False
+        )
+    try:
+        usage_rows = llm_cost.gateway_usage(w, s.warehouse_id, min(days, 90))
+    except Exception:  # noqa: BLE001 - compatibility with serving usage
+        usage_rows = llm_cost.endpoint_usage(w, s.warehouse_id, min(days, 90))
+    costs = llm_cost.normalize_cost_rows(
+        cost_rows,
+        "system.billing.usage",
+        "DATABRICKS_LIST",
+        environment=s.environment,
+    )
+    usage = llm_cost.normalize_usage_rows(
+        usage_rows, "model usage", environment=s.environment
+    )
+    summary = llm_cost.summarize(costs, usage, days)
+    efficiency_report = llm_cost.efficiency(costs, usage)
+    rows = [
+        *summary["totals"],
+        {
+            "requests": summary["requests"],
+            "input_tokens": summary["input_tokens"],
+            "output_tokens": summary["output_tokens"],
+            "cached_tokens": summary["cached_tokens"],
+            "reasoning_tokens": summary["reasoning_tokens"],
+            "cost_per_request": summary["cost_per_request"],
+            "cost_per_million_tokens": summary["cost_per_million_tokens"],
+        },
+        *efficiency_report["recommendations"],
+    ]
+    return _render(
+        rows,
+        "get_llm_cost_and_efficiency",
+        "system.billing.usage + system.ai_gateway + system.serving.endpoint_usage",
+    )
 
 
 @tool
@@ -74,8 +152,15 @@ def get_serving_findings() -> str:
     """Model serving endpoint audit: failed endpoints, missing scale-to-zero,
     missing inference tables, missing AI Gateway limits."""
     s = _settings()
-    return rows_to_text(ml.classify_serving_endpoints(
-        ml.fetch_serving_endpoints(_client()), _now_ms(), s.serving_failed_grace_hours))
+    return _render(
+        ml.classify_serving_endpoints(
+            ml.fetch_serving_endpoints(_client()),
+            _now_ms(),
+            s.serving_failed_grace_hours,
+        ),
+        "get_serving_findings",
+        "Databricks serving endpoints API",
+    )
 
 
 @tool
@@ -85,8 +170,17 @@ def get_model_hygiene(catalog: str | None = None, schema: str | None = None) -> 
     w = _client()
     models, truncated = ml.fetch_registered_models(w, catalog, schema, s.ml_max_models)
     served = ml.served_entity_names(ml.fetch_serving_endpoints(w))
-    text = rows_to_text(ml.classify_models(
-        models, served, _now_ms(), s.model_stale_days, s.model_unaliased_days))
+    text = _render(
+        ml.classify_models(
+            models,
+            served,
+            _now_ms(),
+            s.model_stale_days,
+            s.model_unaliased_days,
+        ),
+        "get_model_hygiene",
+        "Unity Catalog registered models API + serving endpoints API",
+    )
     if truncated:
         text += f"\n(listing truncated at {s.ml_max_models} models)"
     return text
@@ -98,9 +192,16 @@ def get_gpu_findings() -> str:
     GPU uptime threshold."""
     s = _settings()
     w = _client()
-    return rows_to_text(ml.classify_gpu_clusters(
-        ml.fetch_clusters_with_node_types(w), ml.fetch_gpu_node_types(w),
-        _now_ms(), s.gpu_max_uptime_hours))
+    return _render(
+        ml.classify_gpu_clusters(
+            ml.fetch_clusters_with_node_types(w),
+            ml.fetch_gpu_node_types(w),
+            _now_ms(),
+            s.gpu_max_uptime_hours,
+        ),
+        "get_gpu_findings",
+        "Databricks clusters API + node types API",
+    )
 
 
 @tool
@@ -116,16 +217,27 @@ def get_policy_drift() -> str:
         [{"action": "create", "name": p["name"]} for p in plan["create"]]
         + [{"action": "update", "name": p["name"]} for p in plan["update"]]
     )
-    return rows_to_text(rows)
+    return _render(
+        rows,
+        "get_policy_drift",
+        "packaged policies + Databricks cluster policies API",
+    )
 
 
 @tool
 def get_stale_clusters() -> str:
     """Stale terminated clusters and long-running interactive clusters."""
     s = _settings()
-    return rows_to_text(housekeeping.classify_clusters(
-        housekeeping.fetch_clusters(_client()), _now_ms(),
-        s.stale_cluster_days, s.max_uptime_hours))
+    return _render(
+        housekeeping.classify_clusters(
+            housekeeping.fetch_clusters(_client()),
+            _now_ms(),
+            s.stale_cluster_days,
+            s.max_uptime_hours,
+        ),
+        "get_stale_clusters",
+        "Databricks clusters API",
+    )
 
 
 @tool
@@ -134,8 +246,15 @@ def get_warehouse_utilization(days: int = 30) -> str:
     or sustained queueing at capacity."""
     s = _settings()
     rows = cost.warehouse_utilization(_client(), s.warehouse_id, days)
-    return rows_to_text(cost.classify_warehouse_utilization(
-        rows, s.warehouse_min_queries, s.warehouse_queue_warn_seconds))
+    return _render(
+        cost.classify_warehouse_utilization(
+            rows,
+            s.warehouse_min_queries,
+            s.warehouse_queue_warn_seconds,
+        ),
+        "get_warehouse_utilization",
+        "system.query.history + system.billing.usage",
+    )
 
 
 @tool
@@ -143,17 +262,30 @@ def get_token_findings() -> str:
     """PAT token audit: never-expires, over the age threshold, expiring soon.
     Requires workspace-admin visibility."""
     s = _settings()
-    return rows_to_text(security.classify_tokens(
-        security.fetch_tokens(_client()), _now_ms(),
-        s.token_max_age_days, s.token_expiry_warn_days))
+    return _render(
+        security.classify_tokens(
+            security.fetch_tokens(_client()),
+            _now_ms(),
+            s.token_max_age_days,
+            s.token_expiry_warn_days,
+        ),
+        "get_token_findings",
+        "Databricks token management API",
+    )
 
 
 @tool
 def get_orphaned_jobs() -> str:
     """Jobs whose creator no longer exists or is inactive."""
     w = _client()
-    return rows_to_text(housekeeping.find_orphaned_jobs(
-        housekeeping.fetch_jobs(w), housekeeping.fetch_active_principals(w)))
+    return _render(
+        housekeeping.find_orphaned_jobs(
+            housekeeping.fetch_jobs(w),
+            housekeeping.fetch_active_principals(w),
+        ),
+        "get_orphaned_jobs",
+        "Databricks Jobs API + SCIM users/service principals",
+    )
 
 
 @tool
@@ -161,12 +293,16 @@ def get_tag_recommendations() -> str:
     """Suggested fixes for resources missing required tags (mistyped keys,
     values inferred from names, creators for owner-type keys)."""
     s = _settings()
-    return rows_to_text(governance.recommend_tags(
-        governance.fetch_taggable_resources(_client()),
-        s.required_tag_list(),
-        min_ratio=s.tag_suggestion_min_ratio_pct / 100,
-        owner_keys=tuple(s.tag_owner_key_list()),
-    ))
+    return _render(
+        governance.recommend_tags(
+            governance.fetch_taggable_resources(_client()),
+            s.required_tag_list(),
+            min_ratio=s.tag_suggestion_min_ratio_pct / 100,
+            owner_keys=tuple(s.tag_owner_key_list()),
+        ),
+        "get_tag_recommendations",
+        "Databricks workspace resource APIs",
+    )
 
 
 @tool
@@ -177,7 +313,11 @@ def list_platform_jobs() -> str:
         for j in _client().jobs.list()
         if "dbx-platform" in ((j.settings.name if j.settings else "") or "")
     ]
-    return rows_to_text(sorted(rows, key=lambda r: r["name"]))
+    return _render(
+        sorted(rows, key=lambda r: r["name"]),
+        "list_platform_jobs",
+        "Databricks Jobs API",
+    )
 
 
 @tool
@@ -192,7 +332,11 @@ def get_recent_runs(job_id: int) -> str:
             "result": state.result_state.value if state and state.result_state else "",
             "started_ms": r.start_time or 0,
         })
-    return rows_to_text(rows)
+    return _render(
+        rows,
+        "get_recent_runs",
+        f"Databricks Jobs API job_id={job_id}",
+    )
 
 
 # --- proposals (read-only dry-runs the console turns into confirm cards) -----
@@ -240,7 +384,11 @@ def propose_remediation(action: str) -> str:
     marker = json.dumps({"action": action, "count": len(items)})
     return (
         f"Dry-run of {action} found {len(items)} item(s):\n"
-        + rows_to_text(items)
+        + _render(
+            items,
+            "propose_remediation",
+            f"read-only planner:{action}",
+        )
         + f"\nACTION_PROPOSAL:{marker}"
     )
 
@@ -259,31 +407,13 @@ def propose_job_run(job_name: str) -> str:
     if not matches:
         return f"No [dbx-platform] job matches '{job_name}'. Use list_platform_jobs."
     if len(matches) > 1:
-        return "Ambiguous — matches:\n" + rows_to_text(matches)
+        return "Ambiguous — matches:\n" + _render(
+            matches,
+            "propose_job_run",
+            "Databricks Jobs API",
+        )
     marker = json.dumps({"job_id": matches[0]["job_id"], "name": matches[0]["name"]})
     return f"Ready to run {matches[0]['name']}.\nJOB_PROPOSAL:{marker}"
-
-
-@tool
-def propose_run_all_jobs() -> str:
-    """Propose kicking off every [dbx-platform] report job at once (the jobs
-    ship with paused schedules — every run is human-initiated). Changes
-    nothing — the user confirms the batch in the Platform Console. Copy the
-    JOB_PROPOSAL line verbatim into your final answer."""
-    jobs = [
-        {"job_id": j.job_id, "name": (j.settings.name if j.settings else "") or ""}
-        for j in _client().jobs.list()
-        if "dbx-platform" in ((j.settings.name if j.settings else "") or "")
-    ]
-    if not jobs:
-        return "No [dbx-platform] jobs are visible — deploy the bundle first."
-    jobs.sort(key=lambda r: r["name"])
-    marker = json.dumps({"all": True, "count": len(jobs)})
-    return (
-        f"Ready to kick off all {len(jobs)} [dbx-platform] jobs:\n"
-        + rows_to_text(jobs)
-        + f"\nJOB_PROPOSAL:{marker}"
-    )
 
 
 ALL_TOOLS = [
@@ -291,6 +421,7 @@ ALL_TOOLS = [
     get_top_jobs,
     get_cluster_utilization,
     get_failed_run_waste,
+    get_llm_cost_and_efficiency,
     get_warehouse_utilization,
     get_serving_findings,
     get_model_hygiene,
@@ -304,5 +435,4 @@ ALL_TOOLS = [
     get_recent_runs,
     propose_remediation,
     propose_job_run,
-    propose_run_all_jobs,
 ]

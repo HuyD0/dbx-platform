@@ -1,22 +1,28 @@
-# Daily housekeeping report. REPORT-ONLY on schedule: no --apply here.
-# Review the run output, then act locally with e.g.
-#   dbx-platform housekeeping stale-clusters --apply --yes
+# Daily housekeeping evidence. Legacy --apply is disabled; findings become
+# immutable Mission Control proposals and v1 never deletes resources.
 resources:
   jobs:
     housekeeping_report:
       name: "[dbx-platform] housekeeping-report"
       description: >
         Daily report of stale/long-running clusters and jobs owned by
-        missing principals. Report-only; apply actions are run manually.
+        missing principals. Report-only; changes require approved actions.
       schedule:
         quartz_cron_expression: "0 30 5 * * ?"  # daily 05:30 UTC
         timezone_id: UTC
-        pause_status: PAUSED  # run manually; cron above documents intended cadence
+        pause_status: PAUSED
       tags:
         team: platform
         project: dbx-platform
       queue:
         enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
       email_notifications:
         on_failure:
           - ${var.notification_email}
