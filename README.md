@@ -107,10 +107,11 @@ then stops the app. Wake starts the warehouse, starts and health-checks the
 app, and restores only the schedules enabled before Hibernate. Partial failure
 restores captured state where possible and records the result.
 
-All bundle schedules deploy PAUSED and the app/warehouse deploy stopped.
-Deployments run schema migrations on serverless Spark, then produce a
-proposal-only runtime reconciliation. Deploying while `SLEEPING` does not wake
-the toolkit.
+All bundle schedules deploy PAUSED and the warehouse deploys stopped; the app
+deploys started, so a prod deploy starts it directly. Deployments run schema
+migrations on serverless Spark, then produce a proposal-only runtime
+reconciliation. Deploying while `SLEEPING` still restarts the app but leaves
+the warehouse and schedules asleep.
 
 ## Commands and jobs
 

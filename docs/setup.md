@@ -170,5 +170,6 @@ databricks bundle run schema_migrations -t prod
 databricks bundle run power_controller -t prod --params operation=reconcile
 ```
 
-The deploy still leaves resources stopped/paused and reconciliation
-proposal-only. A current approver must execute the exact Wake plan.
+The deploy still leaves the warehouse stopped and schedules paused (the app
+deploys started) and reconciliation proposal-only. A current approver must
+execute the exact Wake plan to restore the warehouse and schedules.
