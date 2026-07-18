@@ -106,6 +106,9 @@ GRANT SELECT ON TABLE main.dbx_platform.platform_runtime_state TO `dbx-platform-
 GRANT SELECT ON TABLE main.dbx_platform.llm_usage_hourly TO `dbx-platform-app`;
 GRANT SELECT ON TABLE main.dbx_platform.llm_cost_daily TO `dbx-platform-app`;
 GRANT SELECT ON TABLE main.dbx_platform.llm_budgets TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.ai_model_catalog TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.ai_model_access TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.ai_app_monitoring TO `dbx-platform-app`;
 ```
 
 Apply the same table-level `SELECT` set to `dbx-platform-viewers`,
@@ -214,6 +217,12 @@ GRANT SELECT, MODIFY ON TABLE main.dbx_platform.platform_digest
 GRANT SELECT, MODIFY ON TABLE main.dbx_platform.llm_usage_hourly
   TO `dbx-platform-reporters`;
 GRANT SELECT, MODIFY ON TABLE main.dbx_platform.llm_cost_daily
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_model_catalog
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_model_access
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_app_monitoring
   TO `dbx-platform-reporters`;
 ```
 

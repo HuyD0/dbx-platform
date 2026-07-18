@@ -117,3 +117,7 @@ resources:
               - cost_forecast_daily=${resources.jobs.cost_forecast_daily.id}
               - --job
               - llm_cost_rollup=${resources.jobs.llm_cost_rollup.id}
+              - --job
+              - ai_catalog_sync=${resources.jobs.ai_catalog_sync.id}
+              - --job
+              - ai_monitor_rollup=${resources.jobs.ai_monitor_rollup.id}

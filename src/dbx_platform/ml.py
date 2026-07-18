@@ -33,6 +33,7 @@ def fetch_serving_endpoints(w: WorkspaceClient) -> list[dict]:
             entities.append(
                 {
                     "entity_name": se.entity_name or se.name or "",
+                    "entity_version": se.entity_version or "",
                     "workload_size": se.workload_size or "",
                     "workload_type": _workload_type(se),
                     "scale_to_zero": bool(se.scale_to_zero_enabled),
@@ -42,6 +43,7 @@ def fetch_serving_endpoints(w: WorkspaceClient) -> list[dict]:
         out.append(
             {
                 "name": e.name,
+                "endpoint_id": e.id or "",
                 "creator": e.creator or "",
                 # Databricks-provided pay-per-token endpoints appear in the
                 # serving API but are not customer-configurable resources.

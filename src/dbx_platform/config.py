@@ -62,6 +62,13 @@ class Settings:
     azure_subscription_id: str = ""
     azure_spike_pct: int = 50
     azure_spike_min_cost: int = 10
+    # AI catalog (ai_catalog.py): comma-separated Azure subscription IDs to
+    # inventory; empty = every subscription the identity can read.
+    ai_catalog_subscriptions: str = ""
+    # AI monitoring (ai_monitor.py): error-rate spike thresholds
+    ai_error_spike_pct: int = 100
+    ai_error_min_requests: int = 50
+    ai_error_min_rate_pct: int = 5
     # Cost forecasting (see forecast_*.py)
     forecast_horizon_days: int = 30
     forecast_model_name: str = "azure_cost_forecaster"

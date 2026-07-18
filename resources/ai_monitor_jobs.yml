@@ -1,0 +1,61 @@
+# Daily production AI app monitoring rollup from serving system tables. The
+# rollup writes only from its periodic run or an exact executor-approved
+# manual run; report remains read-only. The job identity needs the
+# system.serving grants from docs/cloud-setup.md (already part of the
+# reporter grant set); system.ai_gateway.usage is feature-detected.
+resources:
+  jobs:
+    ai_monitor_rollup:
+      name: "[dbx-platform] ai-monitor-rollup"
+      description: >
+        Rolls system.serving.endpoint_usage x served_entities (and, where the
+        Beta is enabled, system.ai_gateway.usage) up to one daily row per
+        endpoint and calling app in <catalog>.<schema>.ai_app_monitoring:
+        requests, errors, tokens, distinct requesters and p95 latency. Emits
+        error-rate-spike, usage-tracking-gap and idle-endpoint findings.
+        Writes only to platform-owned tables.
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"  # daily 07:00 UTC, after ai-catalog
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: rollup
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["ai-monitor", "rollup", "--days", "7",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

@@ -94,7 +94,7 @@ five-minute auto-stop. It never manages or reuses the shared Starter warehouse.
 The exact v1 Hibernate inventory is:
 
 - the Platform Console app;
-- eleven bundle-declared schedules;
+- thirteen bundle-declared schedules;
 - the dedicated Mission Control warehouse.
 
 The unscheduled `power-controller` and `action-executor` jobs, manual forecast
@@ -151,6 +151,8 @@ The scheduled evidence jobs are:
 | Security | PAT/user activity and audit evidence |
 | Governance | policy/tag drift and tag recommendations |
 | ML | customer-managed endpoint, model, GPU, and vector-search hygiene |
+| AI catalog | unified model + access inventory (UC, serving, Azure AI); key-auth and broad-grant evidence |
+| AI monitoring | per-app serving usage and error rates; spike, tracking-gap, and idle evidence |
 | Performance | job/query/serving regressions and cost-versus-SLO evidence |
 | Digest | canonical findings and AI summary |
 | Dashboard health | read-only helper-object availability |

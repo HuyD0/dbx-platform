@@ -94,6 +94,15 @@ variables:
       DefaultAzureCredential, which only works locally.
     default: ""
 
+  azure_ai_subscriptions:
+    description: >
+      Comma-separated Azure subscription IDs the ai-catalog-sync job
+      inventories via Azure Resource Graph. The job identity needs the Reader
+      role on each listed subscription. Empty means every subscription the
+      identity can read (see docs/cloud-setup.md). Set via
+      BUNDLE_VAR_azure_ai_subscriptions.
+    default: ""
+
 targets:
   # Development: resources prefixed with "[dev <user>]", all schedules paused,
   # deployed under your user folder. Safe to iterate.
