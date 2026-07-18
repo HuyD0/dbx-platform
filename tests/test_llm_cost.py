@@ -296,6 +296,7 @@ def test_ledger_ddl_creates_cost_usage_budget_and_source_health_tables():
     assert "main.dbx_platform.llm_source_health" in sql
     assert "cost_basis STRING" in sql
     assert "warning_pct INT" in sql
+    assert " DEFAULT " not in sql
     assert "coverage_start DATE" in sql
     assert "last_success_at TIMESTAMP" in sql
 
