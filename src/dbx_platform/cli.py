@@ -814,7 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
     pd = sub.add_parser("dashboards", help="AI/BI dashboards").add_subparsers(dest="command")
     x = pd.add_parser("render", parents=[common],
                       help="Render dashboards/templates -> dashboards/*.lvdash.json")
-    x.add_argument("--catalog", default=None, help="Catalog for helper objects (default: main)")
+    x.add_argument("--catalog", default=None, help="Catalog for helper objects (default: dbx_dev)")
     x.add_argument("--schema", default=None,
                    help="Schema for helper objects (default: dbx_platform)")
     x.add_argument("--dashboards-dir", default="dashboards")

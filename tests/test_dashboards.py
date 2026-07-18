@@ -192,7 +192,7 @@ def test_dashboards_setup_is_wired_as_a_bundle_job():
     ]
     assert setup_params, (
         "No bundle job runs `dashboards setup` — the dashboards' helper tables "
-        "(main.dbx_platform.workspace_reference, etc.) would never be provisioned. "
+        "(dbx_dev.dbx_platform.workspace_reference, etc.) would never be provisioned. "
         "Add the task to resources/dashboards_jobs.yml."
     )
     for params in setup_params:
