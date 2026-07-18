@@ -178,7 +178,10 @@ def create_ledger_table_statements(catalog: str, schema: str) -> list[tuple[str,
             "budget_id STRING, workspace_id STRING, environment STRING, scope_type STRING, "
             "scope_value STRING, cost_basis STRING, month DATE, currency STRING, "
             "amount DOUBLE, "
-            "warning_pct INT DEFAULT 80, critical_pct INT DEFAULT 100, "
+            # Every governed budget write supplies both thresholds. Avoid
+            # Delta column defaults here because CREATE TABLE cannot enable
+            # the required feature on a table that does not exist yet.
+            "warning_pct INT, critical_pct INT, "
             "status STRING, plan_hash STRING, "
             "updated_by STRING, updated_at TIMESTAMP) "
             "COMMENT 'Human-approved monthly LLM budgets'",
