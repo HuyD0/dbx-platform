@@ -50,3 +50,25 @@ def test_production_deploy_selects_every_declared_non_dashboard_resource() -> No
     }
 
     assert selected == expected
+
+
+def test_control_plane_jobs_share_one_catalog_and_schema() -> None:
+    expected = [
+        "--catalog",
+        "${var.control_plane_catalog}",
+        "--schema",
+        "${var.control_plane_schema}",
+    ]
+    jobs = (
+        ("migrations.yml", "schema_migrations"),
+        ("runtime_control.yml", "power_controller"),
+        ("action_executor.yml", "action_executor"),
+    )
+
+    for resource_file, job_name in jobs:
+        document = yaml.safe_load((ROOT / "resources" / resource_file).read_text())
+        parameters = document["resources"]["jobs"][job_name]["tasks"][0][
+            "spark_python_task"
+        ]["parameters"]
+        start = parameters.index("--catalog")
+        assert parameters[start : start + 4] == expected

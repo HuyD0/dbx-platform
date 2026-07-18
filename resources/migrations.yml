@@ -26,9 +26,9 @@ resources:
             python_file: ../src/dbx_platform/migrations.py
             parameters:
               - --catalog
-              - dbx_dev
+              - ${var.control_plane_catalog}
               - --schema
-              - dbx_platform
+              - ${var.control_plane_schema}
               - --operator-group
               - ${var.operator_group}
               - --approver-group

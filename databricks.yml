@@ -51,6 +51,14 @@ variables:
       immutable-plan, identity, TTL, drift, or executor checks.
     default: "false"
 
+  control_plane_catalog:
+    description: Unity Catalog catalog containing the durable Mission Control tables.
+    default: dbx_dev
+
+  control_plane_schema:
+    description: Unity Catalog schema containing the durable Mission Control tables.
+    default: dbx_platform
+
   notification_email:
     description: Recipient for job failure notifications.
     default: huyydo@gmail.com

@@ -87,6 +87,10 @@ resources:
               - "{{job.run_id}}"
               - --environment
               - ${bundle.target}
+              - --catalog
+              - ${var.control_plane_catalog}
+              - --schema
+              - ${var.control_plane_schema}
               - --approver-group
               - ${var.approver_group}
               - --expected-executor

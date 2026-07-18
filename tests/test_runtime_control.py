@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from databricks.sdk.service import jobs, sql
 
+from dbx_platform import runtime_control
 from dbx_platform.runtime_control import (
     ACTION_HIBERNATE,
     ACTION_WAKE,
@@ -43,6 +44,16 @@ from dbx_platform.runtime_control import (
 )
 
 NOW = datetime(2026, 7, 17, 16, 0, tzinfo=UTC)
+
+
+def test_serverless_entry_returns_normally_only_on_success(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_control, "main", lambda _argv=None: 0)
+    assert runtime_control.entry([]) is None
+
+    monkeypatch.setattr(runtime_control, "main", lambda _argv=None: 2)
+    with pytest.raises(SystemExit) as error:
+        runtime_control.entry([])
+    assert error.value.code == 2
 APPROVER = Actor("user-1", "owner@example.com", ("dbx-platform-approvers",))
 
 

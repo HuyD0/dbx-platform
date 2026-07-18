@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dbx_platform import action_executor
 from dbx_platform.action_executor import (
     STATUS_APPROVED,
     STATUS_FAILED,
@@ -28,6 +29,16 @@ from dbx_platform.action_executor import (
     canonical_hash,
 )
 from dbx_platform.config import Settings
+
+
+def test_serverless_entry_returns_normally_only_on_success(monkeypatch) -> None:
+    monkeypatch.setattr(action_executor, "main", lambda _argv=None: 0)
+    assert action_executor.entry([]) is None
+
+    monkeypatch.setattr(action_executor, "main", lambda _argv=None: 2)
+    with pytest.raises(SystemExit) as error:
+        action_executor.entry([])
+    assert error.value.code == 2
 
 
 class FakeStore:
