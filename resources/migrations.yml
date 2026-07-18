@@ -33,3 +33,5 @@ resources:
               - ${var.operator_group}
               - --approver-group
               - ${var.approver_group}
+              - --actions-enabled
+              - ${var.actions_enabled}
