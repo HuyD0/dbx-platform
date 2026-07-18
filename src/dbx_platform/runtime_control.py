@@ -32,7 +32,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Protocol
 
-from databricks.sdk.service import jobs, sql
+from databricks.sdk.service import apps, jobs, sql
 
 PLAN_SCHEMA_VERSION = 1
 PLAN_TTL = timedelta(minutes=15)
@@ -99,6 +99,7 @@ class ManagedResource:
     stoppable: bool = True
     protected: bool = False
     desired_on_state: str | None = None
+    source_code_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -299,6 +300,10 @@ class RuntimeAdapter(Protocol):
 
     def stop_app(self, app_name: str) -> None: ...
 
+    def deploy_app(
+        self, app_name: str, source_code_path: str, expected_build_sha: str
+    ) -> None: ...
+
     def start_app(self, app_name: str) -> None: ...
 
 
@@ -399,13 +404,16 @@ def _target_observation(
 
 
 def _precondition_from_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    result = {
         "resource_key": observation["resource_key"],
         "resource_type": observation["resource_type"],
         "resource_id": observation["resource_id"],
         "config_hash": observation["config_hash"],
         "state": observation["state"],
     }
+    if observation["resource_type"] == ResourceKind.APP.value:
+        result["deployment_hash"] = canonical_hash(observation.get("deployment") or {})
+    return result
 
 
 class RuntimeController:
@@ -493,10 +501,32 @@ class RuntimeController:
         if all(
             current[key]["config_hash"] == expected[key]["config_hash"]
             and current[key]["state"] == expected[key]["state"]
+            and (
+                action_type != ACTION_WAKE
+                or current[key]["resource_type"] != ResourceKind.APP.value
+                or self._app_is_ready_for_desired_build(current[key])
+            )
             for key in current
         ):
             return None
         return self._create_plan(action_type, proposer, observations=current)
+
+    @staticmethod
+    def _app_is_ready_for_desired_build(
+        observation: Mapping[str, Any],
+    ) -> bool:
+        desired = observation.get("desired_deployment") or {}
+        deployment = observation.get("deployment") or {}
+        health = observation.get("health") or {}
+        return bool(
+            desired.get("source_code_path")
+            and desired.get("build_sha")
+            and deployment.get("source_code_path") == desired.get("source_code_path")
+            and deployment.get("build_sha") == desired.get("build_sha")
+            and health.get("application_state") == "RUNNING"
+            and health.get("deployment_state") == "SUCCEEDED"
+            and int(health.get("running_instances") or 0) >= 1
+        )
 
     def _create_plan(
         self,
@@ -549,6 +579,16 @@ class RuntimeController:
                 "drain_timeout_seconds": self.drain_timeout_seconds,
                 "force_cancel": False,
                 "inventory_hash": self.inventory.inventory_hash,
+                "app_source_code_path": (
+                    current[self.inventory.app.resource_key]
+                    .get("desired_deployment", {})
+                    .get("source_code_path")
+                ),
+                "app_build_sha": (
+                    current[self.inventory.app.resource_key]
+                    .get("desired_deployment", {})
+                    .get("build_sha")
+                ),
             },
             "preconditions": {
                 "resources": {
@@ -641,6 +681,13 @@ class RuntimeController:
                 ),
                 "app_health_required_before_schedule_restore": (
                     action_type == ACTION_WAKE
+                ),
+                "app_build_sha": (
+                    current[self.inventory.app.resource_key]
+                    .get("desired_deployment", {})
+                    .get("build_sha")
+                    if action_type == ACTION_WAKE
+                    else None
                 ),
             },
             "risk": "MEDIUM",
@@ -1060,6 +1107,16 @@ class RuntimeController:
                 mismatches.append(f"{key}: resource ID changed")
             if observation["config_hash"] != expected["config_hash"]:
                 mismatches.append(f"{key}: configuration changed")
+            if (
+                observation["resource_type"] == ResourceKind.APP.value
+                and canonical_hash(observation.get("deployment") or {})
+                != expected.get("deployment_hash")
+                and not (
+                    allow_target_state
+                    and self._app_has_approved_build(plan, observation)
+                )
+            ):
+                mismatches.append(f"{key}: active deployment changed")
             allowed_states = {expected["state"]}
             if allow_target_state:
                 allowed_states.add(target[key]["state"])
@@ -1125,6 +1182,37 @@ class RuntimeController:
         self._step_event(plan, "WAREHOUSE_STARTED", warehouse, actor_id)
 
         app = self.inventory.app
+        source_code_path = str(plan["parameters"].get("app_source_code_path") or "")
+        expected_build_sha = str(plan["parameters"].get("app_build_sha") or "")
+        if not source_code_path or not expected_build_sha:
+            raise ApprovalRequiredError(
+                "Approved Wake plan does not identify an exact app source and build SHA"
+            )
+        self._step_event(
+            plan,
+            "APP_DEPLOY_INTENT",
+            app,
+            actor_id,
+            {
+                "source_code_path": source_code_path,
+                "build_sha": expected_build_sha,
+                "deployment_mode": "SNAPSHOT",
+            },
+        )
+        self.adapter.deploy_app(
+            app.resource_id, source_code_path, expected_build_sha
+        )
+        self._step_event(
+            plan,
+            "APP_DEPLOYED",
+            app,
+            actor_id,
+            {
+                "source_code_path": source_code_path,
+                "build_sha": expected_build_sha,
+                "deployment_mode": "SNAPSHOT",
+            },
+        )
         self._step_event(plan, "APP_START_INTENT", app, actor_id)
         self.adapter.start_app(app.resource_id)
         self._step_event(plan, "APP_STARTED", app, actor_id)
@@ -1167,6 +1255,7 @@ class RuntimeController:
                 and health.get("application_state") == "RUNNING"
                 and health.get("deployment_state") == "SUCCEEDED"
                 and int(health.get("running_instances") or 0) >= 1
+                and self._app_has_approved_build(plan, last_observation)
             )
             if ready:
                 self._step_event(
@@ -1180,11 +1269,27 @@ class RuntimeController:
             if self.monotonic() >= deadline:
                 raise RuntimeControlError(
                     "Platform Console did not pass compute, deployment, and "
-                    "application health checks within "
+                    "approved-build health checks within "
                     f"{self.app_health_timeout_seconds} seconds: "
                     f"{canonical_json(health)}"
                 )
             self.sleeper(self.app_health_poll_seconds)
+
+    @staticmethod
+    def _app_has_approved_build(
+        plan: Mapping[str, Any], observation: Mapping[str, Any]
+    ) -> bool:
+        expected_path = str(
+            plan.get("parameters", {}).get("app_source_code_path") or ""
+        )
+        expected_sha = str(plan.get("parameters", {}).get("app_build_sha") or "")
+        deployment = observation.get("deployment") or {}
+        return bool(
+            expected_path
+            and expected_sha
+            and deployment.get("source_code_path") == expected_path
+            and deployment.get("build_sha") == expected_sha
+        )
 
     def _drain_owned_activity(
         self, plan: Mapping[str, Any], actor_id: str
@@ -1370,6 +1475,43 @@ class DatabricksRuntimeAdapter:
     def __init__(self, workspace_client: Any) -> None:
         self.w = workspace_client
 
+    def _build_info(self, source_code_path: str) -> dict[str, Any]:
+        path = f"{source_code_path.rstrip('/')}/build_info.json"
+        try:
+            with self.w.workspace.download(path) as stream:
+                payload = json.loads(stream.read().decode("utf-8"))
+        except Exception as exc:
+            raise InventoryError(
+                f"Cannot read immutable app build metadata at {path!r}"
+            ) from exc
+        if not isinstance(payload, dict) or not str(payload.get("sha") or "").strip():
+            raise InventoryError(f"App build metadata at {path!r} has no SHA")
+        return payload
+
+    def _app_deployment(self, app: Any) -> dict[str, Any]:
+        deployment = app.active_deployment
+        if deployment is None:
+            return {
+                "deployment_id": None,
+                "source_code_path": None,
+                "snapshot_path": None,
+                "build_sha": None,
+            }
+        snapshot_path = (
+            deployment.deployment_artifacts.source_code_path
+            if deployment.deployment_artifacts
+            else None
+        )
+        build_sha = (
+            str(self._build_info(snapshot_path)["sha"]) if snapshot_path else None
+        )
+        return {
+            "deployment_id": deployment.deployment_id,
+            "source_code_path": deployment.source_code_path,
+            "snapshot_path": snapshot_path,
+            "build_sha": build_sha,
+        }
+
     def observe(self, resource: ManagedResource) -> dict[str, Any]:
         if resource.resource_type is ResourceKind.JOB:
             job = self.w.jobs.get(int(resource.resource_id))
@@ -1401,16 +1543,24 @@ class DatabricksRuntimeAdapter:
                 "warehouse_type": _enum_value(warehouse.warehouse_type),
             }
         else:
+            if not resource.source_code_path:
+                raise InventoryError(
+                    "The Platform Console inventory has no exact source-code path"
+                )
             app = self.w.apps.get(resource.resource_id)
             state = (
                 str(_enum_value(app.compute_status.state))
                 if app.compute_status and app.compute_status.state
                 else "UNKNOWN"
             )
+            desired_build = self._build_info(resource.source_code_path)
+            deployment = self._app_deployment(app)
             config = {
                 "name": app.name,
                 "compute_size": _enum_value(app.compute_size),
                 "default_source_code_path": app.default_source_code_path,
+                "desired_source_code_path": resource.source_code_path,
+                "desired_build_sha": str(desired_build["sha"]),
             }
             health = {
                 "compute_state": state,
@@ -1442,6 +1592,12 @@ class DatabricksRuntimeAdapter:
         }
         if resource.resource_type is ResourceKind.APP:
             observation["health"] = health
+            observation["deployment"] = deployment
+            observation["desired_deployment"] = {
+                "source_code_path": resource.source_code_path,
+                "build_sha": str(desired_build["sha"]),
+                "built_at": desired_build.get("built_at"),
+            }
         return observation
 
     def set_job_paused(self, job_id: str, paused: bool) -> None:
@@ -1555,6 +1711,44 @@ class DatabricksRuntimeAdapter:
         if state == "STOPPED":
             return
         self.w.apps.stop_and_wait(app_name)
+
+    def deploy_app(
+        self, app_name: str, source_code_path: str, expected_build_sha: str
+    ) -> None:
+        current_build_sha = str(self._build_info(source_code_path)["sha"])
+        if current_build_sha != expected_build_sha:
+            raise StalePlanError(
+                "App source changed after approval: expected "
+                f"{expected_build_sha}, got {current_build_sha}"
+            )
+
+        current = self.w.apps.get(app_name)
+        deployment = self._app_deployment(current)
+        if (
+            deployment["source_code_path"] == source_code_path
+            and deployment["build_sha"] == expected_build_sha
+            and current.active_deployment
+            and current.active_deployment.status
+            and _enum_value(current.active_deployment.status.state) == "SUCCEEDED"
+        ):
+            return
+
+        self.w.apps.deploy_and_wait(
+            app_name,
+            apps.AppDeployment(
+                source_code_path=source_code_path,
+                mode=apps.AppDeploymentMode.SNAPSHOT,
+            ),
+        )
+        deployed = self._app_deployment(self.w.apps.get(app_name))
+        if (
+            deployed["source_code_path"] != source_code_path
+            or deployed["build_sha"] != expected_build_sha
+        ):
+            raise RuntimeControlError(
+                "Databricks Apps deployment did not activate the approved "
+                f"snapshot {expected_build_sha}"
+            )
 
     def start_app(self, app_name: str) -> None:
         app = self.w.apps.get(app_name)
@@ -2095,7 +2289,10 @@ class SparkSqlActionStore:
 
 
 def _parse_inventory(
-    job_values: Sequence[str], warehouse_id: str, app_name: str
+    job_values: Sequence[str],
+    warehouse_id: str,
+    app_name: str,
+    app_source_code_path: str,
 ) -> RuntimeInventory:
     resources: list[ManagedResource] = []
     for index, value in enumerate(job_values):
@@ -2127,6 +2324,7 @@ def _parse_inventory(
                 resource_id=app_name,
                 display_name=app_name,
                 stop_order=200,
+                source_code_path=app_source_code_path,
             ),
         ]
     )
@@ -2153,6 +2351,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job", action="append", default=[])
     parser.add_argument("--warehouse-id", required=True)
     parser.add_argument("--app-name", required=True)
+    parser.add_argument("--app-source-code-path", required=True)
     parser.add_argument("--environment", default="prod")
     parser.add_argument("--catalog", default="main")
     parser.add_argument("--schema", default="dbx_platform")
@@ -2182,7 +2381,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "service principal."
             )
         verifier = WorkspaceApproverVerifier(workspace)
-        inventory = _parse_inventory(args.job, args.warehouse_id, args.app_name)
+        inventory = _parse_inventory(
+            args.job,
+            args.warehouse_id,
+            args.app_name,
+            args.app_source_code_path,
+        )
 
         # The currently running power-controller Job must never enter its own
         # stop/drain inventory.

@@ -26,7 +26,7 @@ include:
 # deploy workflow produces. Re-include both or the app breaks on deploy.
 sync:
   include:
-    - apps/platform-console/wheels/*.whl
+    - apps/platform-console/wheels/**/*.whl
     - apps/platform-console/static/**
     - apps/platform-console/build_info.json
 
