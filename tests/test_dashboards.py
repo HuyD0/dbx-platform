@@ -122,6 +122,7 @@ def test_wheel_entry_point_carries_the_error_message(monkeypatch):
     root cause stayed hidden behind 'SystemExit: 1'). The message must ride in
     the exception."""
     from dbx_platform import cli
+    from dbx_platform.system_tables import SystemTablesUnavailableError
 
     def boom(argv):
         raise RuntimeError("[NO_SUCH_CATALOG_EXCEPTION] Catalog 'main' was not found")
@@ -130,8 +131,14 @@ def test_wheel_entry_point_carries_the_error_message(monkeypatch):
     with pytest.raises(SystemExit, match="NO_SUCH_CATALOG_EXCEPTION"):
         cli.entry()
 
-    monkeypatch.setattr(cli, "main", lambda argv=None: 0)  # main() API unchanged
-    assert cli.main() == 0
+    # main() keeps its printed-message/exit-code contract for programmatic use
+    assert cli.main() == 1
+
+    def unavailable(argv):
+        raise SystemTablesUnavailableError("system tables not enabled")
+
+    monkeypatch.setattr(cli, "_dispatch", unavailable)
+    assert cli.main() == 3
 
 
 def test_committed_templates_are_valid_and_renderable():
