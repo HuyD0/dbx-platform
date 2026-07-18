@@ -68,12 +68,18 @@ Operational details, thresholds, and how to act on findings: **[docs/runbook.md]
 
 ### Dashboards
 
-Five AI/BI dashboards deployed by the bundle (`resources/dashboards.yml`):
-Unified Cost Analysis, Job Operations & Cost Management, DBSQL Cost & Query
-Performance, Data Lineage & Catalog Utilization, and Azure Bill & Cost Forecast
-(the ingested Azure bill by platform component — Databricks / Foundry-AI /
-Search / Storage — with the P10/P50/P90 ML forecast and the drift monitor's
-findings; this one is authored in-repo, not adapted from the suite).
+Six AI/BI dashboards deployed by the bundle (`resources/dashboards.yml`). The
+**Platform Command Center** is the consolidated, in-repo-authored successor:
+one dashboard whose six pages render as tabs — Overview, Azure Bill & Forecast,
+Databricks Cost, Jobs, SQL Warehouses, Governance & Lineage — each opening with
+a KPI counter row, then one full-width trend, then action tables, with page
+filters bound to every dataset they claim to filter. The five standalone
+dashboards it curates remain deployed until you drop them from
+`resources/dashboards.yml`: Unified Cost Analysis, Job Operations & Cost
+Management, DBSQL Cost & Query Performance, Data Lineage & Catalog Utilization,
+and Azure Bill & Cost Forecast (the ingested Azure bill by platform component —
+Databricks / Foundry-AI / Search / Storage — with the P10/P50/P90 ML forecast
+and the drift monitor's findings; also authored in-repo).
 
 Adapted from the community
 [databricks-dashboard-suite](https://github.com/mohanab89/databricks-dashboard-suite)

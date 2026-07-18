@@ -1,0 +1,3232 @@
+{
+  "datasets": [
+    {
+      "name": "ds_azure_kpi",
+      "displayName": "azure_spend_kpi",
+      "query": "SELECT ROUND(SUM(CASE WHEN usage_date >= DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_30d, ROUND(SUM(CASE WHEN usage_date < DATE_SUB(CURRENT_DATE(), 30) THEN cost END), 2) AS cost_prev_30d FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60)"
+    },
+    {
+      "name": "ds_dbx_kpi",
+      "displayName": "databricks_spend_kpi",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 60)) SELECT ROUND(SUM(CASE WHEN usage_date >= DATE_SUB(CURRENT_DATE(), 30) THEN list_cost END), 2) AS cost_30d, ROUND(SUM(CASE WHEN usage_date < DATE_SUB(CURRENT_DATE(), 30) THEN list_cost END), 2) AS cost_prev_30d FROM priced"
+    },
+    {
+      "name": "ds_forecast_kpi",
+      "displayName": "forecast_next_30d_kpi",
+      "query": "SELECT ROUND(SUM(p50), 2) AS p50_next_30d, MAX(run_date) AS forecast_run FROM main.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT MAX(run_date) FROM main.dbx_platform.cost_forecasts) AND target_date > CURRENT_DATE() AND target_date <= DATE_ADD(CURRENT_DATE(), 30)"
+    },
+    {
+      "name": "ds_findings_kpi",
+      "displayName": "open_findings_kpi",
+      "query": "SELECT COUNT(*) AS findings_7d FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 7) AND action != 'ok'"
+    },
+    {
+      "name": "ds_azure_daily",
+      "displayName": "azure_daily_by_bucket_90d",
+      "query": "SELECT usage_date, service_bucket, SUM(cost) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 90) GROUP BY usage_date, service_bucket"
+    },
+    {
+      "name": "ds_findings_recent",
+      "displayName": "platform_findings_recent",
+      "query": "SELECT run_ts, area, check_name, resource, reason, action FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 30) AND action != 'ok' ORDER BY run_ts DESC LIMIT 100"
+    },
+    {
+      "name": "ds_forecast_total",
+      "displayName": "forecast_vs_actual_total",
+      "query": "WITH latest AS (SELECT MAX(run_date) AS run_date FROM main.dbx_platform.cost_forecasts) SELECT usage_date AS day, 'actual' AS metric, SUM(cost) AS value FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60) GROUP BY usage_date UNION ALL SELECT target_date, CONCAT('forecast ', quantile), value FROM main.dbx_platform.cost_forecasts LATERAL VIEW EXPLODE(MAP('p10', p10, 'p50', p50, 'p90', p90)) AS quantile, value WHERE series = 'total' AND run_date = (SELECT run_date FROM latest)"
+    },
+    {
+      "name": "ds_forecast_buckets",
+      "displayName": "forecast_p50_by_bucket",
+      "query": "SELECT target_date AS day, series, p50 FROM main.dbx_platform.cost_forecasts WHERE series != 'total' AND run_date = (SELECT MAX(run_date) FROM main.dbx_platform.cost_forecasts)"
+    },
+    {
+      "name": "ds_azure_services",
+      "displayName": "azure_top_services_30d",
+      "query": "SELECT service_name, service_bucket, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY service_name, service_bucket ORDER BY cost DESC LIMIT 20"
+    },
+    {
+      "name": "ds_azure_rgs",
+      "displayName": "azure_top_resource_groups_30d",
+      "query": "SELECT resource_group, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY resource_group ORDER BY cost DESC LIMIT 20"
+    },
+    {
+      "name": "ds_forecast_monitor",
+      "displayName": "forecast_monitor_findings",
+      "query": "SELECT run_ts, check_name, resource, reason, action FROM main.dbx_platform.platform_findings WHERE area = 'forecast' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
+    },
+    {
+      "name": "ds_dbx_daily",
+      "displayName": "dbx_daily_spend_90d",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90)) SELECT p.usage_date, p.billing_origin_product AS compute_type, COALESCE(wr.workspace_name, p.workspace_id) AS workspace_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN main.dbx_platform.workspace_reference wr ON p.workspace_id = wr.workspace_id GROUP BY ALL"
+    },
+    {
+      "name": "ds_dbx_weekly",
+      "displayName": "dbx_weekly_growth_26w",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 189)), weekly AS ( SELECT DATE_TRUNC('WEEK', usage_date) AS week_start, SUM(list_cost) AS list_cost, COUNT(DISTINCT usage_date) AS days FROM priced GROUP BY 1 HAVING days = 7 ) SELECT week_start, ROUND(list_cost, 2) AS weekly_cost, ROUND(100 * (list_cost - LAG(list_cost) OVER (ORDER BY week_start)) / LAG(list_cost) OVER (ORDER BY week_start), 1) AS wow_growth_pct FROM weekly ORDER BY week_start"
+    },
+    {
+      "name": "ds_jobs_daily",
+      "displayName": "jobs_daily_by_sku_90d",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'JOBS') SELECT usage_date, IFNULL(main.dbx_platform.job_type_from_sku(sku_name), 'UNKNOWN') AS job_type, SUM(list_cost) AS list_cost FROM priced GROUP BY ALL"
+    },
+    {
+      "name": "ds_jobs_top",
+      "displayName": "jobs_most_expensive_30d",
+      "query": "WITH recent_jobs AS ( SELECT *, ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) AS rn FROM system.lakeflow.jobs QUALIFY rn = 1 ), priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 30) AND u.billing_origin_product = 'JOBS' AND u.usage_metadata.job_id IS NOT NULL) SELECT COALESCE(j.name, p.usage_metadata.job_id) AS job_name, main.dbx_platform.team_name_from_tags(FIRST(p.custom_tags, TRUE), FIRST(j.tags, TRUE)) AS team, FIRST(p.identity_metadata.run_as, TRUE) AS run_as, COUNT(DISTINCT p.usage_metadata.job_run_id) AS runs, ROUND(SUM(p.list_cost), 2) AS list_cost FROM priced p LEFT JOIN recent_jobs j ON p.workspace_id = j.workspace_id AND p.usage_metadata.job_id = j.job_id GROUP BY p.workspace_id, p.usage_metadata.job_id, j.name ORDER BY list_cost DESC LIMIT 25"
+    },
+    {
+      "name": "ds_jobs_outcome",
+      "displayName": "jobs_spend_by_outcome_30d",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 30) AND u.billing_origin_product = 'JOBS') SELECT p.usage_date, COALESCE(t.result_state, 'RUNNING') AS result_state, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN system.lakeflow.job_run_timeline t ON p.workspace_id = t.workspace_id AND p.usage_metadata.job_id = t.job_id AND p.usage_metadata.job_run_id = t.run_id AND p.usage_start_time >= DATE_TRUNC('HOUR', t.period_start_time) AND p.usage_start_time < DATE_TRUNC('HOUR', t.period_end_time) + INTERVAL 1 HOUR GROUP BY ALL"
+    },
+    {
+      "name": "ds_jobs_untagged",
+      "displayName": "jobs_untagged_30d",
+      "query": "WITH recent_jobs AS ( SELECT *, ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) AS rn FROM system.lakeflow.jobs QUALIFY rn = 1 ), priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 30) AND u.billing_origin_product = 'JOBS' AND u.usage_metadata.job_id IS NOT NULL) SELECT COALESCE(j.name, p.usage_metadata.job_id) AS job_name, FIRST(p.identity_metadata.run_as, TRUE) AS run_as, ROUND(SUM(p.list_cost), 2) AS list_cost FROM priced p INNER JOIN recent_jobs j ON p.workspace_id = j.workspace_id AND p.usage_metadata.job_id = j.job_id WHERE CARDINALITY(j.tags) = 0 AND CARDINALITY(p.custom_tags) = 0 GROUP BY p.workspace_id, p.usage_metadata.job_id, j.name ORDER BY list_cost DESC LIMIT 25"
+    },
+    {
+      "name": "ds_sql_daily",
+      "displayName": "dbsql_daily_spend_90d",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90) AND u.billing_origin_product = 'SQL') SELECT p.usage_date, IFNULL(main.dbx_platform.sql_type_from_sku(p.sku_name), 'UNKNOWN') AS sql_type, COALESCE(wh.warehouse_name, p.usage_metadata.warehouse_id, 'unknown') AS warehouse_name, SUM(p.list_cost) AS list_cost FROM priced p LEFT JOIN main.dbx_platform.warehouse_reference wh ON p.workspace_id = wh.workspace_id AND p.usage_metadata.warehouse_id = wh.warehouse_id GROUP BY ALL"
+    },
+    {
+      "name": "ds_sql_kpi",
+      "displayName": "dbsql_spend_kpi",
+      "query": "WITH priced AS ( SELECT u.*, u.usage_quantity * lp.pricing.default AS list_cost FROM system.billing.usage u INNER JOIN system.billing.list_prices lp ON u.cloud = lp.cloud AND u.sku_name = lp.sku_name AND u.usage_start_time >= lp.price_start_time AND (u.usage_end_time <= lp.price_end_time OR lp.price_end_time IS NULL) WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 60) AND u.billing_origin_product = 'SQL') SELECT ROUND(SUM(CASE WHEN usage_date >= DATE_SUB(CURRENT_DATE(), 30) THEN list_cost END), 2) AS cost_30d, ROUND(SUM(CASE WHEN usage_date < DATE_SUB(CURRENT_DATE(), 30) THEN list_cost END), 2) AS cost_prev_30d FROM priced"
+    },
+    {
+      "name": "ds_sql_perf",
+      "displayName": "dbsql_query_performance_30d",
+      "query": "SELECT DATE(start_time) AS day, metric, ROUND(value, 2) AS value FROM ( SELECT start_time, ROUND(AVG(try_divide(total_duration_ms, 1000)) , 2) AS `avg runtime (s)`, ROUND(AVG(try_divide(waiting_at_capacity_duration_ms, 1000)), 2) AS `avg queue (s)`, ROUND(PERCENTILE(try_divide(total_duration_ms, 1000), 0.95), 2) AS `p95 runtime (s)` FROM system.query.history WHERE start_time >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY start_time ) LATERAL VIEW EXPLODE(MAP( 'avg runtime (s)', `avg runtime (s)`, 'avg queue (s)', `avg queue (s)`, 'p95 runtime (s)', `p95 runtime (s)`)) AS metric, value"
+    },
+    {
+      "name": "ds_sql_top_queries",
+      "displayName": "dbsql_heaviest_queries_30d",
+      "query": "SELECT LEFT(statement_text, 120) AS statement, executed_by, ifnull(statement_type, 'Other') AS statement_type, COUNT(*) AS runs, ROUND(SUM(try_divide(total_duration_ms, 1000)), 1) AS total_runtime_s, ROUND(AVG(try_divide(waiting_at_capacity_duration_ms, 1000)), 1) AS avg_queue_s, ROUND(SUM(read_bytes) / (1024*1024*1024), 2) AS read_gb, MAX(CASE WHEN spilled_local_bytes > 0 THEN 'spill' ELSE '' END) AS spill FROM system.query.history WHERE start_time >= DATE_SUB(CURRENT_DATE(), 30) AND statement_text IS NOT NULL GROUP BY LEFT(statement_text, 120), executed_by, ifnull(statement_type, 'Other') ORDER BY total_runtime_s DESC LIMIT 25"
+    },
+    {
+      "name": "ds_lineage_daily",
+      "displayName": "lineage_activity_daily_30d",
+      "query": "SELECT event_date AS day, metric, value FROM ( SELECT event_date, COUNT(*) AS `table reads/writes`, COUNT(DISTINCT created_by) AS `active users` FROM system.access.table_lineage WHERE event_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY event_date ) LATERAL VIEW EXPLODE(MAP( 'table reads/writes', `table reads/writes`, 'active users', `active users`)) AS metric, value"
+    },
+    {
+      "name": "ds_catalog_usage",
+      "displayName": "catalog_usage_by_entity_30d",
+      "query": "SELECT catalog, IFNULL(entity_type, 'interactive') AS entity_type, COUNT(*) AS events FROM ( SELECT entity_type, EXPLODE(ARRAY_DISTINCT(ARRAY(source_table_catalog, target_table_catalog))) AS catalog FROM system.access.table_lineage WHERE event_date >= DATE_SUB(CURRENT_DATE(), 30) ) WHERE catalog IS NOT NULL AND catalog NOT IN ('system', '__databricks_internal') GROUP BY ALL ORDER BY events DESC LIMIT 60"
+    },
+    {
+      "name": "ds_unused_tables",
+      "displayName": "unused_tables_90d",
+      "query": "WITH written AS ( SELECT target_table_full_name AS table_name, MAX(event_date) AS last_written FROM system.access.table_lineage WHERE event_date >= DATE_SUB(CURRENT_DATE(), 90) AND target_table_full_name IS NOT NULL GROUP BY 1 ), read_tables AS ( SELECT DISTINCT source_table_full_name AS table_name FROM system.access.table_lineage WHERE event_date >= DATE_SUB(CURRENT_DATE(), 90) AND source_table_full_name IS NOT NULL ) SELECT w.table_name, w.last_written FROM written w LEFT ANTI JOIN read_tables r ON w.table_name = r.table_name INNER JOIN system.information_schema.tables t ON w.table_name = CONCAT(t.table_catalog, '.', t.table_schema, '.', t.table_name) ORDER BY w.last_written DESC LIMIT 50"
+    },
+    {
+      "name": "ds_gov_kpi",
+      "displayName": "governance_kpi_30d",
+      "query": "SELECT COUNT(DISTINCT created_by) AS active_users_30d, COUNT(DISTINCT COALESCE(source_table_catalog, target_table_catalog)) AS catalogs_in_use FROM system.access.table_lineage WHERE event_date >= DATE_SUB(CURRENT_DATE(), 30)"
+    },
+    {
+      "name": "ds_findings_by_area",
+      "displayName": "findings_by_area_90d",
+      "query": "SELECT DATE(run_ts) AS day, area, COUNT(*) AS findings FROM main.dbx_platform.platform_findings WHERE run_ts >= DATE_SUB(CURRENT_DATE(), 90) AND action != 'ok' GROUP BY ALL"
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "t_ov",
+            "textbox_spec": "### Platform overview\nOne place for spend, forecast, and platform health. Each tab drills into an area; every big number here links to a tab with the detail."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_ov_azure",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_30d`)"
+                    },
+                    {
+                      "name": "target",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Azure bill \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                },
+                "target": {
+                  "fieldName": "target",
+                  "displayName": "previous period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Azure bill \u2014 30d",
+                "showDescription": true,
+                "description": "vs the previous 30 days"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_ov_dbx",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_30d`)"
+                    },
+                    {
+                      "name": "target",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Databricks spend \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                },
+                "target": {
+                  "fieldName": "target",
+                  "displayName": "previous period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Databricks spend \u2014 30d",
+                "showDescription": true,
+                "description": "list price, all workspaces"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_ov_forecast",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`p50_next_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Forecast next 30d (P50)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast next 30d (P50)",
+                "showDescription": true,
+                "description": "latest @champion batch forecast"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b_ov_azure_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "cost",
+                      "expression": "SUM(`cost`)"
+                    },
+                    {
+                      "name": "service_bucket",
+                      "expression": "`service_bucket`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "service_bucket",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "service_bucket"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily Azure spend by platform component \u2014 90d",
+                "showDescription": true,
+                "description": "Stacked bill from the Cost Management API: databricks / foundry_ai / search / storage / other"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_ov_dbx_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "compute_type",
+                      "expression": "`compute_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "compute_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "compute_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily Databricks spend by compute type \u2014 90d",
+                "showDescription": true,
+                "description": "jobs / SQL / all-purpose / DLT / model serving, at list price"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_ov_findings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_findings_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`findings_7d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Findings \u2014 7d",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Findings \u2014 7d",
+                "showDescription": true,
+                "description": "non-ok rows from all scheduled checks"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 11,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_ov_findings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_findings_recent",
+                  "fields": [
+                    {
+                      "name": "run_ts",
+                      "expression": "`run_ts`"
+                    },
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    },
+                    {
+                      "name": "check_name",
+                      "expression": "`check_name`"
+                    },
+                    {
+                      "name": "resource",
+                      "expression": "`resource`"
+                    },
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "run_ts",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 1,
+                    "title": "when",
+                    "displayName": "when"
+                  },
+                  {
+                    "fieldName": "area",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "area",
+                    "displayName": "area"
+                  },
+                  {
+                    "fieldName": "check_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "check",
+                    "displayName": "check"
+                  },
+                  {
+                    "fieldName": "resource",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "resource",
+                    "displayName": "resource"
+                  },
+                  {
+                    "fieldName": "reason",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "reason",
+                    "displayName": "reason"
+                  },
+                  {
+                    "fieldName": "action",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "action",
+                    "displayName": "action"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest findings \u2014 30d",
+                "showDescription": true,
+                "description": "what the scheduled checks flagged, newest first"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "azure_forecast",
+      "displayName": "Azure Bill & Forecast",
+      "layout": [
+        {
+          "widget": {
+            "name": "c_az_30d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_30d`)"
+                    },
+                    {
+                      "name": "target",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Azure bill \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                },
+                "target": {
+                  "fieldName": "target",
+                  "displayName": "previous period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Azure bill \u2014 30d",
+                "showDescription": true,
+                "description": "vs the previous 30 days"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_az_prev",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Previous 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Previous 30d",
+                "showDescription": true,
+                "description": "days 31-60"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_az_fcst",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`p50_next_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Forecast next 30d (P50)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast next 30d (P50)",
+                "showDescription": true,
+                "description": "latest @champion batch forecast"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "l_az_forecast",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_total",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "SUM(`value`)"
+                    },
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "value",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "metric",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "metric"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total spend: actual vs forecast (P10/P50/P90)",
+                "showDescription": true,
+                "description": "60d of actuals against the latest champion forecast and its uncertainty band"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_az_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "cost",
+                      "expression": "SUM(`cost`)"
+                    },
+                    {
+                      "name": "service_bucket",
+                      "expression": "`service_bucket`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "service_bucket",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "service_bucket"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily Azure spend by component \u2014 90d",
+                "showDescription": true,
+                "description": "Stacked daily bill from the Cost Management Query API"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "l_az_p50",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_buckets",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "p50",
+                      "expression": "SUM(`p50`)"
+                    },
+                    {
+                      "name": "series",
+                      "expression": "`series`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "p50",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "p50",
+                  "axis": {
+                    "title": "$ (P50)"
+                  }
+                },
+                "color": {
+                  "fieldName": "series",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "series"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "P50 forecast by component",
+                "showDescription": true,
+                "description": "latest run, per service bucket"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 9,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_az_services",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_services",
+                  "fields": [
+                    {
+                      "name": "service_name",
+                      "expression": "`service_name`"
+                    },
+                    {
+                      "name": "service_bucket",
+                      "expression": "`service_bucket`"
+                    },
+                    {
+                      "name": "cost",
+                      "expression": "`cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "service_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "service",
+                    "displayName": "service"
+                  },
+                  {
+                    "fieldName": "service_bucket",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "bucket",
+                    "displayName": "bucket"
+                  },
+                  {
+                    "fieldName": "cost",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 3,
+                    "title": "30d $",
+                    "displayName": "30d $"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top services \u2014 30d"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_az_rgs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_azure_rgs",
+                  "fields": [
+                    {
+                      "name": "resource_group",
+                      "expression": "`resource_group`"
+                    },
+                    {
+                      "name": "cost",
+                      "expression": "`cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "resource_group",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "resource group",
+                    "displayName": "resource group"
+                  },
+                  {
+                    "fieldName": "cost",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 2,
+                    "title": "30d $",
+                    "displayName": "30d $"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top resource groups \u2014 30d"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 15,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_az_monitor",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_monitor",
+                  "fields": [
+                    {
+                      "name": "run_ts",
+                      "expression": "`run_ts`"
+                    },
+                    {
+                      "name": "check_name",
+                      "expression": "`check_name`"
+                    },
+                    {
+                      "name": "resource",
+                      "expression": "`resource`"
+                    },
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "run_ts",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 1,
+                    "title": "run",
+                    "displayName": "run"
+                  },
+                  {
+                    "fieldName": "check_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "check",
+                    "displayName": "check"
+                  },
+                  {
+                    "fieldName": "resource",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "resource",
+                    "displayName": "resource"
+                  },
+                  {
+                    "fieldName": "reason",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "reason",
+                    "displayName": "reason"
+                  },
+                  {
+                    "fieldName": "action",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "action",
+                    "displayName": "action"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast monitor findings \u2014 90d",
+                "showDescription": true,
+                "description": "drift and matured-accuracy checks; only non-ok rows appear in Overview"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "dbx_cost",
+      "displayName": "Databricks Cost",
+      "layout": [
+        {
+          "widget": {
+            "name": "f_dbx_date",
+            "queries": [
+              {
+                "name": "filter_ds_dbx_daily_usage_date",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "usage_date_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "usage_date",
+                    "displayName": "usage_date",
+                    "queryName": "filter_ds_dbx_daily_usage_date"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Date range"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_dbx_ws",
+            "queries": [
+              {
+                "name": "filter_ds_dbx_daily_workspace_name",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "workspace_name",
+                      "expression": "`workspace_name`"
+                    },
+                    {
+                      "name": "workspace_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_name",
+                    "displayName": "workspace_name",
+                    "queryName": "filter_ds_dbx_daily_workspace_name"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_dbx_ct",
+            "queries": [
+              {
+                "name": "filter_ds_dbx_daily_compute_type",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "compute_type",
+                      "expression": "`compute_type`"
+                    },
+                    {
+                      "name": "compute_type_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "compute_type",
+                    "displayName": "compute_type",
+                    "queryName": "filter_ds_dbx_daily_compute_type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Compute type"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_dbx_30d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_30d`)"
+                    },
+                    {
+                      "name": "target",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Databricks spend \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                },
+                "target": {
+                  "fieldName": "target",
+                  "displayName": "previous period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Databricks spend \u2014 30d",
+                "showDescription": true,
+                "description": "vs the previous 30 days; list price"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_dbx_prev",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Previous 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Previous 30d",
+                "showDescription": true,
+                "description": "days 31-60"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b_dbx_type",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "compute_type",
+                      "expression": "`compute_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "compute_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "compute_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily spend by compute type",
+                "showDescription": true,
+                "description": "responds to the filters above"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_dbx_ws",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "workspace_name",
+                      "expression": "`workspace_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "workspace_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "workspace_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily spend by workspace",
+                "showDescription": true,
+                "description": "responds to the filters above"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_dbx_type_tot",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_daily",
+                  "fields": [
+                    {
+                      "name": "compute_type",
+                      "expression": "`compute_type`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "y": {
+                  "fieldName": "compute_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "compute_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Spend by compute type",
+                "showDescription": true,
+                "description": "share of the filtered window"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 11,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "cb_dbx_wow",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dbx_weekly",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    },
+                    {
+                      "name": "weekly_cost",
+                      "expression": "`weekly_cost`"
+                    },
+                    {
+                      "name": "wow_growth_pct",
+                      "expression": "`wow_growth_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "week_start",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "week_start"
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "weekly_cost",
+                        "displayName": "weekly $ (list)"
+                      }
+                    ]
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "wow_growth_pct",
+                        "displayName": "WoW growth %"
+                      }
+                    ]
+                  },
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Weekly spend and WoW growth \u2014 26w",
+                "showDescription": true,
+                "description": "bars: weekly list cost; line: week-over-week growth %"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "jobs",
+      "displayName": "Jobs",
+      "layout": [
+        {
+          "widget": {
+            "name": "c_jobs_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_daily",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`list_cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Job spend \u2014 90d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job spend \u2014 90d",
+                "showDescription": true,
+                "description": "all jobs compute, list price"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_jobs_failed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_outcome",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(CASE WHEN `result_state` IN ('FAILED','ERROR','TIMED_OUT') THEN `list_cost` END)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Failed-run spend \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Failed-run spend \u2014 30d",
+                "showDescription": true,
+                "description": "money burned by runs that did not succeed"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_jobs_untagged",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_untagged",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`list_cost`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Untagged job spend \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Untagged job spend \u2014 30d",
+                "showDescription": true,
+                "description": "unattributable to any team"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b_jobs_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "job_type",
+                      "expression": "`job_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "job_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "job_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily job spend by SKU type \u2014 90d",
+                "showDescription": true,
+                "description": "serverless vs classic vs photon mix over time"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_jobs_outcome",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_outcome",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "result_state",
+                      "expression": "`result_state`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "result_state",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "result_state"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Job spend by run outcome \u2014 30d",
+                "showDescription": true,
+                "description": "SUCCEEDED vs FAILED/TIMED_OUT: reliability with dollars attached"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_jobs_top",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_top",
+                  "fields": [
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "team",
+                      "expression": "`team`"
+                    },
+                    {
+                      "name": "run_as",
+                      "expression": "`run_as`"
+                    },
+                    {
+                      "name": "runs",
+                      "expression": "`runs`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "`list_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "job",
+                    "displayName": "job"
+                  },
+                  {
+                    "fieldName": "team",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "team",
+                    "displayName": "team"
+                  },
+                  {
+                    "fieldName": "run_as",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "run as",
+                    "displayName": "run as"
+                  },
+                  {
+                    "fieldName": "runs",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 4,
+                    "title": "runs",
+                    "displayName": "runs"
+                  },
+                  {
+                    "fieldName": "list_cost",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 5,
+                    "title": "30d $",
+                    "displayName": "30d $"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Most expensive jobs \u2014 30d",
+                "showDescription": true,
+                "description": "top 25 by list cost"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_jobs_untagged",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_jobs_untagged",
+                  "fields": [
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "run_as",
+                      "expression": "`run_as`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "`list_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "job",
+                    "displayName": "job"
+                  },
+                  {
+                    "fieldName": "run_as",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "run as",
+                    "displayName": "run as"
+                  },
+                  {
+                    "fieldName": "list_cost",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 3,
+                    "title": "30d $",
+                    "displayName": "30d $"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Untagged jobs \u2014 30d",
+                "showDescription": true,
+                "description": "no team/project tags: fix the tags to attribute this spend"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "sql_warehouses",
+      "displayName": "SQL Warehouses",
+      "layout": [
+        {
+          "widget": {
+            "name": "c_sql_30d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_30d`)"
+                    },
+                    {
+                      "name": "target",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "DBSQL spend \u2014 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                },
+                "target": {
+                  "fieldName": "target",
+                  "displayName": "previous period"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "DBSQL spend \u2014 30d",
+                "showDescription": true,
+                "description": "vs the previous 30 days; list price"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_sql_prev",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`cost_prev_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Previous 30d",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Previous 30d",
+                "showDescription": true,
+                "description": "days 31-60"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b_sql_type",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "sql_type",
+                      "expression": "`sql_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "sql_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "sql_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily DBSQL spend by type \u2014 90d",
+                "showDescription": true,
+                "description": "serverless / pro / classic"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_sql_wh",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "list_cost",
+                      "expression": "SUM(`list_cost`)"
+                    },
+                    {
+                      "name": "warehouse_name",
+                      "expression": "`warehouse_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "usage_date"
+                },
+                "y": {
+                  "fieldName": "list_cost",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost",
+                  "axis": {
+                    "title": "$ (list)"
+                  }
+                },
+                "color": {
+                  "fieldName": "warehouse_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "warehouse_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily DBSQL spend by warehouse \u2014 90d"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "l_sql_perf",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_perf",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "SUM(`value`)"
+                    },
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "value",
+                  "axis": {
+                    "title": "seconds"
+                  }
+                },
+                "color": {
+                  "fieldName": "metric",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "metric"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Query performance \u2014 30d",
+                "showDescription": true,
+                "description": "rising queue time = under-provisioned; rising p95 = heavy queries"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_sql_queries",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sql_top_queries",
+                  "fields": [
+                    {
+                      "name": "statement",
+                      "expression": "`statement`"
+                    },
+                    {
+                      "name": "executed_by",
+                      "expression": "`executed_by`"
+                    },
+                    {
+                      "name": "statement_type",
+                      "expression": "`statement_type`"
+                    },
+                    {
+                      "name": "runs",
+                      "expression": "`runs`"
+                    },
+                    {
+                      "name": "total_runtime_s",
+                      "expression": "`total_runtime_s`"
+                    },
+                    {
+                      "name": "avg_queue_s",
+                      "expression": "`avg_queue_s`"
+                    },
+                    {
+                      "name": "read_gb",
+                      "expression": "`read_gb`"
+                    },
+                    {
+                      "name": "spill",
+                      "expression": "`spill`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "statement",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "statement (first 120 chars)",
+                    "displayName": "statement (first 120 chars)"
+                  },
+                  {
+                    "fieldName": "executed_by",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "user",
+                    "displayName": "user"
+                  },
+                  {
+                    "fieldName": "statement_type",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "type",
+                    "displayName": "type"
+                  },
+                  {
+                    "fieldName": "runs",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 4,
+                    "title": "runs",
+                    "displayName": "runs"
+                  },
+                  {
+                    "fieldName": "total_runtime_s",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 5,
+                    "title": "total s",
+                    "displayName": "total s"
+                  },
+                  {
+                    "fieldName": "avg_queue_s",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 6,
+                    "title": "avg queue s",
+                    "displayName": "avg queue s"
+                  },
+                  {
+                    "fieldName": "read_gb",
+                    "type": "float",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 7,
+                    "title": "read GB",
+                    "displayName": "read GB"
+                  },
+                  {
+                    "fieldName": "spill",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 8,
+                    "title": "spill",
+                    "displayName": "spill"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Heaviest queries \u2014 30d",
+                "showDescription": true,
+                "description": "the optimization hit-list, by total runtime"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "governance",
+      "displayName": "Governance & Lineage",
+      "layout": [
+        {
+          "widget": {
+            "name": "c_gov_users",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_gov_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`active_users_30d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Active users \u2014 30d",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Active users \u2014 30d",
+                "showDescription": true,
+                "description": "distinct principals in lineage events"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_gov_catalogs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_gov_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`catalogs_in_use`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Catalogs in use \u2014 30d",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Catalogs in use \u2014 30d"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_gov_findings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_findings_kpi",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`findings_7d`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Findings \u2014 7d",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Findings \u2014 7d",
+                "showDescription": true,
+                "description": "non-ok rows from all scheduled checks"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "l_gov_activity",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_lineage_daily",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "SUM(`value`)"
+                    },
+                    {
+                      "name": "metric",
+                      "expression": "`metric`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "value",
+                  "axis": {
+                    "title": "count"
+                  }
+                },
+                "color": {
+                  "fieldName": "metric",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "metric"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data activity \u2014 30d",
+                "showDescription": true,
+                "description": "lineage events and active users per day"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "b_gov_catalog",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_catalog_usage",
+                  "fields": [
+                    {
+                      "name": "catalog",
+                      "expression": "`catalog`"
+                    },
+                    {
+                      "name": "events",
+                      "expression": "SUM(`events`)"
+                    },
+                    {
+                      "name": "entity_type",
+                      "expression": "`entity_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "events",
+                  "axis": {
+                    "title": "events"
+                  }
+                },
+                "y": {
+                  "fieldName": "catalog",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "catalog"
+                },
+                "color": {
+                  "fieldName": "entity_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entity_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Catalog usage by entity type \u2014 30d",
+                "showDescription": true,
+                "description": "which catalogs are read/written, and by what kind of workload"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_gov_findings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_findings_by_area",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "findings",
+                      "expression": "SUM(`findings`)"
+                    },
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "findings",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "findings",
+                  "axis": {
+                    "title": "findings"
+                  }
+                },
+                "color": {
+                  "fieldName": "area",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "area"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Findings by area \u2014 90d",
+                "showDescription": true,
+                "description": "cost / security / governance / housekeeping / ml / forecast"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_gov_unused",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_unused_tables",
+                  "fields": [
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    },
+                    {
+                      "name": "last_written",
+                      "expression": "`last_written`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "table_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "table",
+                    "displayName": "table"
+                  },
+                  {
+                    "fieldName": "last_written",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 2,
+                    "title": "last written",
+                    "displayName": "last written"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Written but never read \u2014 90d",
+                "showDescription": true,
+                "description": "tables produced in the window that nothing consumed: deletion/dedup candidates"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tb_gov_findings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_findings_recent",
+                  "fields": [
+                    {
+                      "name": "run_ts",
+                      "expression": "`run_ts`"
+                    },
+                    {
+                      "name": "area",
+                      "expression": "`area`"
+                    },
+                    {
+                      "name": "check_name",
+                      "expression": "`check_name`"
+                    },
+                    {
+                      "name": "resource",
+                      "expression": "`resource`"
+                    },
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "run_ts",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 1,
+                    "title": "when",
+                    "displayName": "when"
+                  },
+                  {
+                    "fieldName": "area",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "area",
+                    "displayName": "area"
+                  },
+                  {
+                    "fieldName": "check_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "check",
+                    "displayName": "check"
+                  },
+                  {
+                    "fieldName": "resource",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "resource",
+                    "displayName": "resource"
+                  },
+                  {
+                    "fieldName": "action",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "action",
+                    "displayName": "action"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest findings \u2014 30d"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 19,
+            "width": 3,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

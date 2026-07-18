@@ -868,5 +868,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def entry() -> None:
+    """Console-script entry point. Databricks python_wheel_task calls this
+    function directly and ignores its return value — a task only fails if it
+    raises. Convert non-zero exit codes into SystemExit so a failed check
+    fails its scheduled job instead of terminating SUCCESS."""
+    code = main()
+    if code:
+        raise SystemExit(code)
+
+
 if __name__ == "__main__":
     sys.exit(main())

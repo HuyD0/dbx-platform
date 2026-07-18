@@ -51,6 +51,71 @@ def test_setup_statements_cover_all_dashboard_dependencies():
         assert f"c.s.{obj}" in fq_objects
 
 
+def test_setup_creates_catalog_before_schema():
+    """A fresh workspace may have no `main` catalog at all (auto-enabled UC ships
+    a workspace-named catalog instead) — setup must try to create it first."""
+    statements = [sql for _, sql in setup_statements("c", "s", ["team"])]
+    assert statements[0] == "CREATE CATALOG IF NOT EXISTS c"
+    assert statements[1] == "CREATE SCHEMA IF NOT EXISTS c.s"
+
+
+def test_run_setup_tolerates_catalog_create_failure(monkeypatch):
+    """CREATE CATALOG may fail for lack of metastore rights even when the catalog
+    exists; only the CREATE SCHEMA that follows is the real existence gate."""
+    from dbx_platform import dashboards
+
+    executed = []
+
+    def fake_run_query(w, sql, warehouse_id, parameters=None):
+        if sql.startswith("CREATE CATALOG"):
+            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
+        executed.append(sql)
+        return []
+
+    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
+    done = dashboards.run_setup(None, "wh", "c", "s", ["team"])
+    assert any(d.startswith("catalog c (skipped:") for d in done)
+    assert executed[0] == "CREATE SCHEMA IF NOT EXISTS c.s"
+
+
+def test_run_setup_fails_loudly_when_catalog_missing(monkeypatch):
+    """The deploy-time failure this repo actually hit: no `main` catalog, so
+    CREATE SCHEMA dies with NO_SUCH_CATALOG_EXCEPTION. The error must propagate
+    (not be swallowed) and explain the remediation."""
+    from dbx_platform import dashboards
+
+    def fake_run_query(w, sql, warehouse_id, parameters=None):
+        if sql.startswith("CREATE CATALOG"):
+            raise RuntimeError("PERMISSION_DENIED: cannot create catalog")
+        if sql.startswith("CREATE SCHEMA"):
+            raise RuntimeError("[NO_SUCH_CATALOG_EXCEPTION] Catalog 'c' was not found")
+        return []
+
+    monkeypatch.setattr(dashboards, "run_query", fake_run_query)
+    with pytest.raises(RuntimeError, match="dashboards\nrender --catalog|render --catalog"):
+        dashboards.run_setup(None, "wh", "c", "s", ["team"])
+
+
+def test_wheel_entry_point_raises_on_failure(monkeypatch):
+    """python_wheel_task ignores return values — only an exception fails the
+    task. The console-script entry must convert exit codes into SystemExit, and
+    pyproject must point at it, or every scheduled job reports SUCCESS even
+    when its check crashed (the bug that hid the missing-catalog failure)."""
+    import tomllib
+
+    from dbx_platform import cli
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    assert pyproject["project"]["scripts"]["dbx-platform"] == "dbx_platform.cli:entry"
+
+    monkeypatch.setattr(cli, "main", lambda argv=None: 1)
+    with pytest.raises(SystemExit):
+        cli.entry()
+
+    monkeypatch.setattr(cli, "main", lambda argv=None: 0)
+    assert cli.entry() is None  # success must NOT raise (or every job "fails")
+
+
 def test_committed_templates_are_valid_and_renderable():
     tmpl_dir = REPO_ROOT / "dashboards" / "templates"
     for name in TEMPLATE_NAMES:

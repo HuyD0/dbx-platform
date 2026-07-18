@@ -1,10 +1,11 @@
 """AI/BI dashboard support: render templates and provision their dependencies.
 
-The four dashboards under dashboards/templates/ are adapted from the community
+Four dashboards under dashboards/templates/ are adapted from the community
 suite github.com/mohanab89/databricks-dashboard-suite (system-table dashboards,
-provided as-is, no license file — see README attribution). Their queries use
-``{catalog}.{schema}`` placeholders and depend on helper objects the suite's
-notebook normally creates:
+provided as-is, no license file — see README attribution); azure_cost_forecast
+and platform_command_center (the consolidated tabbed successor) are authored
+in-repo. Their queries use ``{catalog}.{schema}`` placeholders and depend on
+helper objects the suite's notebook normally creates:
 
 - functions ``job_type_from_sku``, ``sql_type_from_sku``, ``team_name_from_tags``
 - reference tables ``workspace_reference`` and ``warehouse_reference``
@@ -29,6 +30,7 @@ TEMPLATE_NAMES = (
     "dbsql_cost_performance",
     "lineage_catalog_utilization",
     "azure_cost_forecast",
+    "platform_command_center",
 )
 
 
@@ -99,6 +101,7 @@ def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tup
 
     fq = f"{catalog}.{schema}"
     return [
+        (f"catalog {catalog}", f"CREATE CATALOG IF NOT EXISTS {catalog}"),
         (f"schema {fq}", f"CREATE SCHEMA IF NOT EXISTS {fq}"),
         (f"table {fq}.azure_costs", azure_costs_ddl(catalog, schema)),
         (f"table {fq}.cost_forecasts", create_forecasts_table_sql(catalog, schema)),
@@ -194,8 +197,27 @@ def run_setup(
 ) -> list[str]:
     """Execute all setup statements; optionally name the current workspace."""
     done = []
+    catalog_error: str | None = None
     for description, sql in setup_statements(catalog, schema, tag_keys):
-        run_query(w, sql, warehouse_id)
+        try:
+            run_query(w, sql, warehouse_id)
+        except RuntimeError as e:
+            # CREATE CATALOG needs metastore-level rights the running identity
+            # may lack even when the catalog already exists. Tolerate that one
+            # failure: CREATE SCHEMA right after is the real existence gate.
+            if description == f"catalog {catalog}":
+                catalog_error = str(e)
+                done.append(f"{description} (skipped: {e})")
+                continue
+            if catalog_error and description == f"schema {catalog}.{schema}":
+                raise RuntimeError(
+                    f"{e}\nCatalog '{catalog}' does not exist and could not be "
+                    f"created ({catalog_error}). Create it manually, or point the "
+                    "dashboards at an existing catalog: dbx-platform dashboards "
+                    "render --catalog <c> (then update resources/dashboards_jobs.yml "
+                    "and redeploy)."
+                ) from e
+            raise
         done.append(description)
     if workspace_name:
         ws_id = w.get_workspace_id()
