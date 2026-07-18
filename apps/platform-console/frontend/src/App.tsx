@@ -13,7 +13,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AssistantLauncher, AssistantPanel } from "./components/AssistantPanel";
 import { Badge } from "./components/ui";
 import { apiGet } from "./lib/api";
@@ -57,6 +57,13 @@ function useTheme() {
 export default function App() {
   const { dark, toggle } = useTheme();
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const location = useLocation();
+
+  // The full chat page and the slide-over are the same conversation — never
+  // show both. Navigating to /chat (e.g. via the sidebar) closes the panel.
+  useEffect(() => {
+    if (location.pathname === "/chat") setAssistantOpen(false);
+  }, [location.pathname]);
   const health = useQuery({
     queryKey: ["health"],
     queryFn: () => apiGet<HealthResponse>("/api/health"),
