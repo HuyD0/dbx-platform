@@ -148,7 +148,8 @@ jobs:
         # the managed SQL warehouse, so deploy-while-sleeping stays asleep.
         run: databricks bundle run schema_migrations -t prod
       - name: Reconcile the durable runtime intent (proposal only)
-        # Deploy always leaves schedules paused and never starts the app.
+        # Deploy leaves schedules paused and the warehouse asleep; the app
+        # declares started: true, so deploy does start it directly.
         # This unscheduled serverless controller compares exact bundle IDs with
         # the last approved ON/SLEEPING state. Drift creates a new immutable
         # AWAITING_APPROVAL plan; it never changes resource state in CI.

@@ -2,7 +2,8 @@
 #
 # The controller has no schedule and no idle compute. It is intentionally NOT in
 # its own managed inventory, so it remains callable from the Jobs UI while the
-# Platform Console app and its SQL warehouse are stopped.
+# toolkit is hibernated — the SQL warehouse (and, post-Hibernate, the app) are
+# stopped. The app otherwise deploys started (resources/app.yml).
 resources:
   sql_warehouses:
     platform_console_warehouse:
