@@ -9,7 +9,7 @@
 resources:
   apps:
     platform_console:
-      name: "platform-console"
+      name: ${var.platform_console_name}
       description: "dbx-platform findings, remediation planning, AI digests, agent chat"
       source_code_path: ../apps/platform-console
       user_api_scopes:
