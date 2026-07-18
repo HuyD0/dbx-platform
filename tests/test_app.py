@@ -238,7 +238,10 @@ def test_operational_api_requires_verified_user_but_health_stays_public(
     ws.api_client.do.return_value = {}
     response = client.get("/api/config")
     assert response.status_code == 401
-    assert response.json()["error"] == "unauthenticated"
+    body = response.json()
+    assert body["error"] == "unauthenticated"
+    assert "user authorization is enabled" in body["hint"]
+    assert "restarted after scope changes" in body["hint"]
     assert client.get("/api/health").status_code == 200
 
 

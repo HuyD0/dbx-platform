@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from backend import deps, errors
-from backend.errors import payload
+from backend.errors import USER_AUTH_HINT, payload
 from backend.identity import (
     UnauthenticatedError,
     UnauthorizedError,
@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
         except UnauthenticatedError as exc:
             return JSONResponse(
                 status_code=401,
-                content=payload("unauthenticated", str(exc)),
+                content=payload("unauthenticated", str(exc), USER_AUTH_HINT),
             )
         except UnauthorizedError as exc:
             return JSONResponse(
