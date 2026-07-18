@@ -19,6 +19,7 @@ from backend.control_plane import (  # noqa: E402
 from backend.control_plane_repository import SQLControlPlaneRepository  # noqa: E402
 
 from dbx_platform.control_plane_procedures import procedure_statements  # noqa: E402
+from dbx_platform.migrations import procedure_migration_statements  # noqa: E402
 
 
 def _action() -> ActionRequest:
@@ -91,6 +92,32 @@ def test_procedure_migration_rejects_unsafe_group_names():
             operator_group="operators`; GRANT ALL",
             approver_group="approvers",
         )
+
+
+def test_proposal_only_migration_creates_procedures_without_group_grants():
+    statements = procedure_migration_statements(
+        "main",
+        "dbx_platform",
+        operator_group="missing-operators",
+        approver_group="missing-approvers",
+        actions_enabled=False,
+    )
+    sql = "\n".join(statement for _description, statement in statements)
+
+    assert sql.count("CREATE OR REPLACE PROCEDURE") == 4
+    assert "GRANT EXECUTE" not in sql
+
+
+def test_enabled_migration_requires_configured_group_grants():
+    statements = procedure_migration_statements(
+        "main",
+        "dbx_platform",
+        operator_group="dbx-platform-operators",
+        approver_group="dbx-platform-approvers",
+        actions_enabled=True,
+    )
+
+    assert any(description.startswith("grant ") for description, _sql in statements)
 
 
 def test_sql_human_action_write_calls_broker_not_table_insert():
