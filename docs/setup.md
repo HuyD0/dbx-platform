@@ -101,10 +101,10 @@ The bundle creates the dedicated `[dbx-platform] mission-control` 2X-Small
 serverless warehouse with five-minute auto-stop. It does not use or manage a
 shared Starter warehouse.
 
-Every schedule deploys PAUSED and the app/warehouse deploy stopped.
-`schema_migrations` uses serverless Spark, so deploying while `SLEEPING` does
-not start the dedicated SQL warehouse. Reconciliation creates a proposal; it
-does not apply one.
+Every schedule deploys PAUSED and the warehouse deploys stopped; the app
+deploys started (`resources/app.yml`). `schema_migrations` uses serverless
+Spark, so deploying while `SLEEPING` does not start the dedicated SQL
+warehouse. Reconciliation creates a proposal; it does not apply one.
 
 The migration job is the only dashboard/control-plane DDL bootstrap.
 `dbx-platform dashboards setup` is deliberately disabled. Use:

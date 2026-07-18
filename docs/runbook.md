@@ -138,10 +138,15 @@ Repeated Wake/Hibernate calls are idempotent.
 The controller does not deploy source. Releasing a different app revision is a
 separate reviewed deployment.
 
+Note: the app also starts on any prod deploy (it declares `started: true`), so
+after a merge to `main` this manual Wake is only needed to restart the warehouse
+and the schedules — the app itself is already up.
+
 ## Deployment reconciliation
 
-Every bundle schedule declares `pause_status: PAUSED`; the app and dedicated
-warehouse declare `started: false`.
+Every bundle schedule declares `pause_status: PAUSED` and the dedicated
+warehouse declares `started: false`. The app declares `started: true`, so a
+prod deploy starts it directly (see `resources/app.yml`).
 
 CI performs:
 
@@ -155,7 +160,10 @@ helper functions. It does not start the managed SQL warehouse. Reconciliation
 reads durable desired state and either reports `ALREADY_RECONCILED` or creates
 an `AWAITING_APPROVAL` plan. CI never executes it.
 
-Deploying while desired state is `SLEEPING` leaves the toolkit asleep.
+Deploying while desired state is `SLEEPING` leaves the warehouse and schedules
+asleep, but still starts the app, which declares `started: true`. A routine
+merge to `main` therefore restarts the app even when the toolkit is hibernated;
+only the warehouse and schedules stay asleep until an approved Wake.
 
 ## Protected forecast training
 
