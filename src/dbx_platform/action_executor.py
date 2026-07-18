@@ -1557,5 +1557,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
 
+def entry(argv: Sequence[str] | None = None) -> None:
+    """Exit only on failure; serverless Spark treats ``SystemExit(0)`` as failed."""
+
+    code = main(argv)
+    if code:
+        raise SystemExit(code)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    entry()
