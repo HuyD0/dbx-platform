@@ -63,6 +63,12 @@ export interface JobInfo {
   name: string;
 }
 
+export interface RunAllResponse {
+  runs: (JobInfo & { run_id: number })[];
+  failed: (JobInfo & { error: string })[];
+  count: number;
+}
+
 export interface RunInfo {
   run_id: number;
   state: string;

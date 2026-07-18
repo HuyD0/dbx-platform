@@ -1,8 +1,10 @@
 """Job kick-off — restricted to the bundle's own [dbx-platform] jobs.
 
-run_now is deliberately outside the actions gate: the scheduled jobs are
-report-only by definition (no --apply ever appears in resources/*.yml), so
-triggering one early is safe. Jobs outside the name filter are refused.
+run_now and run_all are deliberately outside the actions gate: the bundle
+jobs are report-only by definition (no --apply ever appears in
+resources/*.yml), so triggering them is safe. With every schedule committed
+PAUSED, these routes are the primary way runs happen. Jobs outside the name
+filter are refused.
 """
 
 from __future__ import annotations
@@ -62,3 +64,34 @@ def run_now(job_id: int, request: Request) -> dict:
     log.info("run_now job_id=%s run_id=%s by=%s", job_id, run.run_id,
              request.headers.get("X-Forwarded-Email", "unknown"))
     return {"run_id": run.run_id}
+
+
+# Submitted before the rest: dashboards-setup provisions the tables the digest
+# and forecast jobs read/write; forecast-train produces the model forecast-daily
+# predicts with. Submission order only — completion is not awaited, so a
+# first-ever run on a fresh workspace can still race (all jobs are idempotent;
+# re-run the loser).
+_RUN_ALL_FIRST = ("dashboards-setup", "cost-forecast-train")
+
+
+def _run_all_order(job: dict) -> tuple[int, str]:
+    for i, marker in enumerate(_RUN_ALL_FIRST):
+        if marker in job["name"]:
+            return (i, job["name"])
+    return (len(_RUN_ALL_FIRST), job["name"])
+
+
+@router.post("/run_all")
+def run_all(request: Request) -> dict:
+    ws = deps.get_ws()
+    runs: list[dict] = []
+    failed: list[dict] = []
+    for job in sorted(_platform_jobs(), key=_run_all_order):
+        try:
+            run = ws.jobs.run_now(job_id=job["job_id"])
+            runs.append({**job, "run_id": run.run_id})
+        except Exception as e:  # noqa: BLE001 — one refused job must not stop the rest
+            failed.append({**job, "error": str(e)})
+    log.info("run_all started=%d failed=%d by=%s", len(runs), len(failed),
+             request.headers.get("X-Forwarded-Email", "unknown"))
+    return {"runs": runs, "failed": failed, "count": len(runs)}

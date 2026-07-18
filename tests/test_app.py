@@ -149,6 +149,7 @@ def test_every_mutating_route_is_post_only(client):
         "/api/actions/{action}/plan",
         "/api/actions/{action}/apply",
         "/api/jobs/{job_id}/run_now",
+        "/api/jobs/run_all",
         "/api/digest/generate",
         "/api/chat",
     }
@@ -252,6 +253,50 @@ def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
     resp = client.post("/api/jobs/7/run_now")
     assert resp.status_code == 200
     assert resp.json()["run_id"] == 99
+
+
+def _mock_job(job_id: int, name: str) -> MagicMock:
+    job = MagicMock()
+    job.job_id = job_id
+    job.settings.name = name
+    return job
+
+
+def test_run_all_triggers_only_platform_jobs_setup_first(client, ws):
+    ws.jobs.list.return_value = [
+        _mock_job(7, "[dbx-platform] cost-usage-report"),
+        _mock_job(5, "[dbx-platform] dashboards-setup"),
+        _mock_job(8, "someone-elses-etl"),
+    ]
+    run_ids = iter([101, 102])
+    ws.jobs.run_now.side_effect = lambda job_id: MagicMock(run_id=next(run_ids))
+    body = client.post("/api/jobs/run_all").json()
+    assert body["count"] == 2
+    assert body["failed"] == []
+    submitted = [c.kwargs["job_id"] for c in ws.jobs.run_now.call_args_list]
+    assert submitted == [5, 7], "dashboards-setup must be submitted first, job 8 never"
+
+
+def test_run_all_captures_per_job_failures_and_continues(client, ws):
+    ws.jobs.list.return_value = [
+        _mock_job(5, "[dbx-platform] dashboards-setup"),
+        _mock_job(7, "[dbx-platform] cost-usage-report"),
+    ]
+
+    def run_now(job_id):
+        if job_id == 5:
+            raise RuntimeError("PERMISSION_DENIED")
+        return MagicMock(run_id=200)
+
+    ws.jobs.run_now.side_effect = run_now
+    body = client.post("/api/jobs/run_all").json()
+    assert body["count"] == 1
+    assert [r["job_id"] for r in body["runs"]] == [7]
+    assert body["failed"] == [{
+        "job_id": 5,
+        "name": "[dbx-platform] dashboards-setup",
+        "error": "PERMISSION_DENIED",
+    }]
 
 
 def test_system_tables_error_maps_to_friendly_503(client, monkeypatch):
