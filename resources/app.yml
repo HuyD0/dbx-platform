@@ -12,11 +12,14 @@ resources:
       name: ${var.platform_console_name}
       description: "dbx-platform findings, remediation planning, AI digests, agent chat"
       source_code_path: ../apps/platform-console
-      # Databricks assigns iam.current-user:read and
-      # iam.access-control:read automatically when user authorization is
-      # enabled. The Apps update API rejects those implicit defaults when they
-      # are submitted as explicit scopes in this workspace.
       user_api_scopes:
+        # Required for the backend to verify the forwarded user token against
+        # the workspace current-user/SCIM APIs before showing data or accepting
+        # guarded control-plane proposals.
+        - iam.current-user:read
+        - iam.access-control:read
+        # Required for request-scoped SQL reads/writes executed on behalf of
+        # the verified user against the bundle-owned warehouse.
         - sql
       lifecycle:
         prevent_destroy: true
