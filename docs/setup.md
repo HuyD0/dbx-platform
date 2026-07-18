@@ -68,7 +68,7 @@ These grants cover *you* running ad-hoc commands. The scheduled prod jobs run as
 CI service principal, which needs the same grants — see the system-table grants
 section in [cloud-setup.md](cloud-setup.md).
 
-Commands that need system tables fail with an actionable message (exit code 3)
+Commands that need system tables fail with an actionable message
 if the schemas aren't enabled; REST-only commands are unaffected.
 
 ## 5. Smoke test
