@@ -5,9 +5,7 @@ import { timeAgo } from "../lib/format";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div
-      className={`rounded-xl border border-hairline bg-surface p-4 shadow-sm ${className}`}
-    >
+    <div className={`glass rounded-2xl p-4 shadow-xl shadow-black/5 dark:shadow-black/25 ${className}`}>
       {children}
     </div>
   );

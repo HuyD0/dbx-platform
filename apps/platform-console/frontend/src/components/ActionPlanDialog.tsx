@@ -43,12 +43,12 @@ export function ActionPlanDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-hairline bg-surface p-5 shadow-xl">
+      <div className="glass-strong max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl p-5 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
             <ShieldAlert className="h-4 w-4 text-status-serious" />

@@ -52,6 +52,45 @@ body {
   color: var(--color-ink);
 }
 
+/* Ambient glows behind the glass — without depth to blur, glassmorphism
+   reads as flat gray. Fixed so scrolling content slides over the light. */
+body {
+  background-image:
+    radial-gradient(900px 520px at 12% -8%, rgba(42, 120, 214, 0.1), transparent 60%),
+    radial-gradient(760px 480px at 92% 4%, rgba(74, 58, 167, 0.07), transparent 60%),
+    radial-gradient(700px 520px at 50% 110%, rgba(27, 175, 122, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+.dark body {
+  background-image:
+    radial-gradient(900px 520px at 12% -8%, rgba(57, 135, 229, 0.16), transparent 60%),
+    radial-gradient(760px 480px at 92% 4%, rgba(144, 133, 233, 0.1), transparent 60%),
+    radial-gradient(700px 520px at 50% 110%, rgba(25, 158, 112, 0.07), transparent 60%);
+}
+
+/* Frosted surfaces. --alpha-* are per-mode so light glass stays readable. */
+.glass {
+  background: rgba(252, 252, 251, 0.6);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(11, 11, 11, 0.08);
+}
+.dark .glass {
+  background: rgba(26, 26, 25, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+/* Higher-opacity variant for modals/panels that sit over busy content. */
+.glass-strong {
+  background: rgba(252, 252, 251, 0.85);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(11, 11, 11, 0.1);
+}
+.dark .glass-strong {
+  background: rgba(22, 22, 21, 0.82);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 /* Markdown rendered from digests / chat */
 .prose-console {
   line-height: 1.6;

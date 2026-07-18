@@ -21,7 +21,7 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
 
   if (!open) return null;
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-hairline bg-page shadow-2xl">
+    <div className="glass-strong fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-y-0 border-r-0 shadow-2xl">
       <div className="flex items-center justify-between border-b border-grid px-3 py-2">
         <button
           type="button"

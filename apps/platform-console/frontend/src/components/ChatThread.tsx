@@ -1,4 +1,4 @@
-import { ArrowUp, Play, Sparkles } from "lucide-react";
+import { ArrowUp, DollarSign, Gauge, Play, Shield, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation } from "@tanstack/react-query";
@@ -9,10 +9,30 @@ import { ActionPlanDialog } from "./ActionPlanDialog";
 import { Badge, ErrorState } from "./ui";
 
 const SUGGESTIONS = [
-  "Where are we wasting the most money right now?",
-  "Audit our serving endpoints and summarize the risks.",
-  "Any security findings I should worry about?",
-  "Clean up stale clusters.",
+  {
+    icon: DollarSign,
+    tint: "bg-series-1/15 text-series-1",
+    title: "Find money leaks",
+    prompt: "Where are we wasting the most money right now?",
+  },
+  {
+    icon: Sparkles,
+    tint: "bg-series-3/15 text-series-3",
+    title: "Audit AI/ML",
+    prompt: "Audit our serving endpoints and summarize the risks.",
+  },
+  {
+    icon: Shield,
+    tint: "bg-series-4/15 text-series-4",
+    title: "Check security",
+    prompt: "Any security findings I should worry about?",
+  },
+  {
+    icon: Gauge,
+    tint: "bg-series-2/15 text-series-2",
+    title: "Clean up compute",
+    prompt: "Clean up stale clusters.",
+  },
 ];
 
 function JobProposalCard({ proposal }: { proposal: Proposal }) {
@@ -20,7 +40,7 @@ function JobProposalCard({ proposal }: { proposal: Proposal }) {
     mutationFn: () => apiPost<{ run_id: number }>(`/api/jobs/${proposal.job_id}/run_now`),
   });
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-grid bg-surface px-3 py-2 text-xs">
+    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
         Run <span className="font-medium text-ink">{proposal.name}</span>?
       </span>
@@ -46,7 +66,7 @@ function ActionProposalCard({ proposal }: { proposal: Proposal }) {
   const [open, setOpen] = useState(false);
   const action = proposal.action ?? "";
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-grid bg-surface px-3 py-2 text-xs">
+    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
         Proposed: <span className="font-medium text-ink">{action}</span>
         {typeof proposal.count === "number" && ` — ${proposal.count} item(s) in the dry-run`}
@@ -78,7 +98,7 @@ function Composer({ autoFocus }: { autoFocus?: boolean }) {
   };
 
   return (
-    <div className="rounded-2xl border border-grid bg-surface p-2 shadow-lg focus-within:border-accent">
+    <div className="glass-strong rounded-3xl p-2.5 shadow-2xl shadow-black/10 transition-shadow focus-within:shadow-accent/10 focus-within:ring-2 focus-within:ring-accent/30 dark:shadow-black/40">
       <div className="flex items-end gap-2">
         <textarea
           ref={ref}
@@ -96,16 +116,16 @@ function Composer({ autoFocus }: { autoFocus?: boolean }) {
               submit();
             }
           }}
-          placeholder="Ask the platform agent…"
+          placeholder="Ask anything about your workspace…"
           aria-label="Message the platform agent"
-          className="max-h-40 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-ink outline-none placeholder:text-muted"
+          className="max-h-40 w-full resize-none bg-transparent px-3 py-2 text-[15px] text-ink outline-none placeholder:text-muted"
         />
         <button
           type="button"
           onClick={submit}
           disabled={pending || !input.trim()}
           aria-label="Send"
-          className="shrink-0 rounded-xl bg-accent p-2 text-white transition-opacity disabled:opacity-30"
+          className="shrink-0 rounded-full bg-accent p-2.5 text-white shadow-lg shadow-accent/30 transition-all hover:brightness-110 disabled:opacity-30 disabled:shadow-none"
         >
           <ArrowUp className="h-4 w-4" />
         </button>
@@ -129,26 +149,39 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className={`flex-1 overflow-y-auto ${compact ? "px-3 py-3" : "px-1 py-4"}`}>
         {turns.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <div className="rounded-2xl bg-accent/10 p-3">
-              <Sparkles className="h-6 w-6 text-accent" />
-            </div>
-            <p className={`font-semibold text-ink ${compact ? "text-base" : "text-2xl"}`}>
-              What can I help with?
+          <div className="flex h-full flex-col items-center justify-center gap-6 text-center">
+            <p
+              className={`font-semibold tracking-tight text-ink ${
+                compact ? "text-lg" : "text-3xl md:text-4xl"
+              }`}
+            >
+              What should we look at?
             </p>
-            <p className="max-w-sm text-xs text-muted">
+            <p className="max-w-md text-sm text-muted">
               Same read-only checks as the CLI. When something needs changing, you get a
               confirmation card — nothing happens without you.
             </p>
-            <div className="flex max-w-md flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
+            <div
+              className={`grid w-full gap-3 ${
+                compact ? "grid-cols-1 px-1" : "max-w-2xl grid-cols-2 md:grid-cols-4"
+              }`}
+            >
+              {SUGGESTIONS.map(({ icon: Icon, tint, title, prompt }) => (
                 <button
-                  key={s}
+                  key={title}
                   type="button"
-                  onClick={() => send(s)}
-                  className="rounded-full border border-grid px-3 py-1.5 text-xs text-ink-2 hover:bg-hairline"
+                  onClick={() => send(prompt)}
+                  className={`glass group rounded-2xl p-4 text-left shadow-lg shadow-black/5 transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-xl dark:shadow-black/20 ${
+                    compact ? "flex items-center gap-3 p-3" : ""
+                  }`}
                 >
-                  {s}
+                  <div className={`w-fit rounded-xl p-2 ${tint} ${compact ? "" : "mb-3"}`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-ink">{title}</div>
+                    <div className="mt-0.5 text-xs leading-snug text-muted">{prompt}</div>
+                  </div>
                 </button>
               ))}
             </div>
