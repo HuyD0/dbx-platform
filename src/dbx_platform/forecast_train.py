@@ -188,11 +188,19 @@ def run_training(
     n_folds: int = 4,
     horizon: int = 14,
     min_improvement: float = 0.01,
+    allow_promote: bool = True,
 ) -> list[dict]:
     """Backtest candidates, log experiments, register + alias the model.
 
     Returns summary rows for ``emit``. The registry name is
     ``{catalog}.{schema}.{model_name}``; batch inference loads ``@champion``.
+
+    ``allow_promote=False`` (CLI ``--no-promote``) is the preview mode: the
+    full backtest + registration + ``@challenger`` move still happen, but the
+    ``@champion`` alias is left untouched and the gate's decision is only
+    reported. The scheduled weekly job promotes automatically — the metric
+    gate *is* the safety mechanism there (the incumbent is never deleted,
+    only un-aliased, so rollback is one alias move).
     """
     _require_forecast_deps()
     import mlflow
@@ -311,9 +319,15 @@ def run_training(
     except Exception:  # noqa: BLE001 — no champion yet is the normal first run
         champ = None
 
-    promoted = should_promote(champion_wape, challenger_wape, min_improvement)
-    if promoted:
+    gate_says_promote = should_promote(champion_wape, challenger_wape, min_improvement)
+    if gate_says_promote and allow_promote:
         client.set_registered_model_alias(uc_name, CHAMPION_ALIAS, str(new_version))
+        promotion = f"@{CHAMPION_ALIAS} -> v{new_version}"
+    elif gate_says_promote:
+        promotion = (f"WOULD promote v{new_version} (--no-promote preview; "
+                     f"@{CHAMPION_ALIAS} untouched)")
+    else:
+        promotion = f"kept incumbent @{CHAMPION_ALIAS}"
 
     return [
         {"candidate": "seasonal-naive", "wape": round(metrics["seasonal-naive"]["wape"], 4),
@@ -324,8 +338,7 @@ def run_training(
         {"candidate": "promotion",
          "wape": round(champion_wape, 4) if champion_wape is not None else "",
          "smape": "",
-         "registered": (f"@{CHAMPION_ALIAS} -> v{new_version}" if promoted
-                        else f"kept incumbent @{CHAMPION_ALIAS}")},
+         "registered": promotion},
     ]
 
 

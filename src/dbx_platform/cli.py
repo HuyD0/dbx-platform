@@ -232,9 +232,13 @@ def cmd_forecast_train(args) -> int:
         args.experiment or s.forecast_experiment,
         n_folds=args.folds, horizon=args.horizon,
         min_improvement=args.min_improvement,
+        allow_promote=not args.no_promote,
     )
-    emit(args, "Forecast training — backtest + champion/challenger gate", rows,
-         ["Batch inference resolves the model by @champion alias only."])
+    notes = ["Batch inference resolves the model by @champion alias only."]
+    if args.no_promote:
+        notes.append("Preview mode — the gate's decision was reported, "
+                     "@champion was not moved.")
+    emit(args, "Forecast training — backtest + champion/challenger gate", rows, notes)
     return 0
 
 
@@ -717,6 +721,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--horizon", type=int, default=14)
     x.add_argument("--min-improvement", type=float, default=0.01,
                    help="Relative WAPE margin the challenger must win by")
+    x.add_argument("--no-promote", action="store_true",
+                   help="Preview: backtest + register + @challenger, but report "
+                        "the gate's decision instead of moving @champion")
     x.add_argument("--model-name", default=None)
     x.add_argument("--experiment", default=None)
     x.set_defaults(func=cmd_forecast_train)
