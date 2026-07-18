@@ -73,8 +73,10 @@ jobs:
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_AUTH_TYPE: azure-cli
+      BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
     steps:
       - uses: actions/checkout@v4
       - name: Azure login (OIDC, keyless)
@@ -95,20 +97,7 @@ jobs:
         # Pinned to an immutable commit SHA rather than a floating tag/@main, so a
         # retagged or force-pushed upstream cannot silently change what runs here.
         uses: databricks/setup-cli@71b5fa6b2b94c9a543658f65ebb6b477913f8626 # v1.6.0
-      - name: Verify runtime executor configuration
-        run: |
-          if [ -z "$BUNDLE_VAR_runtime_executor_service_principal_name" ]; then
-            echo "DBX_PLATFORM_RUNTIME_EXECUTOR_SP is required for prod validation." >&2
-            exit 1
-          fi
-          if [ -z "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "DBX_PLATFORM_ACTION_EXECUTOR_SP is required for prod validation." >&2
-            exit 1
-          fi
-          if [ "$BUNDLE_VAR_runtime_executor_service_principal_name" = \
-               "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "Runtime and action executors must use separate service principals." >&2
-            exit 1
-          fi
+      - name: Verify executor identity policy
+        run: bash scripts/verify_executor_identity.sh
       - name: Validate bundle
         run: databricks bundle validate -t prod

@@ -1,4 +1,7 @@
 import inspect
+import os
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -19,6 +22,56 @@ from dbx_platform.cli import (
     cmd_publish_wheel,
     main,
 )
+
+EXECUTOR_POLICY = (
+    Path(__file__).resolve().parent.parent
+    / "scripts"
+    / "verify_executor_identity.sh"
+)
+
+
+def _executor_policy(**values: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(values)
+    return subprocess.run(
+        ["bash", str(EXECUTOR_POLICY)],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_shared_executor_bootstrap_requires_proposal_only_exception():
+    common = {
+        "BUNDLE_VAR_runtime_executor_service_principal_name": "shared",
+        "BUNDLE_VAR_action_executor_service_principal_name": "shared",
+    }
+    assert _executor_policy(**common).returncode == 1
+    assert (
+        _executor_policy(
+            **common,
+            DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP="true",
+            BUNDLE_VAR_actions_enabled="true",
+        ).returncode
+        == 1
+    )
+    allowed = _executor_policy(
+        **common,
+        DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP="true",
+        BUNDLE_VAR_actions_enabled="false",
+    )
+    assert allowed.returncode == 0
+    assert "actions remain disabled" in allowed.stdout
+
+
+def test_distinct_executor_identities_need_no_bootstrap_exception():
+    result = _executor_policy(
+        BUNDLE_VAR_runtime_executor_service_principal_name="runtime",
+        BUNDLE_VAR_action_executor_service_principal_name="action",
+        BUNDLE_VAR_actions_enabled="true",
+    )
+    assert result.returncode == 0
 
 
 @pytest.mark.parametrize(

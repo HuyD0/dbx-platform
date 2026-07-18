@@ -46,7 +46,7 @@ These exist; nothing to do.
 | GitHub default branch | `main` |
 | GitHub `production` environment | created, no protection rules |
 | Repo secrets | `DATABRICKS_HOST`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
-| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (dedicated runtime controller) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (separate allowlisted remediation executor) |
+| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (runtime controller) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor) |
 
 The keyless CI chain is proven. Mission Control adds a dedicated warehouse,
 eleven PAUSED report schedules, manual approval-gated training, and out-of-band
@@ -80,6 +80,13 @@ GitHub/Claude items below:
   only its enabled action-pack permissions, and set
   `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` plus
   `DBX_PLATFORM_ACTION_EXECUTOR_SP` in the GitHub production environment.
+
+For a temporary proposal-only bootstrap, both variables may reference the
+deployment identity only when `DBX_PLATFORM_ACTIONS_ENABLED=false` and
+`DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP=true`. The workflows fail closed if
+actions are enabled while the identities are shared. Replace the shared value
+with two dedicated least-privileged identities and remove the exception before
+controlled action enablement.
 
 The deploy workflow fails instead of substituting another identity when either
 variable is absent. It runs idempotent control-plane migrations under the CI
