@@ -1,0 +1,380 @@
+{
+  "datasets": [
+    {
+      "name": "ds_total_30d",
+      "displayName": "azure_total_30d",
+      "query": "SELECT ROUND(SUM(cost), 2) AS cost, MAX(currency) AS currency FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30)"
+    },
+    {
+      "name": "ds_bucket_totals",
+      "displayName": "azure_bucket_totals_30d",
+      "query": "SELECT service_bucket, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY service_bucket ORDER BY cost DESC"
+    },
+    {
+      "name": "ds_bill_daily",
+      "displayName": "azure_daily_by_bucket_90d",
+      "query": "SELECT usage_date, service_bucket, SUM(cost) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 90) GROUP BY usage_date, service_bucket"
+    },
+    {
+      "name": "ds_service_totals",
+      "displayName": "azure_service_totals_30d",
+      "query": "SELECT service_name, service_bucket, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY service_name, service_bucket ORDER BY cost DESC LIMIT 20"
+    },
+    {
+      "name": "ds_rg_totals",
+      "displayName": "azure_resource_group_totals_30d",
+      "query": "SELECT resource_group, ROUND(SUM(cost), 2) AS cost FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 30) GROUP BY resource_group ORDER BY cost DESC LIMIT 20"
+    },
+    {
+      "name": "ds_forecast_total",
+      "displayName": "forecast_vs_actual_total",
+      "query": "WITH latest AS (SELECT MAX(run_date) AS run_date FROM main.dbx_platform.cost_forecasts) SELECT usage_date AS day, 'actual' AS metric, SUM(cost) AS value FROM main.dbx_platform.azure_costs WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 60) GROUP BY usage_date UNION ALL SELECT target_date, 'forecast p50', p50 FROM main.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT run_date FROM latest) UNION ALL SELECT target_date, 'forecast p10', p10 FROM main.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT run_date FROM latest) UNION ALL SELECT target_date, 'forecast p90', p90 FROM main.dbx_platform.cost_forecasts WHERE series = 'total' AND run_date = (SELECT run_date FROM latest)"
+    },
+    {
+      "name": "ds_forecast_buckets",
+      "displayName": "forecast_p50_by_bucket",
+      "query": "SELECT target_date AS day, series, p50 FROM main.dbx_platform.cost_forecasts WHERE series != 'total' AND run_date = (SELECT MAX(run_date) FROM main.dbx_platform.cost_forecasts)"
+    },
+    {
+      "name": "ds_monitor",
+      "displayName": "forecast_monitor_findings",
+      "query": "SELECT run_ts, check_name, resource, reason, action FROM main.dbx_platform.platform_findings WHERE area = 'forecast' AND run_ts >= DATE_SUB(CURRENT_DATE(), 90) ORDER BY run_ts DESC LIMIT 200"
+    }
+  ],
+  "pages": [
+    {
+      "name": "azure_bill_forecast",
+      "displayName": "Azure Bill & Forecast",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_total_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_total_30d",
+                  "fields": [
+                    { "name": "cost", "expression": "SUM(`cost`)" }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": { "fieldName": "cost", "displayName": "Azure spend (30d)" }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Azure spend — last 30 days",
+                "showDescription": true,
+                "description": "Whole subscription, from the ingested Cost Management bill"
+              }
+            }
+          },
+          "position": { "x": 0, "y": 0, "width": 2, "height": 4 }
+        },
+        {
+          "widget": {
+            "name": "w_bucket_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_bucket_totals",
+                  "fields": [
+                    { "name": "service_bucket", "expression": "`service_bucket`" },
+                    { "name": "sum(cost)", "expression": "SUM(`cost`)" }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "service_bucket",
+                  "scale": { "type": "categorical" },
+                  "displayName": "service bucket"
+                },
+                "y": {
+                  "fieldName": "sum(cost)",
+                  "scale": { "type": "quantitative" },
+                  "axis": { "title": "$" },
+                  "displayName": "spend"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "30d spend by platform component",
+                "showDescription": true,
+                "description": "databricks / foundry_ai / search / storage / other"
+              }
+            }
+          },
+          "position": { "x": 2, "y": 0, "width": 4, "height": 4 }
+        },
+        {
+          "widget": {
+            "name": "w_daily_stacked",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_bill_daily",
+                  "fields": [
+                    { "name": "usage_date", "expression": "`usage_date`" },
+                    { "name": "sum(cost)", "expression": "SUM(`cost`)" },
+                    { "name": "service_bucket", "expression": "`service_bucket`" }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": { "type": "temporal" },
+                  "displayName": "date"
+                },
+                "y": {
+                  "fieldName": "sum(cost)",
+                  "scale": { "type": "quantitative" },
+                  "axis": { "title": "$" },
+                  "displayName": "spend"
+                },
+                "color": {
+                  "fieldName": "service_bucket",
+                  "scale": { "type": "categorical" },
+                  "displayName": "service bucket"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily Azure spend by component — last 90 days",
+                "showDescription": true,
+                "description": "Stacked daily bill from the Cost Management Query API"
+              }
+            }
+          },
+          "position": { "x": 0, "y": 4, "width": 6, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "w_forecast_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_total",
+                  "fields": [
+                    { "name": "day", "expression": "`day`" },
+                    { "name": "sum(value)", "expression": "SUM(`value`)" },
+                    { "name": "metric", "expression": "`metric`" }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": { "type": "temporal" },
+                  "displayName": "date"
+                },
+                "y": {
+                  "fieldName": "sum(value)",
+                  "scale": { "type": "quantitative" },
+                  "axis": { "title": "$" },
+                  "displayName": "spend"
+                },
+                "color": {
+                  "fieldName": "metric",
+                  "scale": { "type": "categorical" },
+                  "displayName": "series"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total spend: actual vs forecast (P10/P50/P90)",
+                "showDescription": true,
+                "description": "Latest @champion batch forecast against the actual bill"
+              }
+            }
+          },
+          "position": { "x": 0, "y": 9, "width": 6, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "w_forecast_buckets",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_forecast_buckets",
+                  "fields": [
+                    { "name": "day", "expression": "`day`" },
+                    { "name": "sum(p50)", "expression": "SUM(`p50`)" },
+                    { "name": "series", "expression": "`series`" }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": { "type": "temporal" },
+                  "displayName": "date"
+                },
+                "y": {
+                  "fieldName": "sum(p50)",
+                  "scale": { "type": "quantitative" },
+                  "axis": { "title": "$ (P50)" },
+                  "displayName": "P50 forecast"
+                },
+                "color": {
+                  "fieldName": "series",
+                  "scale": { "type": "categorical" },
+                  "displayName": "component"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "P50 forecast by platform component",
+                "showDescription": true,
+                "description": "Latest run, per service bucket"
+              }
+            }
+          },
+          "position": { "x": 0, "y": 14, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "w_service_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_service_totals",
+                  "fields": [
+                    { "name": "service_name", "expression": "`service_name`" },
+                    { "name": "service_bucket", "expression": "`service_bucket`" },
+                    { "name": "cost", "expression": "`cost`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "service_name", "type": "string", "displayAs": "string", "visible": true, "order": 1, "title": "service", "displayName": "service" },
+                  { "fieldName": "service_bucket", "type": "string", "displayAs": "string", "visible": true, "order": 2, "title": "bucket", "displayName": "bucket" },
+                  { "fieldName": "cost", "type": "float", "displayAs": "number", "visible": true, "order": 3, "title": "30d $", "displayName": "30d $" }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top services — 30d",
+                "showDescription": false
+              }
+            }
+          },
+          "position": { "x": 3, "y": 14, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "w_rg_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_rg_totals",
+                  "fields": [
+                    { "name": "resource_group", "expression": "`resource_group`" },
+                    { "name": "cost", "expression": "`cost`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "resource_group", "type": "string", "displayAs": "string", "visible": true, "order": 1, "title": "resource group", "displayName": "resource group" },
+                  { "fieldName": "cost", "type": "float", "displayAs": "number", "visible": true, "order": 2, "title": "30d $", "displayName": "30d $" }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top resource groups — 30d",
+                "showDescription": false
+              }
+            }
+          },
+          "position": { "x": 0, "y": 19, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "w_monitor_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_monitor",
+                  "fields": [
+                    { "name": "run_ts", "expression": "`run_ts`" },
+                    { "name": "check_name", "expression": "`check_name`" },
+                    { "name": "resource", "expression": "`resource`" },
+                    { "name": "reason", "expression": "`reason`" },
+                    { "name": "action", "expression": "`action`" }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  { "fieldName": "run_ts", "type": "datetime", "displayAs": "datetime", "visible": true, "order": 1, "title": "run", "displayName": "run" },
+                  { "fieldName": "check_name", "type": "string", "displayAs": "string", "visible": true, "order": 2, "title": "check", "displayName": "check" },
+                  { "fieldName": "resource", "type": "string", "displayAs": "string", "visible": true, "order": 3, "title": "resource", "displayName": "resource" },
+                  { "fieldName": "reason", "type": "string", "displayAs": "string", "visible": true, "order": 4, "title": "reason", "displayName": "reason" },
+                  { "fieldName": "action", "type": "string", "displayAs": "string", "visible": true, "order": 5, "title": "action", "displayName": "action" }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast monitor findings (drift / accuracy)",
+                "showDescription": true,
+                "description": "From platform_findings, area = forecast; ok rows are the heartbeat"
+              }
+            }
+          },
+          "position": { "x": 3, "y": 19, "width": 3, "height": 5 }
+        }
+      ]
+    }
+  ]
+}

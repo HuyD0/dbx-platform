@@ -24,6 +24,14 @@ dev = [
     "build>=1.2",
     "pyyaml>=6.0",
 ]
+# The Azure cost forecaster's training/inference deps — kept out of the core
+# wheel; the forecast jobs' serverless environment installs them alongside
+# the wheel (see resources/forecast_jobs.yml).
+forecast = [
+    "mlflow>=3.0",
+    "lightgbm>=4.3",
+    "pandas>=2.0",
+]
 # The served LangGraph agent (agents/platform_agent) — kept out of the core
 # wheel so scheduled jobs stay lean.
 agent = [

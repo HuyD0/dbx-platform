@@ -1,0 +1,106 @@
+# ML cost forecasting — the MLOps loop as two scheduled jobs.
+#
+# Training (weekly): rolling-origin backtest of a seasonal-naive baseline vs
+# LightGBM quantile models, MLflow experiment tracking, UC registry with
+# @challenger on every run and @champion moved only through the promotion
+# gate.
+#
+# Daily: rebuild features from the ingested bill -> batch inference from
+# @champion into cost_forecasts -> drift + accuracy monitor (fails the job on
+# a retrain verdict, so the failure email is the alert).
+#
+# The forecast environment installs the [forecast] extras on serverless —
+# they are deliberately NOT in the core wheel (see pyproject.toml).
+resources:
+  jobs:
+    cost_forecast_train:
+      name: "[dbx-platform] cost-forecast-train"
+      description: >
+        Weekly training for the Azure cost forecaster: backtest, MLflow
+        experiment logging, UC registration and the champion/challenger
+        promotion gate on backtest WAPE.
+      schedule:
+        quartz_cron_expression: "0 0 5 ? * MON"  # weekly, Monday 05:00 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: forecast
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+              - lightgbm>=4.3
+              - pandas>=2.0
+      tasks:
+        - task_key: train_and_gate
+          environment_key: forecast
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["forecast", "train",
+               "--warehouse-id", "${var.warehouse_id}"]
+
+    cost_forecast_daily:
+      name: "[dbx-platform] cost-forecast-daily"
+      description: >
+        Daily batch serving of the Azure cost forecast: feature engineering
+        from azure_costs, P10/P50/P90 inference from the @champion model, and
+        the PSI-drift + matured-accuracy monitor. Runs after azure-cost-pull.
+      schedule:
+        quartz_cron_expression: "0 15 7 * * ?"  # daily 07:15 UTC
+        timezone_id: UTC
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      environments:
+        - environment_key: forecast
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+              - lightgbm>=4.3
+              - pandas>=2.0
+      tasks:
+        - task_key: build_features
+          environment_key: forecast
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["forecast", "build-features",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: predict
+          depends_on:
+            - task_key: build_features
+          environment_key: forecast
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["forecast", "predict",
+               "--warehouse-id", "${var.warehouse_id}"]
+        - task_key: monitor
+          depends_on:
+            - task_key: predict
+          environment_key: forecast
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["forecast", "monitor",
+               "--warehouse-id", "${var.warehouse_id}"]

@@ -20,6 +20,9 @@ not failures), `1` runtime error, `2` refused `--apply` without confirmation,
 | `ml-serving-report` | daily 07:30 | `endpoint-audit`, `serving-cost` | warehouse + system.billing (+ system.serving where enabled) |
 | `ml-hygiene-report` | weekly Mon 07:00 | `model-hygiene`, `gpu-audit`, `vector-search-audit` | REST APIs (+ warehouse for GPU spend) |
 | `platform-digest` | weekly Mon 08:00 | `ai-digest` | warehouse + an `ai_query`-capable foundation-model endpoint |
+| `azure-cost-pull` | daily 06:30 | `azure-cost pull` (3d re-merge), `azure-cost spikes` | UC service credential w/ Cost Management Reader + warehouse (see docs/cloud-setup.md) |
+| `cost-forecast-train` | weekly Mon 05:00 | `forecast train` | warehouse + MLflow/UC registry; serverless env installs the `[forecast]` extras |
+| `cost-forecast-daily` | daily 07:15 | `forecast build-features` → `predict` → `monitor` | warehouse + the `@champion` model (train once first) |
 
 Thresholds are task parameters in `resources/*.yml` — change them in git, not
 in the Jobs UI, so the config stays reviewable.
