@@ -26,8 +26,10 @@ jobs:
     env:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_AUTH_TYPE: azure-cli
+      BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -45,18 +47,8 @@ jobs:
       - name: Install the Databricks CLI
         # Pinned to the same immutable commit as ci.yml and deploy.yml.
         uses: databricks/setup-cli@71b5fa6b2b94c9a543658f65ebb6b477913f8626 # v1.6.0
-      - name: Verify executor identity separation
-        run: |
-          if [ -z "$BUNDLE_VAR_runtime_executor_service_principal_name" ] ||
-             [ -z "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "Both executor service-principal variables are required." >&2
-            exit 1
-          fi
-          if [ "$BUNDLE_VAR_runtime_executor_service_principal_name" = \
-               "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "Runtime and action executors must use separate service principals." >&2
-            exit 1
-          fi
+      - name: Verify executor identity policy
+        run: bash scripts/verify_executor_identity.sh
       - name: Resolve the bundle-owned SQL warehouse
         # Pull the deployed bundle state and use the exact logical resource
         # key. Never search warehouses by name and never fall back to shared

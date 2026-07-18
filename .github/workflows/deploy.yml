@@ -40,8 +40,10 @@ jobs:
       DATABRICKS_AUTH_TYPE: azure-cli
       BUNDLE_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       BUNDLE_VAR_azure_service_credential: ${{ vars.DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL }}
+      BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,18 +77,8 @@ jobs:
         # unaffected — they resolve variables properly.
         working-directory: ${{ runner.temp }}
         run: databricks current-user me
-      - name: Verify executor identity separation
-        run: |
-          if [ -z "$BUNDLE_VAR_runtime_executor_service_principal_name" ] ||
-             [ -z "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "Both executor service-principal variables are required." >&2
-            exit 1
-          fi
-          if [ "$BUNDLE_VAR_runtime_executor_service_principal_name" = \
-               "$BUNDLE_VAR_action_executor_service_principal_name" ]; then
-            echo "Runtime and action executors must use separate service principals." >&2
-            exit 1
-          fi
+      - name: Verify executor identity policy
+        run: bash scripts/verify_executor_identity.sh
       - name: Stage the wheel for the Platform Console app
         # The app's requirements.txt resolves dbx-platform from ./wheels via
         # --find-links, so the exact package the jobs run also powers the app.
