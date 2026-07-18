@@ -108,6 +108,23 @@ def test_app_yaml_launches_the_backend():
     assert "fastapi" in requirements
 
 
+def test_app_and_controller_share_name_without_resource_cycle():
+    root = APP_DIR.parent.parent
+    app_resource = yaml.safe_load((root / "resources" / "app.yml").read_text())
+    runtime_resource = yaml.safe_load(
+        (root / "resources" / "runtime_control.yml").read_text()
+    )
+    app_name = app_resource["resources"]["apps"]["platform_console"]["name"]
+    parameters = runtime_resource["resources"]["jobs"]["power_controller"][
+        "tasks"
+    ][0]["spark_python_task"]["parameters"]
+
+    assert app_name == "${var.platform_console_name}"
+    app_name_index = parameters.index("--app-name") + 1
+    assert parameters[app_name_index] == "${var.platform_console_name}"
+    assert "${resources.apps.platform_console.name}" not in parameters
+
+
 # --- TestClient behavior ----------------------------------------------------
 
 @pytest.fixture()
