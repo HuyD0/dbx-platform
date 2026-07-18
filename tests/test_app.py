@@ -98,7 +98,7 @@ def test_app_yaml_launches_the_backend():
     )
     assert bundle_config["resources"]["apps"]["platform_console"][
         "user_api_scopes"
-    ] == ["sql"]
+    ] == ["iam.current-user:read", "iam.access-control:read", "sql"]
     requirements = (APP_DIR / "requirements.txt").read_text()
     assert "--find-links wheels" in requirements
     assert "fastapi" in requirements
