@@ -18,6 +18,7 @@ from backend.control_plane import (  # noqa: E402
 )
 from backend.control_plane_repository import SQLControlPlaneRepository  # noqa: E402
 
+from dbx_platform import migrations  # noqa: E402
 from dbx_platform.control_plane_procedures import procedure_statements  # noqa: E402
 from dbx_platform.migrations import procedure_migration_statements  # noqa: E402
 
@@ -118,6 +119,18 @@ def test_enabled_migration_requires_configured_group_grants():
     )
 
     assert any(description.startswith("grant ") for description, _sql in statements)
+
+
+def test_migration_entry_returns_normally_on_success_and_raises_on_failure(
+    monkeypatch,
+):
+    monkeypatch.setattr(migrations, "main", lambda _argv=None: 0)
+    assert migrations.entry([]) is None
+
+    monkeypatch.setattr(migrations, "main", lambda _argv=None: 1)
+    with pytest.raises(SystemExit) as error:
+        migrations.entry([])
+    assert error.value.code == 1
 
 
 def test_sql_human_action_write_calls_broker_not_table_insert():
