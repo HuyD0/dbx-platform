@@ -108,7 +108,9 @@ def test_app_yaml_launches_the_backend():
     ] == ["sql"]
     project = (APP_DIR / "pyproject.toml").read_text()
     assert '"fastapi==0.139.2"' in project
-    assert '"mlflow==3.14.0"' in project
+    assert '"langgraph==1.2.9"' in project
+    assert "databricks-langchain" not in project
+    assert '"mlflow' not in project
     assert 'dbx-platform = { path = "wheels/' in project
 
 
