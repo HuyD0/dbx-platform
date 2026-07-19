@@ -1614,7 +1614,7 @@ class DatabricksRuntimeAdapter:
         active: list[dict[str, Any]] = []
         for job_id in job_ids:
             for run in self.w.jobs.list_runs(
-                job_id=int(job_id), active_only=True, limit=100
+                job_id=int(job_id), active_only=True, limit=25
             ):
                 active.append(
                     {

@@ -882,9 +882,16 @@ def bind_action_handler(
                 raise ActionExecutionError("run-job accepts exactly one job_id.")
             if int(payload["job_id"]) != job_id:
                 raise ActionExecutionError("run-job payload differs from its exact target.")
+            # Databricks deduplicates idempotency tokens across the workspace,
+            # not per Job. The app already uses the plan key when it submits
+            # this executor, so reusing it here would return the executor's own
+            # run instead of launching the governed child Job.
+            child_idempotency_token = hashlib.sha256(
+                f"run-job:{action.plan['idempotency_key']}:{job_id}".encode()
+            ).hexdigest()
             run = w.jobs.run_now(
                 job_id=job_id,
-                idempotency_token=str(action.plan["idempotency_key"]),
+                idempotency_token=child_idempotency_token,
                 job_parameters={
                     "approved_action_id": action.action_id,
                     "approved_plan_hash": action.plan_hash,

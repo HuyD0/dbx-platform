@@ -18,6 +18,10 @@ resources:
         project: dbx-platform
         control_plane: action-executor
       permissions:
+        # The executor re-reads its own run metadata to attest the exact
+        # executor identity and immutable action ID before doing any work.
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_VIEW
         - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
           level: CAN_MANAGE_RUN
         - group_name: ${var.approver_group}
