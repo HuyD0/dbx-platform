@@ -49,10 +49,11 @@ def _action() -> ActionRequest:
     )
 
 
-def test_security_definer_procedures_use_native_group_grants_and_are_atomic():
+def test_security_definer_procedures_are_app_only_and_atomic():
     statements = procedure_statements(
         "main",
         "dbx_platform",
+        app_service_principal="00000000-0000-0000-0000-000000000001",
         operator_group="dbx-platform-operators",
         approver_group="dbx-platform-approvers",
     )
@@ -61,7 +62,10 @@ def test_security_definer_procedures_use_native_group_grants_and_are_atomic():
     assert sql.count("SQL SECURITY DEFINER") == 4
     assert sql.count("AS BEGIN ATOMIC") == 4
     assert "is_account_group_member" not in sql
-    assert "session_user()" in sql
+    assert "session_user()" not in sql
+    assert "p_proposer_id, p_proposer_email" in sql
+    assert "p_decision, p_approver_id, p_approver_email" in sql
+    assert "p_actor_id, p_details_json" in sql
     assert "sha2(p_plan_json, 256)" in sql
     assert "p_target_status NOT IN ('STALE', 'EXPIRED')" in sql
     assert "p_target_status = 'APPROVED'" in sql
@@ -74,13 +78,23 @@ def test_security_definer_procedures_use_native_group_grants_and_are_atomic():
     assert "GRANT MODIFY" not in sql
     assert (
         "GRANT EXECUTE ON PROCEDURE "
-        "`main`.`dbx_platform`.`cp_decide_action` "
+        "`main`.`dbx_platform`.`cp_create_action` "
         "TO `dbx-platform-operators`"
     ) not in sql
     assert (
         "GRANT EXECUTE ON PROCEDURE "
         "`main`.`dbx_platform`.`cp_decide_action` "
         "TO `dbx-platform-approvers`"
+    ) not in sql
+    assert (
+        "GRANT EXECUTE ON PROCEDURE "
+        "`main`.`dbx_platform`.`cp_decide_action` "
+        "TO `00000000-0000-0000-0000-000000000001`"
+    ) in sql
+    assert (
+        "REVOKE EXECUTE ON PROCEDURE "
+        "`main`.`dbx_platform`.`cp_decide_action` "
+        "FROM `dbx-platform-approvers`"
     ) in sql
 
 
@@ -89,6 +103,7 @@ def test_procedure_migration_rejects_unsafe_group_names():
         procedure_statements(
             "main",
             "dbx_platform",
+            app_service_principal="app",
             operator_group="operators`; GRANT ALL",
             approver_group="approvers",
         )
@@ -98,6 +113,7 @@ def test_proposal_only_migration_creates_procedures_without_group_grants():
     statements = procedure_migration_statements(
         "main",
         "dbx_platform",
+        app_service_principal="app",
         operator_group="missing-operators",
         approver_group="missing-approvers",
         actions_enabled=False,
@@ -106,18 +122,25 @@ def test_proposal_only_migration_creates_procedures_without_group_grants():
 
     assert sql.count("CREATE OR REPLACE PROCEDURE") == 4
     assert "GRANT EXECUTE" not in sql
+    assert "REVOKE EXECUTE" in sql
 
 
 def test_enabled_migration_requires_configured_group_grants():
     statements = procedure_migration_statements(
         "main",
         "dbx_platform",
+        app_service_principal="app",
         operator_group="dbx-platform-operators",
         approver_group="dbx-platform-approvers",
         actions_enabled=True,
     )
 
     assert any(description.startswith("grant ") for description, _sql in statements)
+    assert all(
+        "dbx-platform-approvers" not in sql
+        for description, sql in statements
+        if description.startswith("grant ")
+    )
 
 
 def test_migration_entry_returns_normally_on_success_and_raises_on_failure(

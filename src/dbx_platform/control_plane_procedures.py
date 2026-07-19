@@ -1,10 +1,11 @@
 """Security-definer write broker for human Mission Control decisions.
 
 The Databricks App service principal and human groups receive no ``MODIFY`` on
-the action ledger. Verified App user tokens call these narrowly scoped Unity
-Catalog procedures with ``EXECUTE`` only. The procedures re-check the connected
-user's live account-group membership through native ``EXECUTE`` authorization
-on every call and record ``session_user()`` as the actor.
+the action ledger. Only the App service principal receives ``EXECUTE`` on these
+narrowly scoped Unity Catalog procedures. The App re-checks the forwarded
+user's live account-group membership and passes that verified identity as the
+actor. Human groups deliberately cannot call the procedures directly and
+substitute another actor identity.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ def procedure_statements(
     catalog: str,
     schema: str,
     *,
+    app_service_principal: str,
     operator_group: str,
     approver_group: str,
 ) -> list[tuple[str, str]]:
@@ -38,14 +40,14 @@ def procedure_statements(
 
     catalog = _identifier(catalog)
     schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
     operator_group = _principal(operator_group)
     approver_group = _principal(approver_group)
     fq = f"`{catalog}`.`{schema}`"
-    # Group membership is revalidated by Unity Catalog on every CALL through
-    # the exact EXECUTE grants emitted below. Databricks does not allow
-    # is_account_group_member() inside an atomic stored-procedure transaction.
-    # Keep the procedures atomic and rely on native procedure authorization,
-    # with cp_decide_action granted only to the approver group.
+    # Databricks does not allow is_account_group_member() or session_user()
+    # inside an atomic stored-procedure transaction. Keep the procedures atomic
+    # and make the App the sole caller. Its request boundary verifies the
+    # forwarded user and live group membership before supplying actor fields.
     allowed_actions = (
         "'stale-clusters', 'orphaned-jobs', 'token-revoke', 'policy-sync', "
         "'run-job', 'configure-budget'"
@@ -72,10 +74,10 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
-  IF p_proposer_email IS NULL
-     OR lower(session_user()) <> lower(p_proposer_email) THEN
+  IF p_proposer_id IS NULL OR p_proposer_id = ''
+     OR p_proposer_email IS NULL OR p_proposer_email = '' THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The connected user does not match the proposer';
+      SET MESSAGE_TEXT = 'The verified proposer identity is required';
   END IF;
   IF p_action_type NOT IN ({allowed_actions}) THEN
     SIGNAL SQLSTATE '45000'
@@ -112,7 +114,7 @@ AS BEGIN ATOMIC
      OR get_json_object(p_plan_json, '$.risk') <> p_risk
      OR get_json_object(p_plan_json, '$.proposer_id') <> p_proposer_id
      OR lower(get_json_object(p_plan_json, '$.proposer_email'))
-       <> lower(session_user())
+       <> lower(p_proposer_email)
      OR get_json_object(p_plan_json, '$.created_at') <> p_created_at
      OR get_json_object(p_plan_json, '$.expires_at') <> p_expires_at
      OR get_json_object(p_plan_json, '$.confirm_phrase') <> p_confirm_phrase
@@ -136,7 +138,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_action_id, p_action_type,
     'AWAITING_APPROVAL', p_plan_json, p_plan_hash, p_confirm_phrase, p_risk,
-    p_proposer_id, session_user(), CAST(p_created_at AS TIMESTAMP),
+    p_proposer_id, p_proposer_email, CAST(p_created_at AS TIMESTAMP),
     CAST(p_expires_at AS TIMESTAMP), CAST(p_updated_at AS TIMESTAMP),
     p_idempotency_key, NULL
   );
@@ -152,6 +154,7 @@ CREATE OR REPLACE PROCEDURE {fq}.`cp_transition_action`(
   IN p_target_status STRING,
   IN p_reason STRING,
   IN p_event_id STRING,
+  IN p_actor_id STRING,
   IN p_details_json STRING,
   IN p_event_at STRING
 )
@@ -160,6 +163,10 @@ SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
   DECLARE v_from_status STRING;
+  IF p_actor_id IS NULL OR p_actor_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified transition actor is required';
+  END IF;
   IF p_target_status NOT IN ('STALE', 'EXPIRED') THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Human transition target is not allowlisted';
@@ -189,7 +196,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id,
     concat('STATUS_', p_target_status), v_from_status, p_target_status,
-    session_user(), p_details_json, CAST(p_event_at AS TIMESTAMP)
+    p_actor_id, p_details_json, CAST(p_event_at AS TIMESTAMP)
   );
 END
 """.strip()
@@ -220,10 +227,10 @@ AS BEGIN ATOMIC
   DECLARE v_risk STRING;
   DECLARE v_confirm_phrase STRING;
   DECLARE v_expires_at TIMESTAMP;
-  IF p_approver_email IS NULL
-     OR lower(session_user()) <> lower(p_approver_email) THEN
+  IF p_approver_id IS NULL OR p_approver_id = ''
+     OR p_approver_email IS NULL OR p_approver_email = '' THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The connected user does not match the approver';
+      SET MESSAGE_TEXT = 'The verified approver identity is required';
   END IF;
   IF NOT (
     (p_target_status = 'APPROVED' AND p_decision = 'APPROVED'
@@ -310,7 +317,7 @@ AS BEGIN ATOMIC
     approver_id, approver_email, approver_role, confirmation, decided_at
   ) VALUES (
     p_workspace_id, p_environment, p_approval_id, p_action_id, p_plan_hash,
-    p_decision, p_approver_id, session_user(), 'approver',
+    p_decision, p_approver_id, p_approver_email, 'approver',
     nullif(p_confirmation, ''), CAST(p_decided_at AS TIMESTAMP)
   );
   INSERT INTO {fq}.`action_events` (
@@ -319,7 +326,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id,
     concat('STATUS_', p_target_status), p_expected_status, p_target_status,
-    session_user(), p_details_json, CAST(p_decided_at AS TIMESTAMP)
+    p_approver_id, p_details_json, CAST(p_decided_at AS TIMESTAMP)
   );
 END
 """.strip()
@@ -333,6 +340,7 @@ CREATE OR REPLACE PROCEDURE {fq}.`cp_append_event`(
   IN p_event_type STRING,
   IN p_from_status STRING,
   IN p_to_status STRING,
+  IN p_actor_id STRING,
   IN p_details_json STRING,
   IN p_event_at STRING
 )
@@ -340,6 +348,10 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
+  IF p_actor_id IS NULL OR p_actor_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified event actor is required';
+  END IF;
   IF p_event_type NOT IN (
     'PLAN_CREATED',
     'PLAN_REQUESTED_FROM_APP',
@@ -372,7 +384,7 @@ AS BEGIN ATOMIC
     to_status, actor_id, details_json, event_ts
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id, p_event_type,
-    nullif(p_from_status, ''), nullif(p_to_status, ''), session_user(),
+    nullif(p_from_status, ''), nullif(p_to_status, ''), p_actor_id,
     p_details_json, CAST(p_event_at AS TIMESTAMP)
   );
 END
@@ -389,19 +401,20 @@ END
         for name, sql in procedures.items()
     ]
     for name in procedures:
-        if name != "cp_decide_action":
+        # Remove grants from the earlier group-authorized implementation. This
+        # is intentionally idempotent and closes direct SQL identity spoofing.
+        for group in (operator_group, approver_group):
             statements.append(
                 (
-                    f"grant {operator_group} execute on {name}",
-                    f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                    f"TO `{operator_group}`",
+                    f"revoke {group} execute on {name}",
+                    f"REVOKE EXECUTE ON PROCEDURE {fq}.`{name}` FROM `{group}`",
                 )
             )
         statements.append(
             (
-                f"grant {approver_group} execute on {name}",
+                f"grant {app_service_principal} execute on {name}",
                 f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                f"TO `{approver_group}`",
+                f"TO `{app_service_principal}`",
             )
         )
     return statements
