@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { BarList } from "../components/BarList";
 import { FindingsSection } from "../components/FindingsSection";
+import { ProductSpendBreakdown } from "../components/ProductSpendBreakdown";
 
 const WINDOWS = [7, 30, 90];
 
@@ -26,20 +26,12 @@ export function Cost() {
       </div>
 
       <FindingsSection
-        title="Spend by SKU and workspace"
-        subtitle={`DBUs and list cost, last ${days} days`}
-        path="/api/cost/usage"
+        title="Workspace spend by product"
+        subtitle={`List-price cost with product and workload attribution, last ${days} days`}
+        path="/api/cost/products"
         params={{ days }}
         emptyMessage="No billed usage in the window."
-        render={(rows) => (
-          <BarList
-            maxBars={12}
-            data={rows.map((r) => ({
-              label: String(r.sku_name ?? "unknown"),
-              value: Number(r.list_cost_usd ?? 0),
-            }))}
-          />
-        )}
+        render={(rows) => <ProductSpendBreakdown rows={rows} days={days} />}
       />
       <FindingsSection
         title="Most expensive jobs"

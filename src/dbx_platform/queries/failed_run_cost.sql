@@ -4,6 +4,7 @@ WITH failed_runs AS (
   SELECT DISTINCT workspace_id, job_id, run_id
   FROM system.lakeflow.job_run_timeline
   WHERE period_start_time >= DATE_SUB(CURRENT_DATE(), :days)
+    AND workspace_id = :workspace_id
     AND result_state IN ('FAILED', 'ERROR', 'TIMED_OUT', 'UPSTREAM_FAILED')
 )
 SELECT
@@ -27,6 +28,7 @@ LEFT JOIN system.lakeflow.jobs j
   ON  f.job_id       = j.job_id
   AND f.workspace_id = j.workspace_id
 WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+  AND u.workspace_id = :workspace_id
 GROUP BY f.workspace_id, f.job_id
 ORDER BY wasted_list_cost_usd DESC
 LIMIT :limit

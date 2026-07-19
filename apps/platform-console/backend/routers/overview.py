@@ -1,4 +1,4 @@
-"""Overview: stored findings summary, spend by SKU, digest freshness.
+"""Overview: stored findings summary, spend by product, digest freshness.
 
 Sections degrade independently — a missing findings table must not blank the
 spend chart, so each section resolves to {data} or {error}.
@@ -62,9 +62,10 @@ def overview(refresh: bool = False) -> dict:
             }
 
         def spend() -> list[dict]:
-            rows = cost.usage_report(w, deps.warehouse_id(), s.lookback_days)
+            rows = cost.product_spend(w, deps.warehouse_id(), s.lookback_days)
+            rows = [row for row in rows if row.get("period") == "current"]
             rows.sort(key=lambda r: float(r.get("list_cost_usd") or 0), reverse=True)
-            return rows[:10]
+            return rows
 
         def digest_at() -> str | None:
             rows = run_query(

@@ -578,7 +578,12 @@ class ActionService:
                     f"Type the exact confirmation phrase: '{action.confirm_phrase}'."
                 )
 
-    def _revalidate(self, action: ActionRequest, revalidate: Revalidator) -> None:
+    def _revalidate(
+        self,
+        action: ActionRequest,
+        revalidate: Revalidator,
+        actor_id: str,
+    ) -> None:
         current = revalidate(action)
         expected_hash = sha256_json(action.preconditions)
         actual_hash = sha256_json(current)
@@ -587,7 +592,7 @@ class ActionService:
                 action.action_id,
                 expected={action.status},
                 target=ActionStatus.STALE,
-                actor_id=None,
+                actor_id=actor_id,
                 reason="Resource state changed after planning.",
                 details={
                     "expected_preconditions_sha256": expected_hash,
@@ -617,7 +622,7 @@ class ActionService:
             raise PlanIntegrityError("Approval supplied a different plan hash.")
         self._expire_if_needed(action, actor.actor_id)
         self._require_confirmation(action, confirmation)
-        self._revalidate(action, revalidate)
+        self._revalidate(action, revalidate, actor.actor_id)
         approval = ApprovalRecord(
             action_id=action.action_id,
             plan_hash=action.plan_hash,
@@ -706,7 +711,7 @@ class ActionService:
             for a in approvals
         ):
             raise PlanIntegrityError("No matching durable approval exists.")
-        self._revalidate(action, revalidate)
+        self._revalidate(action, revalidate, executor.actor_id)
         return self.repository.transition(
             action.action_id,
             expected={ActionStatus.APPROVED},

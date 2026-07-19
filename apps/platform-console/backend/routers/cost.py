@@ -23,6 +23,18 @@ def usage(days: int = 30, refresh: bool = False) -> dict:
     return envelope(data, as_of, hit)
 
 
+@router.get("/products")
+def products(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    workspace_id, _ = deps.control_plane_scope()
+    data, as_of, hit = cache.cached(
+        f"cost/products/{workspace_id}/{days}",
+        lambda: cost.product_spend(deps.get_ws(), deps.warehouse_id(), days),
+        refresh,
+    )
+    return envelope(data, as_of, hit)
+
+
 @router.get("/top-jobs")
 def top_jobs(days: int = 30, limit: int = 20, refresh: bool = False) -> dict:
     days = deps.clamp_days(days)
