@@ -65,4 +65,11 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["azure-cost", "spikes",
-               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--store-findings",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

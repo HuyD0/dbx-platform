@@ -6,7 +6,14 @@ resources:
       name: "[dbx-platform] cost-usage-report"
       description: >
         Daily DBU/list-cost report by SKU and workspace, plus the most
-        expensive jobs. Read-only; results appear in the task run output.
+        expensive jobs. Utilization tasks additionally persist their findings
+        to platform_findings (append-only telemetry) inside the attested
+        scheduled context; everything else is read-only.
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
       schedule:
         quartz_cron_expression: "0 0 7 * * ?"  # daily 07:00 UTC
         timezone_id: UTC
@@ -53,7 +60,14 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "cluster-utilization", "--days", "30",
-               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--store-findings",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
         - task_key: failed_run_waste
           environment_key: default
           python_wheel_task:
@@ -69,4 +83,11 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["cost", "warehouse-utilization", "--days", "30",
-               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--store-findings",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

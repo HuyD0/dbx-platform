@@ -765,3 +765,54 @@ def test_ai_governance_monitor_serves_per_app_rollup(client, monkeypatch):
     monkeypatch.setattr(aig.ai_monitor, "report", lambda *a, **k: rows)
     body = client.get("/api/ai-governance/monitor?days=7").json()
     assert body["data"] == rows
+
+
+# --- Phase 2 wiring: attribution + Azure detail -------------------------------
+
+def test_cost_attribution_serves_tag_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_attribution(w, warehouse, dimension, days):
+        captured.update(dimension=dimension, days=days)
+        return [
+            {
+                "sub_account_id": "local",
+                "x_team": "search",
+                "x_dbus": 120.5,
+                "list_cost": 88.25,
+                "currency": "USD",
+            }
+        ]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.cost, "attribution", fake_attribution)
+    body = client.get("/api/cost/attribution?dimension=team&days=30").json()
+    assert captured["dimension"] == "team"
+    assert body["data"][0]["x_team"] == "search"
+
+
+def test_cost_attribution_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/attribution?dimension=cost_center")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_azure_detail_passes_validated_bucket(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_detail(w, warehouse, catalog, schema, by, days, bucket=None):
+        captured.update(by=by, bucket=bucket)
+        return [{"meter_name": "gpt-4o input", "service_bucket": "foundry_ai", "cost": 12.5}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report_detail", fake_detail)
+    body = client.get("/api/cost/azure-detail?by=meter&bucket=foundry_ai").json()
+    assert captured == {"by": "meter", "bucket": "foundry_ai"}
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_azure_detail_rejects_unknown_dimension_or_bucket(client):
+    assert client.get("/api/cost/azure-detail?by=owner").status_code == 400
+    assert client.get("/api/cost/azure-detail?bucket=aws").status_code == 400

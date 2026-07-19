@@ -87,6 +87,51 @@ def failed_run_waste(days: int = 30, limit: int = 20, refresh: bool = False) -> 
     return envelope(data, as_of, hit)
 
 
+@router.get("/attribution")
+def attribution(dimension: str = "team", days: int = 30, refresh: bool = False) -> dict:
+    """Spend by enforced tag (team/project) or whole workspace.
+
+    The dimension allowlist lives in cost.ATTRIBUTION_DIMENSIONS; an unknown
+    value raises ValueError inside the loader and maps to a 400.
+    """
+    days = deps.clamp_days(days)
+    workspace_id, _ = deps.control_plane_scope()
+    data, as_of, hit = cache.cached(
+        f"cost/attribution/{workspace_id}/{dimension}/{days}",
+        lambda: cost.attribution(deps.get_ws(), deps.warehouse_id(), dimension, days),
+        refresh,
+    )
+    return envelope(data, as_of, hit)
+
+
+@router.get("/azure-detail")
+def azure_detail(
+    by: str = "meter",
+    days: int = 30,
+    bucket: str | None = None,
+    refresh: bool = False,
+) -> dict:
+    """Detail-grain Azure spend (resource/meter) — per-Foundry-deployment drill."""
+    days = deps.clamp_days(days)
+
+    def load() -> list[dict]:
+        s = deps.get_settings()
+        return azure_cost.report_detail(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            by,
+            days,
+            bucket,
+        )
+
+    data, as_of, hit = cache.cached(
+        f"cost/azure-detail/{by}/{bucket or 'all'}/{days}", load, refresh
+    )
+    return envelope(data, as_of, hit)
+
+
 @router.get("/azure")
 def azure(days: int = 30, by: str = "service", refresh: bool = False) -> dict:
     days = deps.clamp_days(days)

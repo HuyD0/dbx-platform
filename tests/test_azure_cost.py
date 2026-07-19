@@ -357,3 +357,30 @@ def test_findings_ranked_by_cost():
             + _steady("foundry_ai", 100.0, spike=1000.0))
     findings = classify_azure_spend(rows, 50, 5)
     assert [f["service_bucket"] for f in findings] == ["foundry_ai", "databricks"]
+
+
+def test_report_detail_sql_whitelists_dimension_and_bucket():
+    from dbx_platform.azure_cost import report_detail_sql
+
+    sql = report_detail_sql("main", "dbx_platform", "meter")
+    assert "azure_cost_details" in sql
+    assert "GROUP BY meter_name, service_bucket" in sql
+    with pytest.raises(ValueError):
+        report_detail_sql("main", "dbx_platform", "usage_date; DROP TABLE x")
+    with pytest.raises(ValueError):
+        report_detail_sql("main", "dbx_platform", "meter", bucket="foundry'; --")
+
+
+def test_report_detail_sql_resource_dimension_carries_group_and_type():
+    from dbx_platform.azure_cost import report_detail_sql
+
+    sql = report_detail_sql("main", "dbx_platform", "resource")
+    assert "resource_id, resource_group, resource_type" in sql
+
+
+def test_report_detail_sql_binds_bucket_filter():
+    from dbx_platform.azure_cost import report_detail_sql
+
+    sql = report_detail_sql("main", "dbx_platform", "meter", bucket="foundry_ai")
+    assert "service_bucket = :bucket" in sql
+    assert "'foundry_ai'" not in sql
