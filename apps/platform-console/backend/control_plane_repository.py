@@ -259,7 +259,15 @@ class InMemoryControlPlaneRepository:
         rows = [
             row
             for row in rows
-            if (pillar is None or row.get("pillar") == pillar)
+            if (
+                self.workspace_id is None
+                or row.get("workspace_id") == self.workspace_id
+            )
+            and (
+                self.environment is None
+                or row.get("environment") == self.environment
+            )
+            and (pillar is None or row.get("pillar") == pillar)
             and (state is None or row.get("state") == state)
         ]
         _rank_findings(rows)

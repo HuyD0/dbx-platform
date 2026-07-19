@@ -1,4 +1,7 @@
 export type Row = Record<string, unknown>;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonObject = { [key: string]: JsonValue };
 
 export interface Envelope<T> {
   data: T;
@@ -97,9 +100,19 @@ export interface Proposal {
   all?: boolean;
 }
 
+export interface AssistantCitation {
+  citation_id: string;
+  tool: string;
+  source: string;
+  observed_at: string;
+  resource?: string;
+  finding_id?: string;
+}
+
 export interface ChatResponse {
   message: string;
   proposals: Proposal[];
+  citations?: AssistantCitation[];
   endpoint: string;
 }
 
@@ -135,6 +148,126 @@ export interface PillarOutcome {
   summary?: string;
 }
 
+/** Risk values emitted by the action response adapter. */
+export type ActionRisk = "low" | "medium" | "high";
+
+export type ActionStatus =
+  | "AWAITING_APPROVAL"
+  | "APPROVED"
+  | "EXECUTING"
+  | "VERIFYING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "ROLLED_BACK"
+  | "REJECTED"
+  | "EXPIRED"
+  | "STALE";
+
+export type EvidenceCoverageStatus =
+  | "MATCHED"
+  | "NO_MATCH"
+  | "NO_TARGETS"
+  | "UNAVAILABLE";
+
+export interface DecisionEvidenceSummary {
+  matched_count: number;
+  pillars: string[];
+  freshest_at: string | null;
+  coverage_status: EvidenceCoverageStatus;
+}
+
+export interface DecisionQueueItem {
+  action_id: string;
+  action_type: string;
+  status: ActionStatus;
+  raw_status: ActionStatus;
+  effective_status: ActionStatus;
+  risk: ActionRisk;
+  target_count: number;
+  proposer_id: string;
+  proposer_email: string | null;
+  created_at: string;
+  expires_at: string;
+  can_approve: boolean;
+  impact: JsonObject;
+  evidence_summary: DecisionEvidenceSummary;
+}
+
+export interface DecisionQueue {
+  evaluated_at: string;
+  ranking: "risk-expiry-created-v1";
+  active_count: number;
+  expiring_soon_count: number;
+  expired_count: number;
+  items: DecisionQueueItem[];
+}
+
+export type EvidenceRelationship = "supports_action" | "same_target";
+
+export interface ActionEvidenceItem {
+  finding_id: string | null;
+  check_name: string | null;
+  match_type: EvidenceRelationship;
+  pillar: string;
+  severity: string;
+  confidence: number | null;
+  owner: string | null;
+  reason: string | null;
+  state: string;
+  freshness_at: string | null;
+  proposed_action_type: string | null;
+  affected_resources: JsonObject[];
+}
+
+export interface ActionEvidenceCorrelation {
+  items: ActionEvidenceItem[];
+  total: number;
+  truncated: boolean;
+  coverage_status: EvidenceCoverageStatus;
+}
+
+export type ApprovalDecision = "APPROVED" | "REJECTED";
+
+export interface ActionApproval {
+  approval_id: string;
+  action_id: string;
+  plan_hash: string;
+  decision: ApprovalDecision;
+  approver_id: string;
+  approver_email: string | null;
+  approver_role: string;
+  confirmation: string | null;
+  decided_at: string;
+}
+
+export interface ActionEvent {
+  event_id: string;
+  action_id: string;
+  event_type: string;
+  from_status: ActionStatus | null;
+  to_status: ActionStatus | null;
+  actor_id: string | null;
+  details: JsonObject;
+  event_ts: string;
+}
+
+export type ActionTimelineStage =
+  | "plan"
+  | "approval"
+  | "execution"
+  | "verification"
+  | "outcome";
+
+export interface ActionTimelineItem {
+  id: string;
+  stage: ActionTimelineStage;
+  label: string;
+  timestamp?: string | null;
+  actor?: string | null;
+  status?: string | null;
+  detail?: string | null;
+}
+
 export interface MissionControlData {
   scope?: {
     workspace?: string;
@@ -144,28 +277,61 @@ export interface MissionControlData {
   };
   outcomes?: Record<string, PillarOutcome>;
   pending_approvals?: number;
-  decisions?: Row[];
-  changes?: Row[];
+  decision_queue?: DecisionQueue;
+  decisions?: LegacyDecisionRow[];
+  changes?: ActionRequest[];
   data_health?: SourceHealth[];
   findings?: OverviewData["findings"];
   spend?: OverviewData["spend"];
   digest?: OverviewData["digest"];
 }
 
+/** Unstructured rows are accepted only by the explicit legacy Mission Control adapter. */
+export type LegacyDecisionRow = Row;
+
 export interface ActionRequest {
-  id?: string;
-  plan_id?: string;
-  action?: string;
-  action_type?: string;
-  status?: string;
-  risk?: string;
-  proposer?: string;
-  approver?: string;
-  created_at?: string;
-  expires_at?: string;
-  plan_hash?: string;
+  schema_version: number;
+  action_id: string;
+  action_type: string;
+  workspace_id: string;
+  environment: string;
+  targets: JsonObject[];
+  parameters: JsonObject;
+  preconditions: JsonObject;
+  before_state: JsonValue;
+  after_state: JsonValue;
+  impact: JsonObject;
+  rollback: JsonObject;
+  verification: JsonObject;
+  risk: ActionRisk;
+  proposer_id: string;
+  proposer_email: string | null;
+  created_at: string;
+  expires_at: string;
+  idempotency_key: string;
+  confirm_phrase: string;
+  plan_hash: string;
+  status: ActionStatus;
+  updated_at: string;
+  terminal_reason: string | null;
+  plan_id: string;
+  action: string;
+  items: JsonObject[];
+  summary: JsonValue;
+  actions_enabled: boolean;
+  approver_required: boolean;
+  raw_status: ActionStatus;
+  effective_status: ActionStatus;
+  evaluated_at: string;
+  can_approve: boolean;
+  expiry_guidance?: string | null;
   target_count?: number;
-  [key: string]: unknown;
+}
+
+export interface ActionRequestDetail extends ActionRequest {
+  evidence_correlation: ActionEvidenceCorrelation;
+  approvals: ActionApproval[];
+  events: ActionEvent[];
 }
 
 export interface RuntimeState {

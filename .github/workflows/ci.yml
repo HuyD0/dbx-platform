@@ -62,12 +62,26 @@ jobs:
       - name: Install
         working-directory: apps/platform-console/frontend
         run: npm ci
+      - name: Install Chromium
+        working-directory: apps/platform-console/frontend
+        run: npx playwright install --with-deps chromium
       - name: Accessibility and interaction tests
         working-directory: apps/platform-console/frontend
         run: npm test
       - name: Typecheck and build
         working-directory: apps/platform-console/frontend
         run: npm run build
+      - name: Responsive browser and visual tests
+        working-directory: apps/platform-console/frontend
+        run: npm run test:e2e
+      - name: Upload browser test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-console-playwright-report
+          path: apps/platform-console/frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   bundle-validate:
     # Push/dispatch only — never on pull_request. The `production` environment

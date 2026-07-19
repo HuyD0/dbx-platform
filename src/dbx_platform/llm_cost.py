@@ -69,8 +69,25 @@ SOURCE_HEALTH_ROW_SCHEMA = (
 )
 
 
+def _current_workspace_id(
+    w: WorkspaceClient,
+    workspace_id: str | None,
+) -> str:
+    """Resolve a non-empty workspace scope for account-level system tables."""
+
+    resolved = str(workspace_id if workspace_id is not None else w.get_workspace_id()).strip()
+    if not resolved:
+        raise ValueError("workspace_id is required")
+    return resolved
+
+
 def databricks_cost(
-    w: WorkspaceClient, warehouse_id: str, days: int, *, gateway_enriched: bool = True
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    *,
+    gateway_enriched: bool = True,
+    workspace_id: str | None = None,
 ) -> list[dict]:
     """Daily Databricks-hosted model cost at list price.
 
@@ -80,19 +97,55 @@ def databricks_cost(
     """
 
     name = "llm_databricks_gateway_cost" if gateway_enriched else "llm_databricks_cost"
-    return run_query(w, load_query(name), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        load_query(name),
+        warehouse_id,
+        {
+            "days": days,
+            "workspace_id": _current_workspace_id(w, workspace_id),
+        },
+    )
 
 
-def gateway_usage(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def gateway_usage(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    *,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Request, token, retry and latency metrics from Unity AI Gateway."""
 
-    return run_query(w, load_query("llm_gateway_usage"), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        load_query("llm_gateway_usage"),
+        warehouse_id,
+        {
+            "days": days,
+            "workspace_id": _current_workspace_id(w, workspace_id),
+        },
+    )
 
 
-def endpoint_usage(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def endpoint_usage(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    *,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Compatibility usage query for the legacy serving usage table."""
 
-    return run_query(w, load_query("llm_endpoint_usage_daily"), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        load_query("llm_endpoint_usage_daily"),
+        warehouse_id,
+        {
+            "days": days,
+            "workspace_id": _current_workspace_id(w, workspace_id),
+        },
+    )
 
 
 def external_model_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:

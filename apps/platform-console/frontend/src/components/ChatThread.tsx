@@ -1,7 +1,8 @@
-import { ArrowUp, DollarSign, Gauge, Shield, Sparkles } from "lucide-react";
+import { ArrowUp, BookOpenCheck, DollarSign, Gauge, Shield, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChat } from "../lib/chat";
+import { timeAgo } from "../lib/format";
 import type { Proposal } from "../lib/types";
 import { ActionPlanDialog, PlanActionButton } from "./ActionPlanDialog";
 import { ErrorState } from "./ui";
@@ -205,6 +206,38 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                     <div className="prose-console text-ink-2">
                       <ReactMarkdown>{turn.content}</ReactMarkdown>
                     </div>
+                    {(turn.citations?.length ?? 0) > 0 && (
+                      <div className="mt-3 rounded-xl border border-grid bg-page/40 p-3">
+                        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-ink">
+                          <BookOpenCheck className="h-3.5 w-3.5 text-accent" />
+                          Sources cited
+                        </p>
+                        <ul className="mt-2 space-y-2" aria-label="Assistant evidence citations">
+                          {turn.citations?.map((citation) => (
+                            <li
+                              key={citation.citation_id}
+                              className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-[11px]"
+                            >
+                              <span className="font-medium text-ink-2">{citation.source}</span>
+                              <span className="text-muted">
+                                {citation.tool} ·{" "}
+                                <time
+                                  dateTime={citation.observed_at}
+                                  title={citation.observed_at}
+                                >
+                                  {timeAgo(citation.observed_at)}
+                                </time>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {turn.focusActionId && (turn.citations?.length ?? 0) === 0 && (
+                      <p className="mt-3 rounded-lg border border-grid bg-page/40 px-3 py-2 text-[11px] text-muted">
+                        No structured source citation was returned for this focused answer.
+                      </p>
+                    )}
                     {turn.proposals?.map((p, j) =>
                       p.kind === "job" ? (
                         p.all ? (

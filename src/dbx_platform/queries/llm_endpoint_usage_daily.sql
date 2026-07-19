@@ -3,7 +3,7 @@
 SELECT
   DATE(eu.request_time)                                          AS usage_date,
   DATE_TRUNC('HOUR', eu.request_time)                            AS usage_hour,
-  'current'                                                      AS workspace_id,
+  eu.workspace_id                                                AS workspace_id,
   'databricks-serving'                                          AS provider,
   COALESCE(se.entity_name, eu.served_entity_id, 'unallocated')   AS model,
   COALESCE(se.endpoint_name, eu.served_entity_id, 'unallocated') AS endpoint,
@@ -23,10 +23,13 @@ SELECT
 FROM system.serving.endpoint_usage eu
 LEFT JOIN system.serving.served_entities se
   ON eu.served_entity_id = se.served_entity_id
+  AND eu.workspace_id = se.workspace_id
 WHERE DATE(eu.request_time) >= DATE_SUB(CURRENT_DATE(), :days)
+  AND eu.workspace_id = :workspace_id
 GROUP BY
   usage_date,
   usage_hour,
+  eu.workspace_id,
   model,
   endpoint,
   principal

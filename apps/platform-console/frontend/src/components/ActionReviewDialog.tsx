@@ -1,29 +1,85 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Fingerprint, ShieldCheck, X, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Fingerprint,
+  Info,
+  ShieldCheck,
+  X,
+  XCircle,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiGet, apiPost } from "../lib/api";
-import type { ActionRequest, Row } from "../lib/types";
+import { dateTime } from "../lib/format";
+import type {
+  ActionEvent,
+  ActionRequestDetail,
+  ActionStatus,
+  Row,
+} from "../lib/types";
 import { DataTable } from "./DataTable";
 import { Badge, ErrorState, Skeleton, statusTone } from "./ui";
 
-type ActionDetail = ActionRequest & {
-  action_id: string;
-  action_type: string;
-  plan_hash: string;
-  confirm_phrase: string;
-  status: string;
-  actions_enabled: boolean;
-  targets?: Row[];
-  items?: Row[];
-  impact?: Row;
-  rollback?: Row | string;
-  verification?: Row | string;
-  before_state?: unknown;
-  after_state?: unknown;
-  approvals?: Row[];
-  events?: Row[];
-};
+function useServerClock(evaluatedAt?: string, expiresAt?: string): number | null {
+  const parsedAnchor = Date.parse(evaluatedAt ?? "");
+  const [clock, setClock] = useState<{
+    evaluatedAt: string | undefined;
+    value: number | null;
+  }>({ evaluatedAt, value: Number.isFinite(parsedAnchor) ? parsedAnchor : null });
+  useEffect(() => {
+    const serverAnchor = Date.parse(evaluatedAt ?? "");
+    if (!Number.isFinite(serverAnchor)) {
+      setClock({ evaluatedAt, value: null });
+      return;
+    }
+    const localAnchor = Date.now();
+    const update = () =>
+      setClock({ evaluatedAt, value: serverAnchor + (Date.now() - localAnchor) });
+    update();
+    const interval = window.setInterval(update, 1_000);
+    const expiry = Date.parse(expiresAt ?? "");
+    const boundaryDelay = Number.isFinite(expiry) ? expiry - serverAnchor : NaN;
+    const boundary =
+      Number.isFinite(boundaryDelay) && boundaryDelay >= 0
+        ? window.setTimeout(update, boundaryDelay + 1)
+        : null;
+    return () => {
+      window.clearInterval(interval);
+      if (boundary !== null) window.clearTimeout(boundary);
+    };
+  }, [evaluatedAt, expiresAt]);
+  if (clock.evaluatedAt !== evaluatedAt) {
+    return Number.isFinite(parsedAnchor) ? parsedAnchor : null;
+  }
+  return clock.value;
+}
+
+function effectiveStatus(action: ActionRequestDetail, serverNow: number | null): ActionStatus {
+  const expiry = Date.parse(action.expires_at);
+  if (
+    ["AWAITING_APPROVAL", "APPROVED"].includes(action.effective_status) &&
+    serverNow !== null &&
+    Number.isFinite(expiry) &&
+    expiry <= serverNow
+  ) {
+    return "EXPIRED";
+  }
+  return action.effective_status;
+}
+
+/** The generic table remains a legacy row renderer; adapt strict events explicitly. */
+function actionEventRows(events: ActionEvent[]): Row[] {
+  return events.map((event) => ({
+    event_id: event.event_id,
+    event_type: event.event_type,
+    from_status: event.from_status,
+    to_status: event.to_status,
+    actor_id: event.actor_id,
+    event_ts: event.event_ts,
+    details: event.details,
+  }));
+}
 
 function Detail({ label, value }: { label: string; value: unknown }) {
   if (value === undefined || value === null || value === "") return null;
@@ -50,18 +106,19 @@ export function ActionReviewDialog({
   const [reason, setReason] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const confirmApprovalRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const previousFocus = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
   const query = useQuery({
     queryKey: ["action-request", actionId],
-    queryFn: () => apiGet<ActionDetail>(`/api/action-requests/${actionId}`),
+    queryFn: () => apiGet<ActionRequestDetail>(`/api/action-requests/${actionId}`),
     retry: false,
   });
   const approve = useMutation({
-    mutationFn: (action: ActionDetail) =>
-      apiPost<ActionDetail>(`/api/action-requests/${action.action_id}/approve`, {
+    mutationFn: (action: ActionRequestDetail) =>
+      apiPost<ActionRequestDetail>(`/api/action-requests/${action.action_id}/approve`, {
         plan_hash: action.plan_hash,
       }),
     onSuccess: () => {
@@ -70,8 +127,8 @@ export function ActionReviewDialog({
     },
   });
   const reject = useMutation({
-    mutationFn: (action: ActionDetail) =>
-      apiPost<ActionDetail>(`/api/action-requests/${action.action_id}/reject`, {
+    mutationFn: (action: ActionRequestDetail) =>
+      apiPost<ActionRequestDetail>(`/api/action-requests/${action.action_id}/reject`, {
         plan_hash: action.plan_hash,
         reason: reason.trim() || "Rejected by approver.",
       }),
@@ -117,12 +174,34 @@ export function ActionReviewDialog({
   }, [onClose]);
 
   const action = query.data;
-  const items = action?.targets ?? action?.items ?? [];
-  const pending = action?.status === "AWAITING_APPROVAL";
+  const items = action?.targets ?? [];
+  const serverNow = useServerClock(action?.evaluated_at, action?.expires_at);
+  const displayStatus = action ? effectiveStatus(action, serverNow) : "";
+  const pending = displayStatus === "AWAITING_APPROVAL";
+  const expired = displayStatus === "EXPIRED";
+  const expiry = Date.parse(action?.expires_at ?? "");
+  const timingValid = serverNow !== null && Number.isFinite(expiry) && expiry > serverNow;
+  const canApprove =
+    action !== undefined &&
+    pending &&
+    timingValid &&
+    action.can_approve === true;
+
+  useEffect(() => {
+    if (confirming) {
+      window.requestAnimationFrame(() => confirmApprovalRef.current?.focus());
+    }
+  }, [confirming]);
+
+  useEffect(() => {
+    if (canApprove || !confirming) return;
+    setConfirming(false);
+    window.requestAnimationFrame(() => closeRef.current?.focus());
+  }, [canApprove, confirming]);
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -148,7 +227,7 @@ export function ActionReviewDialog({
             type="button"
             onClick={onClose}
             aria-label="Close action review"
-            className="rounded-lg p-1.5 text-muted hover:bg-hairline"
+            className="min-h-8 min-w-8 rounded-lg p-1.5 text-muted hover:bg-hairline"
           >
             <X className="h-4 w-4" />
           </button>
@@ -159,14 +238,22 @@ export function ActionReviewDialog({
         {action && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-grid bg-page/30 p-3 text-xs">
-              <Badge tone={statusTone(action.status)}>{action.status.replaceAll("_", " ")}</Badge>
+              <Badge tone={statusTone(displayStatus)}>{displayStatus.replaceAll("_", " ")}</Badge>
               <Badge tone={statusTone(action.risk)}>{String(action.risk)} risk</Badge>
               <span className="font-medium text-ink">{action.action_type}</span>
               <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[10px] text-muted">
                 <Fingerprint className="h-3.5 w-3.5" />
                 <span title={action.plan_hash}>{action.plan_hash.slice(0, 16)}…</span>
               </span>
-              <span className="ml-auto text-muted">expires {String(action.expires_at)}</span>
+              <span className="ml-auto text-muted">expires {dateTime(action.expires_at)}</span>
+              {action.evaluated_at && (
+                <span className="text-muted">evaluated {dateTime(action.evaluated_at)}</span>
+              )}
+              {String(action.status).toUpperCase() !== displayStatus && (
+                <span className="basis-full text-muted">
+                  Ledger status: {String(action.status).replaceAll("_", " ")}
+                </span>
+              )}
             </div>
 
             {items.length > 0 && (
@@ -184,16 +271,16 @@ export function ActionReviewDialog({
               <Detail label="Verification" value={action.verification} />
             </div>
 
-            {(action.events?.length ?? 0) > 0 && (
+            {action.events.length > 0 && (
               <DataTable
-                rows={action.events ?? []}
+                rows={actionEventRows(action.events)}
                 pageSize={6}
                 exportName={`action-${action.action_id}-events`}
                 caption="Action audit events"
               />
             )}
 
-            {pending && action.actions_enabled && (
+            {pending && action.actions_enabled && canApprove && (
               <div className="grid gap-3 rounded-xl border border-status-warning/30 bg-status-warning/5 p-3 md:grid-cols-2">
                 <div>
                   {!confirming ? (
@@ -206,7 +293,7 @@ export function ActionReviewDialog({
                         type="button"
                         disabled={approve.isPending}
                         onClick={() => setConfirming(true)}
-                        className="mt-2 inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                        className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-mid px-3 py-2 text-sm font-medium text-white hover:bg-brand-maroon disabled:opacity-40"
                       >
                         <ShieldCheck className="h-4 w-4" />
                         Approve action
@@ -223,15 +310,16 @@ export function ActionReviewDialog({
                         <button
                           type="button"
                           onClick={() => setConfirming(false)}
-                          className="rounded-lg border border-grid px-3 py-2 text-sm font-medium text-ink hover:bg-hairline"
+                          className="min-h-11 rounded-lg border border-grid px-3 py-2 text-sm font-medium text-ink hover:bg-hairline"
                         >
                           Back
                         </button>
                         <button
+                          ref={confirmApprovalRef}
                           type="button"
                           disabled={approve.isPending}
                           onClick={() => approve.mutate(action)}
-                          className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-mid px-3 py-2 text-sm font-medium text-white hover:bg-brand-maroon disabled:opacity-40"
                         >
                           <ShieldCheck className="h-4 w-4" />
                           {approve.isPending ? "Approving…" : "Confirm approval"}
@@ -255,7 +343,7 @@ export function ActionReviewDialog({
                     type="button"
                     disabled={reject.isPending}
                     onClick={() => reject.mutate(action)}
-                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-status-critical/40 px-3 py-2 text-sm font-medium text-status-critical hover:bg-status-critical/10 disabled:opacity-40"
+                    className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-lg border border-status-critical/40 px-3 py-2 text-sm font-medium text-status-critical hover:bg-critical-surface disabled:opacity-40"
                   >
                     <XCircle className="h-4 w-4" />
                     {reject.isPending ? "Rejecting…" : "Reject plan"}
@@ -269,12 +357,38 @@ export function ActionReviewDialog({
                 and executor submission are disabled.
               </p>
             )}
+            {pending && action.actions_enabled && !canApprove && (
+              <div
+                className="flex items-start gap-2 rounded-lg border border-status-serious/30 bg-serious-surface p-3 text-xs leading-5 text-ink-2"
+                role="status"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-serious" />
+                This exact plan is not currently approvable. Refresh its status before taking
+                another decision.
+              </div>
+            )}
             {(approve.isError || reject.isError) && (
               <ErrorState error={approve.error ?? reject.error} />
             )}
-            {!pending && (
+            {expired && (
+              <div
+                className="flex items-start gap-2 rounded-lg border border-warning-accent bg-warning-surface p-3 text-xs leading-5 text-brand-maroon dark:text-ink-2"
+                role="status"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
+                <span>
+                  This exact plan has expired and cannot be approved or replayed. Create a new
+                  exact plan so its targets, evidence, and preconditions can be revalidated.
+                </span>
+              </div>
+            )}
+            {!pending && !expired && (
               <div className="flex items-start gap-2 rounded-lg border border-grid bg-page/30 p-3 text-xs text-ink-2">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-good" />
+                {["SUCCEEDED", "VERIFIED"].includes(displayStatus) ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-good" />
+                ) : (
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-status-info" />
+                )}
                 This request is no longer awaiting a decision. Its complete history remains
                 available above.
               </div>
