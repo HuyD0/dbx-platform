@@ -38,6 +38,8 @@ jobs:
           cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
           uv lock --project apps/platform-console
           uv sync --frozen --project apps/platform-console --no-install-project
+          apps/platform-console/.venv/bin/python -m unittest discover \
+            -s apps/platform-console/tests -v
       - name: Verify packaged data (queries + policies ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"

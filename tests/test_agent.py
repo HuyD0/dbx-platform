@@ -91,6 +91,8 @@ def test_platform_console_hosts_langgraph_agent_without_direct_invocation():
         root / "apps" / "platform-console" / "backend" / "routers" / "chat.py"
     ).read_text()
     assert "create_react_agent" in runtime
+    assert "DatabricksChatModel" in runtime
+    assert "databricks_langchain" not in runtime
     assert "get_platform_agent().invoke" in router
     assert "api_client.do(" not in router
     for forbidden in ("action_executor", "run_now", "jobs.update", "jobs.delete"):

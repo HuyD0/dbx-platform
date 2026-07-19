@@ -108,8 +108,27 @@ def test_app_yaml_launches_the_backend():
     ] == ["sql"]
     project = (APP_DIR / "pyproject.toml").read_text()
     assert '"fastapi==0.139.2"' in project
-    assert '"mlflow==3.14.0"' in project
+    assert '"langgraph==1.2.9"' in project
+    assert '"mlflow-tracing==3.14.0"' in project
+    assert "databricks-langchain" not in project
+    assert '"mlflow==' not in project
     assert 'dbx-platform = { path = "wheels/' in project
+
+    experiment = bundle_config["resources"]["experiments"][
+        "platform_console_traces"
+    ]
+    assert experiment["lifecycle"]["prevent_destroy"] is True
+    app = bundle_config["resources"]["apps"]["platform_console"]
+    trace_resource = next(
+        resource
+        for resource in app["resources"]
+        if resource["name"] == "agent-traces"
+    )
+    assert trace_resource["experiment"]["permission"] == "CAN_EDIT"
+    assert {
+        item["name"]: item.get("value_from")
+        for item in app["config"]["env"]
+    }["MLFLOW_EXPERIMENT_ID"] == "agent-traces"
 
 
 def test_bundle_artifact_build_uses_managed_environment():
