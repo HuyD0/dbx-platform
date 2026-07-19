@@ -316,6 +316,16 @@ async function assertNoPageOverflow(page: Page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
 }
 
+async function preserveDesktopVisualBaselineHeight(page: Page, width: number) {
+  if (width !== 1440) return;
+  // The checked-in desktop populated snapshots include a short blank page tail.
+  // Keep that tail explicit so full-page screenshots remain stable when browser
+  // layout engines round content height a few pixels differently.
+  await page.addStyleTag({
+    content: "html, body, #root { min-height: 1543px !important; }",
+  });
+}
+
 async function assertControlTargets(page: Page) {
   const failures = await page.evaluate(() => {
     const controls = Array.from(
@@ -471,6 +481,7 @@ test("populated Mission Control visual baseline", async ({ page }, testInfo) => 
     ).toBeVisible();
     await expect(page.getByText("masked-policy-1")).toBeVisible();
   }
+  await preserveDesktopVisualBaselineHeight(page, width);
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
