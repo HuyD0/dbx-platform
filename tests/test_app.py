@@ -117,6 +117,9 @@ def test_app_yaml_launches_the_backend():
     experiment = bundle_config["resources"]["experiments"][
         "platform_console_traces"
     ]
+    assert experiment["name"] == (
+        "/Shared/dbx-platform-${bundle.target}-platform-console-traces"
+    )
     assert experiment["lifecycle"]["prevent_destroy"] is True
     app = bundle_config["resources"]["apps"]["platform_console"]
     trace_resource = next(
