@@ -274,9 +274,8 @@ export default function App() {
 
           <header
             aria-hidden={mobileNavOpen || assistantOpen || undefined}
-            className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center justify-between px-4 lg:hidden"
+            className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center gap-1 px-2 lg:hidden"
           >
-            <Brand />
             <button
               ref={mobileTriggerRef}
               type="button"
@@ -287,6 +286,7 @@ export default function App() {
             >
               <Menu className="h-5 w-5" />
             </button>
+            <Brand />
           </header>
 
           {mobileNavOpen && (
