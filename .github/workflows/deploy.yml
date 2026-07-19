@@ -135,6 +135,7 @@ jobs:
           databricks bundle deploy -t prod \
             "${lock_args[@]}" \
             --select apps.platform_console \
+            --select experiments.platform_console_traces \
             --select sql_warehouses.platform_console_warehouse \
             --select jobs.action_executor \
             --select jobs.ai_catalog_sync \

@@ -8,6 +8,7 @@ a separate model-serving endpoint.
 from __future__ import annotations
 
 import json
+import os
 from functools import cached_property
 from typing import Any
 from urllib.parse import quote
@@ -124,6 +125,21 @@ class DatabricksChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+def _configure_mlflow_tracing(experiment_id: str) -> None:
+    """Enable production LangGraph tracing against the App-bound experiment."""
+
+    if not experiment_id:
+        raise RuntimeError(
+            "The App-bound MLflow trace experiment is not configured."
+        )
+    import mlflow
+    import mlflow.langchain
+
+    mlflow.set_tracking_uri("databricks")
+    mlflow.set_experiment(experiment_id=experiment_id)
+    mlflow.langchain.autolog(log_traces=True, silent=True)
+
+
 class PlatformAgent:
     """Lazy, process-local LangGraph runtime with App-safe tool bindings."""
 
@@ -236,6 +252,9 @@ class PlatformAgent:
     @cached_property
     def graph(self):
         from langgraph.prebuilt import create_react_agent
+
+        experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "").strip()
+        _configure_mlflow_tracing(experiment_id)
 
         shared_tools.configure_runtime(
             client_factory=self.workspace_client_factory,

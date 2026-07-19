@@ -3,12 +3,15 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 APP_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP_DIR))
 
-from backend.platform_agent import DatabricksChatModel  # noqa: E402
+from backend.platform_agent import (  # noqa: E402
+    DatabricksChatModel,
+    _configure_mlflow_tracing,
+)
 from langchain_core.messages import (  # noqa: E402
     AIMessage,
     HumanMessage,
@@ -95,6 +98,22 @@ class DatabricksChatModelTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "no chat choices"):
             model._generate([HumanMessage(content="hello")])
+
+    def test_configures_langgraph_tracing_for_bound_experiment(self) -> None:
+        with (
+            patch("mlflow.set_tracking_uri") as set_tracking_uri,
+            patch("mlflow.set_experiment") as set_experiment,
+            patch("mlflow.langchain.autolog") as autolog,
+        ):
+            _configure_mlflow_tracing("experiment-123")
+
+        set_tracking_uri.assert_called_once_with("databricks")
+        set_experiment.assert_called_once_with(experiment_id="experiment-123")
+        autolog.assert_called_once_with(log_traces=True, silent=True)
+
+    def test_trace_experiment_is_required(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "trace experiment"):
+            _configure_mlflow_tracing("")
 
 
 if __name__ == "__main__":
