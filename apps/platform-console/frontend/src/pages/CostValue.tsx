@@ -145,8 +145,8 @@ function AzureCost() {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
-        Azure amounts are billed actuals from Cost Management. They remain separate from
-        Databricks list cost and expose their original currency.
+        Azure amounts are billed costs from the configured resource-group scope. They remain
+        separate from Databricks list cost and expose their original currency.
       </div>
       <div className="flex flex-wrap items-center gap-4 text-xs">
         <div className="flex items-center gap-1" role="group" aria-label="Azure cost window">
@@ -192,6 +192,13 @@ function AzureCost() {
         path="/api/cost/azure"
         params={{ days, by }}
         emptyMessage={`No Azure billing rows in the last ${days} days.`}
+      />
+      <FindingsSection
+        title="Databricks ↔ Azure reconciliation"
+        subtitle="Daily SKU-family bridge; variance is withheld when currencies differ"
+        path="/api/cost/reconciliation"
+        params={{ days }}
+        emptyMessage="No scoped Databricks and Azure billing rows are available to compare."
       />
       <FindingsSection
         title="Foundry deployment drill"
@@ -263,7 +270,7 @@ function Budgets() {
       <Card>
         <SectionTitle
           title="Databricks account budgets"
-          subtitle="Native account-console budgets use Databricks list price in USD and require an account admin"
+          subtitle="Use native budgets for near-real-time enforcement; Mission Control budgets remain analytical guardrails"
         />
         <p className="text-xs leading-5 text-ink-2">
           Native Databricks budgets are account-level objects, while this app currently has a
@@ -287,6 +294,14 @@ function Budgets() {
             className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
           >
             Azure budget documentation <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="https://learn.microsoft.com/en-us/azure/databricks/genie/budgets"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
+          >
+            Genie budget controls <ExternalLink className="h-3.5 w-3.5" />
           </a>
         </div>
       </Card>

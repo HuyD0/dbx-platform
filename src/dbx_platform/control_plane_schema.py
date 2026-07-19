@@ -121,10 +121,14 @@ MIGRATION_COLUMNS: dict[str, dict[str, str]] = {
     "azure_costs": {
         "workspace_id": "STRING",
         "environment": "STRING",
+        "subscription_id": "STRING",
+        "scope_filter": "STRING",
     },
     "azure_cost_details": {
         "workspace_id": "STRING",
         "environment": "STRING",
+        "subscription_id": "STRING",
+        "scope_filter": "STRING",
     },
     "action_approvals": {
         "workspace_id": "STRING",

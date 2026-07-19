@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -11,6 +11,7 @@ from dbx_platform.llm_cost import (
     create_ledger_table_statements,
     efficiency,
     evaluate_budgets,
+    mark_source_stale,
     mask_identity,
     merge_cost_rows_sql,
     merge_source_health_sql,
@@ -89,7 +90,7 @@ def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
     assert len(calls) == 4
     assert all(warehouse == "warehouse-1" for _, warehouse, _ in calls)
     assert all(
-        parameters == {"days": 30, "workspace_id": "12345"}
+        parameters == {"days": 29, "workspace_id": "12345"}
         for _, _, parameters in calls
     )
     assert all(":workspace_id" in sql for sql, _, _ in calls)
@@ -98,6 +99,8 @@ def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
         for sql, _, _ in calls
     )
     assert "eu.workspace_id = se.workspace_id" in calls[3][0]
+    assert "billing_origin_product = 'GENIE'" in calls[0][0]
+    assert "billing_origin_product = 'GENIE'" in calls[1][0]
     assert "'current'" not in calls[3][0]
 
 
@@ -123,7 +126,7 @@ def test_live_llm_sources_honor_an_explicit_workspace_scope(monkeypatch):
     )
 
     assert seen_parameters == [
-        {"days": 7, "workspace_id": "workspace-current"}
+        {"days": 6, "workspace_id": "workspace-current"}
     ]
 
 
@@ -168,7 +171,36 @@ def test_azure_actual_cost_labels_coarse_fallback_as_partial(monkeypatch):
 
     assert result.rows == [_cost()]
     assert result.status == "partial"
+    assert result.source == "azure_costs"
     assert "resource/meter/use-case attribution is unavailable" in result.notes
+
+
+def test_azure_actual_cost_falls_back_when_detail_table_is_empty(monkeypatch):
+    calls = []
+
+    def query(_w, sql, _warehouse, params):
+        calls.append((sql, params))
+        return [] if len(calls) == 1 else [_cost()]
+
+    monkeypatch.setattr("dbx_platform.llm_cost.run_query", query)
+
+    result = azure_actual_cost(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        3,
+        workspace_id="w1",
+        environment="prod",
+    )
+
+    assert len(calls) == 2
+    assert all(params["days"] == 2 for _, params in calls)
+    assert all("COALESCE(scope_filter, '') <> ''" in sql for sql, _ in calls)
+    assert result.rows == [_cost()]
+    assert result.status == "partial"
+    assert result.source == "azure_costs"
+    assert "no scoped detail rows" in result.notes
 
 
 def test_normalize_cost_rejects_unknown_basis():
@@ -384,6 +416,33 @@ def test_coverage_record_keeps_financial_basis_explicit():
     )
     assert record["cost_basis"] == "AZURE_ACTUAL"
     assert record["retention_days"] == 400
+
+
+def test_old_source_success_is_marked_stale_at_read_time():
+    now = datetime(2026, 7, 19, 12, tzinfo=UTC)
+    source = {
+        "source_key": "azure-cost-management",
+        "status": "available",
+        "last_success_at": now - timedelta(hours=51),
+        "notes": "late adjustments possible",
+    }
+
+    stale = mark_source_stale(source, now=now)
+
+    assert stale["status"] == "stale"
+    assert "51.0 hours old" in stale["notes"]
+    assert source["status"] == "available"
+
+
+def test_recent_source_success_remains_available():
+    now = datetime(2026, 7, 19, 12, tzinfo=UTC)
+    source = {
+        "source_key": "databricks-hosted-billing",
+        "status": "available",
+        "last_success_at": now - timedelta(hours=25),
+    }
+
+    assert mark_source_stale(source, now=now)["status"] == "available"
 
 
 def test_ledger_ddl_creates_cost_usage_budget_and_source_health_tables():
