@@ -404,3 +404,87 @@ export interface LlmEfficiency {
   recommendations?: Row[];
   [key: string]: unknown;
 }
+
+// --- AI Cost Planner (estimator) ---
+
+export interface EstimatorPattern {
+  pattern: string;
+  label: string;
+  description: string;
+  example_prompt: string;
+  defaults: Record<string, unknown>;
+}
+
+export interface EstimateLineItem {
+  component: string;
+  env: string;
+  tier: string;
+  scenario: string;
+  label: string;
+  quantity: number;
+  unit: string;
+  unit_price: number | null;
+  currency: string | null;
+  price_source: string | null;
+  meter_name: string | null;
+  snapshot_date: string | null;
+  provenance: string | null;
+  monthly_cost: number | null;
+  formula: string;
+  assumptions: string[];
+  is_eval_tax: boolean;
+  eval_group: string | null;
+}
+
+export interface RigorCurveEnv {
+  total_fixed: number;
+  total_slope_per_pct: number;
+  eval_fixed: number;
+  eval_slope_per_pct: number;
+}
+
+export interface TierScenarioEstimate {
+  tier: string;
+  scenario: string;
+  rigor_pct: number;
+  line_items: EstimateLineItem[];
+  totals_by_env: Record<string, number>;
+  run_cost_by_env: Record<string, number>;
+  eval_tax_by_env: Record<string, number>;
+  improvement_pipeline_by_env: Record<string, number>;
+  missing_prices: string[];
+  rigor_curve: { pinned: boolean; by_env: Record<string, RigorCurveEnv> };
+}
+
+export interface EstimateTier {
+  label: string;
+  description: string;
+  rigor_locked: boolean;
+  rigor_locked_reason: string;
+  default_rigor_pct: number;
+  scenarios: Record<string, TierScenarioEstimate>;
+}
+
+export interface EstimateMatrix {
+  engine_version: string;
+  rate_card_version: string;
+  snapshot_date: string;
+  requirements: Record<string, unknown>;
+  rigor_pct: number;
+  requirements_hash: string;
+  blueprint: { title: string; body: string }[];
+  tiers: Record<string, EstimateTier>;
+}
+
+export interface ExtractResponse {
+  requirements: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface PricingStatus {
+  sources: Row[];
+  snapshot_date?: string | null;
+  coverage_findings: Row[];
+  notes: string[];
+  health: SourceHealth;
+}
