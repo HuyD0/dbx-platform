@@ -4,6 +4,10 @@ import { apiGet, apiPost } from "../../lib/api";
 import type { Envelope, SavedEstimateSummary } from "../../lib/types";
 import { DataTable } from "../DataTable";
 import { Card, EmptyState, SectionTitle } from "../ui";
+import { LinkDeploymentForm } from "./DeploymentsPanel";
+
+const ESTIMATE_TIERS = ["prototype", "production", "fiduciary"];
+const ESTIMATE_SCENARIOS = ["databricks", "azure"];
 
 /** Save-to-library control. The server recomputes the estimate from the saved
  * requirements before storing, so the library can never contain a number the
@@ -91,16 +95,26 @@ export function EstimateLibrary({
           caption="Saved estimates"
           exportName="ai-cost-planner-library"
           pageSize={8}
-          rowAction={(row) => (
-            <button
-              type="button"
-              onClick={() => onReuse((row as { _row: SavedEstimateSummary })._row)}
-              className="rounded-lg border border-hairline px-2 py-1 text-xs text-ink-2 hover:text-ink"
-            >
-              Use as starting point
-            </button>
-          )}
-          rowActionLabel="Reuse"
+          rowAction={(row) => {
+            const saved = (row as { _row: SavedEstimateSummary })._row;
+            return (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onReuse(saved)}
+                  className="rounded-lg border border-hairline px-2 py-1 text-xs text-ink-2 hover:text-ink"
+                >
+                  Use as starting point
+                </button>
+                <LinkDeploymentForm
+                  estimateId={saved.estimate_id}
+                  tiers={ESTIMATE_TIERS}
+                  scenarios={ESTIMATE_SCENARIOS}
+                />
+              </div>
+            );
+          }}
+          rowActionLabel="Actions"
         />
       )}
     </Card>

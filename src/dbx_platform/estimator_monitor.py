@@ -35,7 +35,14 @@ from dbx_platform.estimator import (
 from dbx_platform.system_tables import run_query
 
 REPRICING_THRESHOLD_PCT = 15.0
+ACTUALS_THRESHOLD_PCT = 25.0
 REPRICING_CHECK = "cost/estimate-repricing-drift"
+ACTUALS_CHECK = "cost/estimate-drift"
+
+_TAG_ANCHORS = {
+    "databricks_project_tag": "project",
+    "databricks_team_tag": "team",
+}
 
 
 # --- readers (impure) ---------------------------------------------------------
@@ -66,6 +73,129 @@ def fetch_saved_estimates(
         warehouse_id,
         {"workspace_id": workspace_id, "environment": environment, "limit": int(limit)},
     )
+
+
+def fetch_active_deployments(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    *,
+    workspace_id: str,
+    environment: str,
+) -> list[dict]:
+    """Latest active deploy-link per estimate for this scope. Pure SQL.
+
+    The link table is append-only: the newest row per (estimate_id) wins, and
+    a link is live only when that newest row has ``active = true`` (a retire
+    appends ``active=false``).
+    """
+    sql = (
+        "WITH ranked AS ("
+        "SELECT *, ROW_NUMBER() OVER ("
+        "PARTITION BY estimate_id ORDER BY created_at DESC) AS rn "
+        f"FROM {catalog}.{schema}.estimator_deployments "
+        "WHERE workspace_id = :workspace_id AND environment = :environment) "
+        "SELECT deployment_id, estimate_id, tier, scenario, anchor_kind, "
+        "anchor_value, monthly_projected_usd, currency "
+        "FROM ranked WHERE rn = 1 AND active = true"
+    )
+    return run_query(
+        w, sql, warehouse_id, {"workspace_id": workspace_id, "environment": environment}
+    )
+
+
+def fetch_anchor_actuals(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    deployments: list[dict],
+    *,
+    days: int = 30,
+) -> dict[tuple[str, str], float]:
+    """Trailing-``days`` actual spend per distinct (anchor_kind, value). Impure.
+
+    ``azure_resource_group`` sums the ingested Azure bill (AZURE_ACTUAL basis);
+    the Databricks tag anchors use ``cost.attribution`` list cost
+    (DATABRICKS_LIST basis). Anchors with no rows yet return no entry (the
+    classifier skips too-new deployments rather than flagging a phantom gap).
+    """
+    from dbx_platform import cost
+
+    actuals: dict[tuple[str, str], float] = {}
+    wanted = {(str(d["anchor_kind"]), str(d["anchor_value"])) for d in deployments}
+    for kind, value in wanted:
+        if kind == "azure_resource_group":
+            rows = run_query(
+                w,
+                "SELECT ROUND(SUM(cost), 2) AS actual FROM "
+                f"{catalog}.{schema}.azure_costs "
+                "WHERE resource_group = :rg "
+                "AND usage_date >= DATE_SUB(CURRENT_DATE(), :days)",
+                warehouse_id,
+                {"rg": value, "days": int(days)},
+            )
+            total = rows[0].get("actual") if rows else None
+        elif kind in _TAG_ANCHORS:
+            rows = cost.attribution(w, warehouse_id, _TAG_ANCHORS[kind], days)
+            tag_col = f"x_{_TAG_ANCHORS[kind]}"
+            total = next(
+                (r.get("list_cost") for r in rows if str(r.get(tag_col)) == value), None
+            )
+        else:
+            continue
+        if total is not None:
+            actuals[(kind, value)] = float(total)
+    return actuals
+
+
+def classify_actuals_drift(
+    deployments: list[dict],
+    actuals: dict[tuple[str, str], float],
+    *,
+    threshold_pct: float = ACTUALS_THRESHOLD_PCT,
+) -> list[dict]:
+    """Compare each active link's projection to its anchor's real spend. Pure.
+
+    A deployment whose anchor has no actuals yet (too new to have accrued a
+    month) is skipped, never flagged. The finding is honest that the anchor
+    may include non-AI resources, so this is a directional signal, not an audit.
+    """
+    findings: list[dict] = []
+    for dep in deployments:
+        anchor = (str(dep.get("anchor_kind")), str(dep.get("anchor_value")))
+        actual = actuals.get(anchor)
+        projected = float(dep.get("monthly_projected_usd") or 0.0)
+        if actual is None or projected <= 0:
+            continue
+        change_pct = (actual - projected) / projected * 100
+        if abs(change_pct) < threshold_pct:
+            continue
+        basis = (
+            "Azure actual bill"
+            if anchor[0] == "azure_resource_group"
+            else "Databricks list cost"
+        )
+        findings.append(
+            {
+                "deployment_id": dep.get("deployment_id"),
+                "estimate_id": dep.get("estimate_id"),
+                "resource": anchor[1],
+                "reason": (
+                    f"projected ${projected:,.0f}/mo ({dep.get('tier')}, "
+                    f"{dep.get('scenario')}); {basis} for {anchor[0]} '{anchor[1]}' "
+                    f"is ${actual:,.0f}/mo over the last 30 days ({change_pct:+.0f}%). "
+                    "The anchor may include non-AI resources — treat as a "
+                    "directional signal."
+                ),
+                "action": "review-estimate-vs-actual",
+                "cost_usd": round(abs(actual - projected), 2),
+                "anchor_kind": anchor[0],
+            }
+        )
+    findings.sort(key=lambda f: f["cost_usd"], reverse=True)
+    return findings
 
 
 # --- re-price staleness (pure) ------------------------------------------------
@@ -157,6 +287,56 @@ def classify_repricing_drift(
 
 
 # --- storage ------------------------------------------------------------------
+
+
+def run_drift_check(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    *,
+    workspace_id: str,
+    environment: str,
+    days: int = 30,
+    reprice_threshold_pct: float = REPRICING_THRESHOLD_PCT,
+    actuals_threshold_pct: float = ACTUALS_THRESHOLD_PCT,
+) -> dict[str, list[dict]]:
+    """Run both drift checks; return findings keyed by check. Impure reads.
+
+    Needs the current price book (re-price) plus the deploy-links and their
+    anchor actuals. Returns ``{}`` for a check whose inputs are unavailable so
+    a partial run still stores what it can.
+    """
+    from dbx_platform.estimator import build_price_book, load_rate_card
+    from dbx_platform.estimator_pricing import read_latest_snapshot
+
+    findings: dict[str, list[dict]] = {REPRICING_CHECK: [], ACTUALS_CHECK: []}
+
+    estimates = fetch_saved_estimates(
+        w, warehouse_id, catalog, schema,
+        workspace_id=workspace_id, environment=environment,
+    )
+    snapshot = read_latest_snapshot(
+        w, warehouse_id, catalog, schema, environment=environment,
+    )
+    if estimates and snapshot:
+        book = build_price_book(snapshot, load_rate_card())
+        findings[REPRICING_CHECK] = classify_repricing_drift(
+            estimates, book, threshold_pct=reprice_threshold_pct
+        )
+
+    deployments = fetch_active_deployments(
+        w, warehouse_id, catalog, schema,
+        workspace_id=workspace_id, environment=environment,
+    )
+    if deployments:
+        actuals = fetch_anchor_actuals(
+            w, warehouse_id, catalog, schema, deployments, days=days
+        )
+        findings[ACTUALS_CHECK] = classify_actuals_drift(
+            deployments, actuals, threshold_pct=actuals_threshold_pct
+        )
+    return findings
 
 
 def store_findings(

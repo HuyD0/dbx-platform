@@ -138,3 +138,55 @@ resources:
               ["estimator", "prices-status",
                "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
                "--environment", "${bundle.target}"]
+
+    estimator_drift_check:
+      name: "[dbx-platform] estimator-drift-check"
+      description: >
+        Compares saved estimates against current prices (re-price staleness)
+        and against real spend for the cost anchors operators linked
+        deployments to (estimate-vs-actuals). Stores cost/estimate-repricing-drift
+        and cost/estimate-drift findings and fails the run on material drift so
+        the failure email is the alert. Reads only platform-owned tables +
+        system.billing; writes only findings.
+      schedule:
+        quartz_cron_expression: "0 30 8 ? * MON"  # weekly Mon 08:30 UTC, after cost ingestion
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: drift_check
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "drift-check",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

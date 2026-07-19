@@ -193,6 +193,33 @@ def create_estimates_table_sql(catalog: str, schema: str) -> str:
     )
 
 
+ANCHOR_KINDS = (
+    "azure_resource_group",
+    "databricks_project_tag",
+    "databricks_team_tag",
+)
+
+
+def create_deployments_table_sql(catalog: str, schema: str) -> str:
+    """DDL for the append-only estimate→deployment link table. Pure.
+
+    Records an operator's decision that a saved estimate was deployed under a
+    concrete cost anchor (an Azure resource group or a Databricks project/team
+    tag) at a chosen tier + scenario — the join key the actuals drift check
+    needs to compare a projection to real spend. Append-only: "retire" writes
+    an ``active=false`` newer row; readers take the latest per estimate_id.
+    """
+    return (
+        f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.estimator_deployments ("
+        "workspace_id STRING, environment STRING, deployment_id STRING, "
+        "estimate_id STRING, created_at TIMESTAMP, created_by STRING, "
+        "tier STRING, scenario STRING, anchor_kind STRING, anchor_value STRING, "
+        "monthly_projected_usd DOUBLE, currency STRING, active BOOLEAN) "
+        "TBLPROPERTIES ('delta.appendOnly' = 'true') "
+        "COMMENT 'Append-only links from saved estimates to deployed cost anchors'"
+    )
+
+
 # --- price book ---------------------------------------------------------------
 
 

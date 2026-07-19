@@ -310,3 +310,69 @@ test("similar estimates render nothing when the library has no matches", async (
   expect(container.querySelector("ul")).toBeNull();
   vi.unstubAllGlobals();
 });
+
+// --- DeploymentsPanel / LinkDeploymentForm ------------------------------------
+
+import { DeploymentsPanel, LinkDeploymentForm } from "./DeploymentsPanel";
+
+test("link deployment form reads projection server-side and posts the anchor", async () => {
+  const posted: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      posted.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ deployment_id: "d1", monthly_projected_usd: 900 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  const user = userEvent.setup();
+  withQuery(
+    <LinkDeploymentForm
+      estimateId="est-1"
+      tiers={["prototype", "production", "fiduciary"]}
+      scenarios={["databricks", "azure"]}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "I deployed this" }));
+  await user.type(screen.getByPlaceholderText("rg-my-solution"), "rg-doc-chat");
+  await user.click(screen.getByRole("button", { name: "Link" }));
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({
+    estimate_id: "est-1",
+    anchor_kind: "azure_resource_group",
+    anchor_value: "rg-doc-chat",
+  });
+  expect(posted[0]).not.toHaveProperty("monthly_projected_usd");
+  vi.unstubAllGlobals();
+});
+
+test("deployments panel lists only active links", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              deployment_id: "d1", estimate_id: "e1", created_at: new Date().toISOString(),
+              tier: "production", scenario: "azure", anchor_kind: "azure_resource_group",
+              anchor_value: "rg-live", monthly_projected_usd: 900, currency: "USD", active: true,
+            },
+            {
+              deployment_id: "d2", estimate_id: "e2", created_at: new Date().toISOString(),
+              tier: "prototype", scenario: "databricks", anchor_kind: "databricks_team_tag",
+              anchor_value: "retired", monthly_projected_usd: 10, currency: "USD", active: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  withQuery(<DeploymentsPanel />);
+  expect(await screen.findByText(/rg-live/)).toBeInTheDocument();
+  expect(screen.queryByText(/retired/)).not.toBeInTheDocument();
+  vi.unstubAllGlobals();
+});

@@ -499,3 +499,68 @@ def test_extract_document_requires_operator(viewer_client):
         files={"file": ("brief.md", b"hello", "text/markdown")},
     )
     assert response.status_code == 403
+
+
+# --- deploy-link (estimate → real cost anchor) --------------------------------
+
+
+def _save_estimate(client) -> str:
+    return client.post(
+        "/api/estimator/estimates/record",
+        json={"title": "Doc chat", "rigor_pct": 10,
+              "requirements": {"pattern": "doc_chat", "monthly_requests": 100000}},
+    ).json()["estimate_id"]
+
+
+def test_link_deployment_reads_projection_server_side_and_lists(client, monkeypatch):
+    _library_client(client, monkeypatch)
+    estimate_id = _save_estimate(client)
+    response = client.post(
+        "/api/estimator/deployments/link",
+        json={"estimate_id": estimate_id, "tier": "production", "scenario": "azure",
+              "anchor_kind": "azure_resource_group", "anchor_value": "rg-doc-chat"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deployment_id"]
+    assert body["monthly_projected_usd"] > 0  # read from the estimate, not the client
+
+    rows = client.get("/api/estimator/deployments").json()["data"]
+    assert len(rows) == 1
+    assert rows[0]["anchor_value"] == "rg-doc-chat"
+    assert rows[0]["tier"] == "production"
+
+
+def test_link_deployment_rejects_bad_tier_scenario_anchor(client, monkeypatch):
+    _library_client(client, monkeypatch)
+    estimate_id = _save_estimate(client)
+    for bad in (
+        {"tier": "nope", "scenario": "azure", "anchor_kind": "azure_resource_group"},
+        {"tier": "production", "scenario": "nope", "anchor_kind": "azure_resource_group"},
+        {"tier": "production", "scenario": "azure", "anchor_kind": "made_up_anchor"},
+    ):
+        response = client.post(
+            "/api/estimator/deployments/link",
+            json={"estimate_id": estimate_id, "anchor_value": "x", **bad},
+        )
+        assert response.status_code == 422
+        assert response.json()["error"] == "invalid_deployment"
+
+
+def test_link_deployment_rejects_unknown_estimate(client, monkeypatch):
+    _library_client(client, monkeypatch)
+    response = client.post(
+        "/api/estimator/deployments/link",
+        json={"estimate_id": "does-not-exist", "tier": "production", "scenario": "azure",
+              "anchor_kind": "azure_resource_group", "anchor_value": "rg"},
+    )
+    assert response.status_code == 422
+
+
+def test_link_deployment_requires_operator(viewer_client):
+    response = viewer_client.post(
+        "/api/estimator/deployments/link",
+        json={"estimate_id": "x", "tier": "production", "scenario": "azure",
+              "anchor_kind": "azure_resource_group", "anchor_value": "rg"},
+    )
+    assert response.status_code == 403

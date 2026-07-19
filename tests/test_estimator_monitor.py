@@ -145,3 +145,182 @@ def test_fetch_saved_estimates_sql_is_scoped():
 def test_repricing_check_key_is_cost_area():
     assert REPRICING_CHECK == "cost/estimate-repricing-drift"
     assert REPRICING_CHECK.startswith("cost/")
+
+
+# --- actuals drift ------------------------------------------------------------
+
+from dbx_platform.estimator_monitor import (  # noqa: E402
+    ACTUALS_CHECK,
+    classify_actuals_drift,
+)
+
+
+def _deployment(anchor_kind="azure_resource_group", anchor_value="rg-doc-chat",
+                projected=1000.0, tier="production", scenario="azure",
+                deployment_id="dep-1", estimate_id="est-1"):
+    return {
+        "deployment_id": deployment_id, "estimate_id": estimate_id,
+        "tier": tier, "scenario": scenario, "anchor_kind": anchor_kind,
+        "anchor_value": anchor_value, "monthly_projected_usd": projected,
+        "currency": "USD",
+    }
+
+
+def test_actuals_drift_flags_material_over_and_under_spend():
+    dep = _deployment(projected=1000.0)
+    over = classify_actuals_drift([dep], {("azure_resource_group", "rg-doc-chat"): 1500.0})
+    assert len(over) == 1
+    assert over[0]["action"] == "review-estimate-vs-actual"
+    assert over[0]["cost_usd"] == 500.0
+    assert over[0]["resource"] == "rg-doc-chat"
+    assert "Azure actual bill" in over[0]["reason"]
+    assert "non-AI resources" in over[0]["reason"]  # honest caveat
+    under = classify_actuals_drift([dep], {("azure_resource_group", "rg-doc-chat"): 500.0})
+    assert under[0]["cost_usd"] == 500.0
+
+
+def test_actuals_drift_ignores_within_threshold_and_skips_missing_actuals():
+    dep = _deployment(projected=1000.0)
+    assert classify_actuals_drift([dep], {("azure_resource_group", "rg-doc-chat"): 1100.0}) == []
+    # anchor has no actuals yet (too new) -> skipped, not flagged
+    assert classify_actuals_drift([dep], {}) == []
+
+
+def test_actuals_drift_databricks_tag_basis_label():
+    dep = _deployment(anchor_kind="databricks_project_tag", anchor_value="doc-chat",
+                      scenario="databricks", projected=1000.0)
+    findings = classify_actuals_drift([dep], {("databricks_project_tag", "doc-chat"): 2000.0})
+    assert findings[0]["anchor_kind"] == "databricks_project_tag"
+    assert "Databricks list cost" in findings[0]["reason"]
+
+
+def test_actuals_check_key_is_cost_area():
+    assert ACTUALS_CHECK == "cost/estimate-drift"
+
+
+def test_fetch_active_deployments_sql_takes_latest_active_per_estimate():
+    captured = {}
+    import dbx_platform.estimator_monitor as mod
+
+    original = mod.run_query
+    try:
+        mod.run_query = lambda w, sql, wh, params: captured.update(sql=sql) or []
+        mod.fetch_active_deployments(object(), "wh", "cat", "sch",
+                                     workspace_id="ws", environment="prod")
+    finally:
+        mod.run_query = original
+    assert "estimator_deployments" in captured["sql"]
+    assert "ROW_NUMBER() OVER" in captured["sql"]
+    assert "rn = 1 AND active = true" in captured["sql"]
+
+
+def test_fetch_anchor_actuals_routes_azure_and_tag_anchors():
+    import dbx_platform.estimator_monitor as mod
+    from dbx_platform import cost
+
+    deployments = [
+        _deployment(anchor_kind="azure_resource_group", anchor_value="rg-1"),
+        _deployment(anchor_kind="databricks_team_tag", anchor_value="ml-team",
+                    deployment_id="dep-2", estimate_id="est-2"),
+    ]
+    calls = []
+
+    def fake_run_query(w, sql, wh, params):
+        calls.append(("sql", params))
+        return [{"actual": 42.0}]
+
+    def fake_attribution(w, wh, dimension, days):
+        calls.append(("attr", dimension))
+        return [{"x_team": "ml-team", "list_cost": 99.0}]
+
+    original_rq, original_attr = mod.run_query, cost.attribution
+    try:
+        mod.run_query = fake_run_query
+        cost.attribution = fake_attribution
+        actuals = mod.fetch_anchor_actuals(object(), "wh", "cat", "sch", deployments, days=30)
+    finally:
+        mod.run_query = original_rq
+        cost.attribution = original_attr
+    assert actuals[("azure_resource_group", "rg-1")] == 42.0
+    assert actuals[("databricks_team_tag", "ml-team")] == 99.0
+    assert ("attr", "team") in calls
+
+
+def test_deployments_ddl_is_append_only():
+    from dbx_platform.estimator import create_deployments_table_sql
+
+    ddl = create_deployments_table_sql("cat", "sch")
+    assert "cat.sch.estimator_deployments" in ddl
+    assert "'delta.appendOnly' = 'true'" in ddl
+    for column in ("anchor_kind STRING", "monthly_projected_usd DOUBLE", "active BOOLEAN"):
+        assert column in ddl
+
+
+# --- CLI drift-check ----------------------------------------------------------
+
+
+def test_cli_drift_check_is_wired_with_thresholds():
+    from dbx_platform import cli
+
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        ["estimator", "drift-check", "--days", "14",
+         "--reprice-threshold", "20", "--actuals-threshold", "40"]
+    )
+    assert args.func is cli.cmd_estimator_drift_check
+    assert args.days == 14
+    assert args.reprice_threshold == 20.0
+    assert args.actuals_threshold == 40.0
+    assert args.no_store is False
+
+
+def test_cli_drift_check_refuses_without_governed_context(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from dbx_platform import approved_job, cli
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+
+    def _reject(*args, **kwargs):
+        raise approved_job.ApprovalGateError("no verified executor context")
+
+    monkeypatch.setattr(approved_job, "verify_governed_write_launch", _reject)
+    parser = cli.build_parser()
+    args = parser.parse_args(["estimator", "drift-check"])
+    assert args.func(args) == 2
+
+
+def test_cli_drift_check_returns_nonzero_when_drift_found(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from dbx_platform import cli, estimator_monitor
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+    monkeypatch.setattr(cli, "_verify_governed_write", lambda *a, **k: True)
+    monkeypatch.setattr(
+        estimator_monitor, "run_drift_check",
+        lambda *a, **k: {estimator_monitor.REPRICING_CHECK: [{"resource": "e1"}],
+                         estimator_monitor.ACTUALS_CHECK: []},
+    )
+    monkeypatch.setattr(estimator_monitor, "store_findings", lambda *a, **k: 1)
+    parser = cli.build_parser()
+    args = parser.parse_args(["estimator", "drift-check"])
+    assert args.func(args) == 1  # drift found -> job fails so the alert fires
+
+
+def test_cli_drift_check_returns_zero_when_clean(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from dbx_platform import cli, estimator_monitor
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+    monkeypatch.setattr(cli, "_verify_governed_write", lambda *a, **k: True)
+    monkeypatch.setattr(
+        estimator_monitor, "run_drift_check",
+        lambda *a, **k: {estimator_monitor.REPRICING_CHECK: [],
+                         estimator_monitor.ACTUALS_CHECK: []},
+    )
+    monkeypatch.setattr(estimator_monitor, "store_findings", lambda *a, **k: 0)
+    parser = cli.build_parser()
+    args = parser.parse_args(["estimator", "drift-check"])
+    assert args.func(args) == 0

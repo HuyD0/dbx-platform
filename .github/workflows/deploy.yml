@@ -155,6 +155,7 @@ jobs:
             --select jobs.cost_usage_report \
             --select jobs.dashboards_setup \
             --select experiments.estimator_extraction_eval_experiment \
+            --select jobs.estimator_drift_check \
             --select jobs.estimator_extraction_eval \
             --select jobs.estimator_prices_pull \
             --select jobs.estimator_prompt_sync \

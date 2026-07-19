@@ -264,6 +264,9 @@ def test_every_mutating_route_is_post_only(client):
         "/api/estimator/estimates/record",
         "/api/estimator/extract",
         "/api/estimator/extract-document",
+        # Linking a deployment is telemetry append through the
+        # cp_link_deployment security-definer procedure — no target mutation.
+        "/api/estimator/deployments/link",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"
