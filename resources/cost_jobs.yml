@@ -23,9 +23,6 @@ resources:
           level: CAN_MANAGE_RUN
         - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
           level: CAN_VIEW
-      email_notifications:
-        on_failure:
-          - ${var.notification_email}
       environments:
         - environment_key: default
           spec:
