@@ -296,14 +296,6 @@ class GovernedActionExecutor:
         }
         if "approver" not in roles:
             raise ActionExecutionError("Stored approval has no approver role.")
-        risk = str(action.plan.get("risk") or "HIGH").upper()
-        if (
-            risk in {"MEDIUM", "HIGH"}
-            and approval.confirmation != action.plan.get("confirm_phrase")
-        ):
-            raise ActionExecutionError(
-                "Stored approval lacks the exact typed confirmation."
-            )
         if not self.approval_validator(approval):
             raise ActionExecutionError(
                 "Approver identity or current group membership could not be verified."

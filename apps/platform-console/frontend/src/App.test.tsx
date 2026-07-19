@@ -244,8 +244,14 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   const review = screen.getByRole("button", { name: "Review exact plan" });
   await user.click(review);
   const planDialog = await screen.findByRole("dialog", { name: "Review exact plan" });
-  expect(within(planDialog).getByText(/Exact plan · single use/)).toBeInTheDocument();
-  expect(within(planDialog).getByTitle("a".repeat(64))).toBeInTheDocument();
+  expect(
+    within(planDialog).getByText("This applies the reviewed action to 1 exact target."),
+  ).toBeInTheDocument();
+  expect(
+    within(planDialog).getByRole("button", { name: "Why does this approval expire?" }),
+  ).toBeInTheDocument();
+  await user.click(within(planDialog).getByText("Technical details"));
+  expect(within(planDialog).getByText("a".repeat(64))).toBeInTheDocument();
   expect(
     within(planDialog).getByText(
       "This deployment is proposal-only. The plan can be inspected and exported, but execution remains disabled until the audited executor and approver group are configured.",

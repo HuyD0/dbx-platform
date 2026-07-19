@@ -848,7 +848,6 @@ def test_generic_api_hash_auth_replay_and_audit(control_plane_client):
         f"/api/action-requests/{plan['action_id']}/approve",
         json={
             "plan_hash": plan["plan_hash"],
-            "confirm": plan["confirm_phrase"],
         },
     )
     assert approved.status_code == 200
@@ -1205,7 +1204,7 @@ def test_runtime_alias_uses_controller_plan_and_submits_after_approval(
 
     approved = control_plane_client.post(
         f"/api/action-requests/{plan['action_id']}/approve",
-        json={"plan_hash": plan["plan_hash"], "confirm": plan["confirm_phrase"]},
+        json={"plan_hash": plan["plan_hash"]},
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "APPROVED"

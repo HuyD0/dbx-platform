@@ -530,28 +530,22 @@ def test_missing_audit_storage_fails_before_observing_or_mutating_targets() -> N
     assert adapter.calls == []
 
 
-def test_execution_requires_exact_confirmation_and_hash() -> None:
+def test_execution_requires_explicit_human_and_exact_hash_but_no_phrase() -> None:
     value, adapter, _, _ = controller()
     record = value.plan_hibernate(APPROVER)
     adapter.calls.clear()
 
     with pytest.raises(ApprovalRequiredError, match="authorized human"):
         value.execute(record.action_id, record.plan_hash)
-    with pytest.raises(ApprovalRequiredError, match="Confirmation must exactly"):
-        value.execute(
-            record.action_id,
-            record.plan_hash,
-            actor=APPROVER,
-            confirmation="yes",
-        )
     with pytest.raises(ApprovalRequiredError, match="hash"):
         value.execute(
             record.action_id,
             "0" * 64,
             actor=APPROVER,
-            confirmation=record.confirm_phrase,
         )
     assert adapter.calls == []
+    value.execute(record.action_id, record.plan_hash, actor=APPROVER)
+    assert adapter.calls
 
 
 def test_approved_status_without_durable_matching_approval_fails_closed() -> None:
@@ -612,7 +606,7 @@ def test_removed_or_missing_approver_fails_before_managed_mutation() -> None:
     assert adapter.calls == []
 
 
-def test_tampered_approval_role_or_confirmation_fails_closed() -> None:
+def test_tampered_approval_role_fails_closed_but_confirmation_is_not_evidence() -> None:
     value, adapter, store, _ = controller()
     record = value.plan_hibernate(APPROVER)
     store.approve_action(
@@ -633,9 +627,8 @@ def test_tampered_approval_role_or_confirmation_fails_closed() -> None:
     store.approvals[key] = replace(
         approval, confirmation="apply runtime.hibernate 999"
     )
-    with pytest.raises(ApprovalRequiredError, match="typed confirmation"):
-        value.execute(record.action_id, record.plan_hash)
-    assert adapter.calls == []
+    value.execute(record.action_id, record.plan_hash)
+    assert adapter.calls
 
 
 def test_hibernate_pauses_drains_and_stops_app_last() -> None:
@@ -1109,7 +1102,7 @@ def test_tampered_indexed_confirmation_fails_even_when_plan_hash_is_intact() -> 
     adapter.calls.clear()
     store.actions[record.action_id] = replace(record, confirm_phrase="yes")
 
-    with pytest.raises(ApprovalRequiredError, match="Indexed confirmation phrase"):
+    with pytest.raises(ApprovalRequiredError, match="Indexed confirmation marker"):
         value.execute(
             record.action_id,
             record.plan_hash,

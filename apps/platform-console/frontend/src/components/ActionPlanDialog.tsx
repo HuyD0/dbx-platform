@@ -1,11 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2, Clock3, Fingerprint, ShieldAlert, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock3, Fingerprint, Play, ShieldAlert, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiPost, isUnavailable } from "../lib/api";
 import type { ApplyResponse, Envelope, PlanResponse } from "../lib/types";
 import { DataTable } from "./DataTable";
-import { Badge, EmptyState, ErrorState, Skeleton } from "./ui";
+import { Badge, EmptyState, ErrorState, HelpTip, Skeleton } from "./ui";
 
 function unwrapPlan(response: PlanResponse | Envelope<PlanResponse>): PlanResponse {
   return "data" in response ? response.data : response;
@@ -21,15 +21,43 @@ function expiresAtMs(value: number | string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function DetailBlock({ label, value }: { label: string; value: unknown }) {
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function detailSummary(label: string, value: unknown): string {
+  const record = recordValue(value);
+  if (typeof value === "string") return value;
+  if (label === "Impact") {
+    const summary = recordValue(record?.summary);
+    const count = Number(record?.target_count ?? 0);
+    if (summary?.run) return `Starts ${String(summary.run)} new job run.`;
+    if (count) return `${count} resource${count === 1 ? "" : "s"} may change.`;
+  }
+  if (label === "Rollback" && record?.description) return String(record.description);
+  if (label === "Verification" && record?.strategy) return String(record.strategy);
+  return "See technical details below.";
+}
+
+function DetailBlock({
+  label,
+  value,
+  help,
+}: {
+  label: string;
+  value: unknown;
+  help: string;
+}) {
   if (value === undefined || value === null || value === "") return null;
-  const rendered = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
     <div className="rounded-lg border border-grid bg-page/30 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</div>
-      <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-5 text-ink-2">
-        {rendered}
-      </pre>
+      <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {label}
+        <HelpTip label={`About ${label.toLowerCase()}`}>{help}</HelpTip>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-ink-2">{detailSummary(label, value)}</p>
     </div>
   );
 }
@@ -50,12 +78,11 @@ export function ActionPlanDialog({
   allowLegacy?: boolean;
   onClose: () => void;
 }) {
-  const [confirm, setConfirm] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  const confirmId = useId();
   const previousFocus = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
@@ -84,7 +111,6 @@ export function ActionPlanDialog({
         `/api/action-requests/${approvedPlan.plan_id}/approve`,
         {
           plan_hash: approvedPlan.plan_hash,
-          confirm,
         },
       );
       return unwrapApproval(response);
@@ -139,8 +165,12 @@ export function ActionPlanDialog({
   const result = plan.data;
   const p = result?.plan;
   const secondsLeft = p ? Math.max(0, Math.floor((expiresAtMs(p.expires_at) - now) / 1000)) : 0;
-  const phraseOk = p !== undefined && confirm === p.confirm_phrase;
   const approved = approve.data;
+  const target = p?.items[0];
+  const isJobRun = p?.action === "run-job";
+  const targetName = String(target?.name ?? "this job");
+  const risk = String(p?.risk ?? "medium").toLowerCase();
+  const riskTone = risk === "high" ? "critical" : risk === "low" ? "info" : "warning";
 
   return createPortal(
     <div
@@ -183,27 +213,45 @@ export function ActionPlanDialog({
 
         {p && !approved && (
           <>
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-grid bg-hairline/20 p-3 text-xs text-muted">
-              <Clock3 className="h-4 w-4 text-accent" />
-              <span>
-                Exact plan · single use · expires in{" "}
-                <strong className="font-semibold text-ink">
-                  {Math.floor(secondsLeft / 60)}m {Math.floor(secondsLeft % 60)}s
-                </strong>
-              </span>
-              {p.plan_hash && (
-                <span
-                  className="inline-flex min-w-0 items-center gap-1 font-mono text-[10px]"
-                  title={p.plan_hash}
-                >
-                  <Fingerprint className="h-3.5 w-3.5 shrink-0" />
-                  {p.plan_hash.slice(0, 12)}…
+            <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 rounded-lg bg-accent/10 p-2 text-accent">
+                  <Play className="h-4 w-4" />
                 </span>
-              )}
-              {p.risk && <Badge tone={p.risk === "high" ? "critical" : "warning"}>{p.risk} risk</Badge>}
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-ink">
+                    {isJobRun ? `Run ${targetName} once?` : `Approve “${title}”?`}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-ink-2">
+                    {isJobRun
+                      ? "This starts one new run now. It does not change the job or its schedule."
+                      : `This applies the reviewed action to ${p.items.length} exact target${p.items.length === 1 ? "" : "s"}.`}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-grid/70 pt-3 text-xs text-muted">
+                <Clock3 className="h-4 w-4 text-accent" />
+                <span>
+                  Available for{" "}
+                  <strong className="font-semibold text-ink">
+                    {Math.floor(secondsLeft / 60)}m {Math.floor(secondsLeft % 60)}s
+                  </strong>
+                </span>
+                <HelpTip label="Why does this approval expire?">
+                  The short expiry prevents an old approval from being reused after the target
+                  changes. The app checks the target again immediately before execution.
+                </HelpTip>
+                <span className="ml-auto inline-flex items-center gap-1">
+                  <Badge tone={riskTone}>{risk} risk</Badge>
+                  <HelpTip label={`What does ${risk} risk mean?`}>
+                    Risk describes the possible operational impact. Every approval uses a separate
+                    confirmation step, plus expiry, revalidation, and an exact plan hash.
+                  </HelpTip>
+                </span>
+              </div>
             </div>
 
-            <div className="my-3 flex flex-wrap gap-2">
+            <div className="my-3 flex flex-wrap gap-2" aria-label="Plan summary">
               {Object.entries(p.summary ?? {}).map(([key, value]) => (
                 <Badge
                   key={key}
@@ -214,51 +262,100 @@ export function ActionPlanDialog({
               ))}
             </div>
 
-            {p.items.length === 0 ? (
-              <EmptyState message="The planner found no resources to change." />
-            ) : (
-              <DataTable
-                rows={p.items}
-                pageSize={6}
-                exportName={`plan-${action}`}
-                caption={`Exact resources in ${title}`}
-              />
-            )}
+            {p.items.length === 0 && <EmptyState message="There is nothing to approve." />}
 
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <DetailBlock label="Impact" value={p.impact} />
-              <DetailBlock label="Rollback" value={p.rollback} />
-              <DetailBlock label="Verification" value={p.verification} />
+              <DetailBlock
+                label="Impact"
+                value={p.impact}
+                help="What this action will start or change."
+              />
+              <DetailBlock
+                label="Rollback"
+                value={p.rollback}
+                help="Whether Mission Control can automatically undo the action."
+              />
+              <DetailBlock
+                label="Verification"
+                value={p.verification}
+                help="How Mission Control checks and records the result after execution."
+              />
             </div>
 
-            {p.items.length > 0 && p.actions_enabled && (
-              <div className="mt-4 rounded-xl border border-status-serious/30 bg-status-serious/5 p-3">
-                <label className="block text-xs leading-5 text-ink-2" htmlFor={confirmId}>
-                  Type{" "}
-                  <code className="rounded bg-hairline px-1.5 py-0.5 font-mono text-ink">
-                    {p.confirm_phrase}
-                  </code>{" "}
-                  to approve this exact plan:
-                </label>
-                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id={confirmId}
-                    value={confirm}
-                    onChange={(event) => setConfirm(event.target.value)}
-                    className="w-full rounded-lg border border-grid bg-page px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                    placeholder={p.confirm_phrase}
-                    autoComplete="off"
-                    spellCheck={false}
+            {p.items.length > 0 && (
+              <details className="mt-3 rounded-lg border border-grid bg-page/30">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-ink hover:bg-hairline">
+                  <ChevronDown className="h-3.5 w-3.5 text-muted" />
+                  Technical details
+                  <span className="font-normal text-muted">
+                    Exact target, IDs, hashes, and export
+                  </span>
+                </summary>
+                <div className="space-y-3 border-t border-grid p-3">
+                  {p.plan_hash && (
+                    <p className="flex min-w-0 items-center gap-1 text-[10px] text-muted">
+                      <Fingerprint className="h-3.5 w-3.5 shrink-0" />
+                      Plan fingerprint: <code className="break-all">{p.plan_hash}</code>
+                    </p>
+                  )}
+                  <DataTable
+                    rows={p.items}
+                    pageSize={6}
+                    exportName={`plan-${action}`}
+                    caption={`Exact resources in ${title}`}
                   />
-                  <button
-                    type="button"
-                    disabled={!phraseOk || secondsLeft <= 0 || approve.isPending}
-                    onClick={() => approve.mutate(p)}
-                    className="shrink-0 rounded-lg bg-status-critical px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {approve.isPending ? "Approving…" : "Approve exact plan"}
-                  </button>
                 </div>
+              </details>
+            )}
+
+            {p.items.length > 0 && p.actions_enabled && (
+              <div className="mt-4">
+                {!confirming ? (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={secondsLeft <= 0 || approve.isPending}
+                      onClick={() => setConfirming(true)}
+                      className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isJobRun ? "Approve and run once" : "Approve action"}
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    role="alertdialog"
+                    aria-label="Confirm approval"
+                    className="rounded-xl border border-status-serious/30 bg-status-serious/5 p-3"
+                  >
+                    <h4 className="text-sm font-semibold text-ink">Confirm approval</h4>
+                    <p className="mt-1 text-xs leading-5 text-ink-2">
+                      {isJobRun
+                        ? `Start one run of ${targetName} now?`
+                        : `Approve this exact ${risk}-risk plan for ${p.items.length} target${p.items.length === 1 ? "" : "s"}?`}
+                    </p>
+                    <div className="mt-3 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirming(false)}
+                        className="rounded-lg border border-grid px-4 py-2 text-sm font-medium text-ink hover:bg-hairline"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        disabled={secondsLeft <= 0 || approve.isPending}
+                        onClick={() => approve.mutate(p)}
+                        className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {approve.isPending
+                          ? "Approving…"
+                          : isJobRun
+                            ? "Confirm and run once"
+                            : "Confirm approval"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {p.items.length > 0 && !p.actions_enabled && (

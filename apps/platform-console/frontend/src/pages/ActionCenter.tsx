@@ -76,7 +76,7 @@ const ACTION_LIFECYCLE = [
   },
   {
     label: "Human approval",
-    description: "Current membership and typed confirmation",
+    description: "Current membership and explicit confirmation",
     icon: UserCheck,
   },
   {

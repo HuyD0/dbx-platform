@@ -508,7 +508,7 @@ def test_workspace_approver_revalidation_rejects_empty_group_id():
     workspace.users.get.assert_not_called()
 
 
-def test_executor_rejects_missing_typed_confirmation():
+def test_executor_accepts_approval_without_typed_confirmation():
     current = TrustedPlan([], [])
     store = FakeStore(make_action(current))
     original = store.get_matching_approval
@@ -518,9 +518,9 @@ def test_executor_rejects_missing_typed_confirmation():
     )
     applied: list = []
     executor = build_executor(store, current, applied)
-    with pytest.raises(ActionExecutionError, match="typed confirmation"):
-        executor.execute("action-1")
-    assert applied == []
+    result = executor.execute("action-1")
+    assert result["status"] == STATUS_SUCCEEDED
+    assert len(applied) == 1
 
 
 def test_executor_fails_closed_instead_of_reapplying_interrupted_mutation():

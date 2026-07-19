@@ -46,12 +46,11 @@ export function ActionReviewDialog({
   onClose: () => void;
   onChanged?: () => void;
 }) {
-  const [confirmation, setConfirmation] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
-  const confirmId = useId();
   const previousFocus = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
@@ -64,7 +63,6 @@ export function ActionReviewDialog({
     mutationFn: (action: ActionDetail) =>
       apiPost<ActionDetail>(`/api/action-requests/${action.action_id}/approve`, {
         plan_hash: action.plan_hash,
-        confirmation,
       }),
     onSuccess: () => {
       void query.refetch();
@@ -121,12 +119,6 @@ export function ActionReviewDialog({
   const action = query.data;
   const items = action?.targets ?? action?.items ?? [];
   const pending = action?.status === "AWAITING_APPROVAL";
-  const confirmationRequired = ["MEDIUM", "HIGH"].includes(
-    String(action?.risk ?? "").toUpperCase(),
-  );
-  const phraseOk =
-    !confirmationRequired ||
-    (action !== undefined && confirmation === action.confirm_phrase);
 
   return createPortal(
     <div
@@ -204,30 +196,49 @@ export function ActionReviewDialog({
             {pending && action.actions_enabled && (
               <div className="grid gap-3 rounded-xl border border-status-warning/30 bg-status-warning/5 p-3 md:grid-cols-2">
                 <div>
-                  <label htmlFor={confirmId} className="text-xs leading-5 text-ink-2">
-                    Type{" "}
-                    <code className="rounded bg-hairline px-1.5 py-0.5 font-mono text-ink">
-                      {action.confirm_phrase}
-                    </code>{" "}
-                    to approve this exact hash.
-                  </label>
-                  <input
-                    id={confirmId}
-                    value={confirmation}
-                    onChange={(event) => setConfirmation(event.target.value)}
-                    className="mt-2 w-full rounded-lg border border-grid bg-page px-3 py-2 text-sm text-ink"
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <button
-                    type="button"
-                    disabled={!phraseOk || approve.isPending}
-                    onClick={() => approve.mutate(action)}
-                    className="mt-2 inline-flex items-center gap-2 rounded-lg bg-status-critical px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
-                  >
-                    <ShieldCheck className="h-4 w-4" />
-                    {approve.isPending ? "Approving…" : "Approve exact plan"}
-                  </button>
+                  {!confirming ? (
+                    <>
+                      <p className="text-xs leading-5 text-ink-2">
+                        Approval applies only to this exact plan hash and is revalidated before
+                        execution.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={approve.isPending}
+                        onClick={() => setConfirming(true)}
+                        className="mt-2 inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                      >
+                        <ShieldCheck className="h-4 w-4" />
+                        Approve action
+                      </button>
+                    </>
+                  ) : (
+                    <div role="alertdialog" aria-label="Confirm approval">
+                      <h3 className="text-sm font-semibold text-ink">Confirm approval</h3>
+                      <p className="mt-1 text-xs leading-5 text-ink-2">
+                        Approve this exact {String(action.risk).toLowerCase()}-risk plan for{" "}
+                        {items.length} target{items.length === 1 ? "" : "s"}?
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfirming(false)}
+                          className="rounded-lg border border-grid px-3 py-2 text-sm font-medium text-ink hover:bg-hairline"
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          disabled={approve.isPending}
+                          onClick={() => approve.mutate(action)}
+                          className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          {approve.isPending ? "Approving…" : "Confirm approval"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs leading-5 text-ink-2">

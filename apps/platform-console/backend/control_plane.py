@@ -570,14 +570,6 @@ class ActionService:
         if not actor.verified or not actor.has_role("approver"):
             raise ActionConflictError("A verified dbx-platform approver is required.")
 
-    @staticmethod
-    def _require_confirmation(action: ActionRequest, confirmation: str | None) -> None:
-        if action.risk in {RiskLevel.MEDIUM, RiskLevel.HIGH}:
-            if confirmation != action.confirm_phrase:
-                raise ActionConflictError(
-                    f"Type the exact confirmation phrase: '{action.confirm_phrase}'."
-                )
-
     def _revalidate(
         self,
         action: ActionRequest,
@@ -621,7 +613,6 @@ class ActionService:
         if plan_hash != action.plan_hash:
             raise PlanIntegrityError("Approval supplied a different plan hash.")
         self._expire_if_needed(action, actor.actor_id)
-        self._require_confirmation(action, confirmation)
         self._revalidate(action, revalidate, actor.actor_id)
         approval = ApprovalRecord(
             action_id=action.action_id,
