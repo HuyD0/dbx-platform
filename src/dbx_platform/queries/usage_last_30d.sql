@@ -12,6 +12,7 @@ LEFT JOIN system.billing.list_prices p
   AND u.cloud    = p.cloud
   AND u.usage_start_time >= p.price_start_time
   AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
-WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+WHERE u.workspace_id = :workspace_id
+  AND u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
 GROUP BY u.workspace_id, u.sku_name
 ORDER BY list_cost_usd DESC

@@ -17,6 +17,7 @@ LEFT JOIN system.lakeflow.jobs j
   ON  u.usage_metadata.job_id = j.job_id
   AND u.workspace_id          = j.workspace_id
 WHERE u.usage_metadata.job_id IS NOT NULL
+  AND u.workspace_id = :workspace_id
   AND u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
 GROUP BY u.workspace_id, u.usage_metadata.job_id
 ORDER BY list_cost_usd DESC

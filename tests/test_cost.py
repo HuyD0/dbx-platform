@@ -1,8 +1,70 @@
+from unittest.mock import MagicMock
+
+from dbx_platform import cost
 from dbx_platform.cost import (
     classify_cluster_utilization,
     classify_warehouse_utilization,
 )
 from dbx_platform.housekeeping import find_jobs_on_all_purpose
+from dbx_platform.system_tables import load_query
+
+
+def test_usage_report_is_scoped_to_current_workspace(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 12345
+    captured = {}
+
+    def read(_workspace, sql, warehouse_id, parameters):
+        captured.update(sql=sql, warehouse_id=warehouse_id, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.usage_report(workspace, "warehouse-1", 30) == []
+    assert "u.workspace_id = :workspace_id" in captured["sql"]
+    assert captured["warehouse_id"] == "warehouse-1"
+    assert captured["parameters"] == {"days": 30, "workspace_id": "12345"}
+
+
+def test_product_spend_has_product_attribution_and_equal_comparison_windows(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 987
+    captured = {}
+
+    def read(_workspace, sql, _warehouse_id, parameters):
+        captured.update(sql=sql, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.product_spend(workspace, "warehouse-1", 30) == []
+    assert "u.billing_origin_product" in captured["sql"]
+    assert "u.usage_metadata.app_name" in captured["sql"]
+    assert "u.usage_metadata.database_instance_id" in captured["sql"]
+    assert "u.usage_metadata.cluster_id" in captured["sql"]
+    assert "u.usage_metadata.dlt_pipeline_id" in captured["sql"]
+    assert captured["parameters"] == {
+        "current_start_days": 29,
+        "comparison_start_days": 59,
+        "workspace_id": "987",
+    }
+
+
+def test_product_spend_query_reports_usage_units_instead_of_calling_everything_dbus():
+    sql = load_query("product_spend")
+    assert "u.usage_unit" in sql
+    assert "u.usage_type" in sql
+    assert "as dbus" not in sql.lower()
+
+
+def test_all_cost_page_queries_are_scoped_to_the_current_workspace():
+    for name in (
+        "usage_last_30d",
+        "product_spend",
+        "job_run_cost",
+        "cluster_utilization",
+        "warehouse_utilization",
+        "failed_run_cost",
+    ):
+        assert ":workspace_id" in load_query(name), name
 
 # --- classify_cluster_utilization ----------------------------------------------
 # Rows arrive from the Statement Execution API, so values are strings.

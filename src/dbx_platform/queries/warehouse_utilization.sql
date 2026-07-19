@@ -15,6 +15,7 @@ WITH spend AS (
     AND u.usage_start_time >= p.price_start_time
     AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
   WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+    AND u.workspace_id = :workspace_id
     AND u.usage_metadata.warehouse_id IS NOT NULL
   GROUP BY u.workspace_id, u.usage_metadata.warehouse_id
 ),
@@ -27,6 +28,7 @@ queries AS (
         waiting_at_capacity_duration_ms, 0)) / 1000.0, 2)  AS avg_queue_seconds
   FROM system.query.history
   WHERE start_time >= DATE_SUB(CURRENT_DATE(), :days)
+    AND workspace_id = :workspace_id
     AND compute.warehouse_id IS NOT NULL
   GROUP BY workspace_id, compute.warehouse_id
 )

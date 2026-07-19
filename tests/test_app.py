@@ -161,11 +161,12 @@ def test_app_construction_never_touches_the_workspace(monkeypatch):
     assert not mock.method_calls
 
 
-def test_llm_cost_routes_are_registered(client):
+def test_cost_routes_are_registered(client):
     paths = {
         getattr(route, "path", "")
         for route in _iter_routes(client.app)
     }
+    assert "/api/cost/products" in paths
     assert {
         "/api/llm-cost/summary",
         "/api/llm-cost/timeseries",

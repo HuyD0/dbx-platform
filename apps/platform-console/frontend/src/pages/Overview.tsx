@@ -4,6 +4,7 @@ import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import type { DashboardInfo, Envelope, OverviewData } from "../lib/types";
 import { BarList } from "../components/BarList";
+import { aggregateProductSpend } from "../components/ProductSpendBreakdown";
 import { AsOf, Card, ErrorState, SectionTitle, Skeleton, StatTile } from "../components/ui";
 
 export function Overview() {
@@ -39,7 +40,8 @@ export function Overview() {
   const d = query.data.data;
   const findings = d.findings.data;
   const spendRows = d.spend.data ?? [];
-  const spendTotal = spendRows.reduce((acc, r) => acc + Number(r.list_cost_usd ?? 0), 0);
+  const productSpend = aggregateProductSpend(spendRows);
+  const spendTotal = productSpend.reduce((acc, product) => acc + product.current, 0);
 
   return (
     <div className="space-y-4">
@@ -67,7 +69,7 @@ export function Overview() {
           value={findings ? Object.keys(findings.by_area).length : "—"}
         />
         <StatTile
-          label={`Spend (top SKUs, ${spendRows.length ? "30d" : "n/a"})`}
+          label={`Workspace spend (${spendRows.length ? "30d" : "n/a"})`}
           value={
             spendTotal
               ? spendTotal.toLocaleString("en-US", {
@@ -107,12 +109,12 @@ export function Overview() {
           )}
         </Card>
         <Card>
-          <SectionTitle title="Spend by SKU" subtitle="List cost, last 30 days" />
+          <SectionTitle title="Spend by product" subtitle="Workspace list cost, last 30 days" />
           {d.spend.data ? (
             <BarList
-              data={spendRows.map((r) => ({
-                label: String(r.sku_name ?? "unknown"),
-                value: Number(r.list_cost_usd ?? 0),
+              data={productSpend.map((product) => ({
+                label: product.label,
+                value: product.current,
               }))}
             />
           ) : (
