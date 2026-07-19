@@ -23,7 +23,11 @@ import pytest
 import yaml
 
 APP_DIR = Path(__file__).resolve().parent.parent / "apps" / "platform-console"
-APP_FILES = sorted(p for p in APP_DIR.rglob("*.py") if "frontend" not in p.parts)
+APP_FILES = sorted(
+    p
+    for p in APP_DIR.rglob("*.py")
+    if "frontend" not in p.parts and ".venv" not in p.parts
+)
 
 sys.path.insert(0, str(APP_DIR))
 
@@ -61,7 +65,9 @@ def _top_level_calls(tree: ast.Module) -> set[str]:
 
 def test_app_source_exists():
     assert (APP_DIR / "app.yaml").exists()
-    assert (APP_DIR / "requirements.txt").exists()
+    assert (APP_DIR / "pyproject.toml").exists()
+    assert (APP_DIR / "uv.lock").exists()
+    assert not (APP_DIR / "requirements.txt").exists()
     assert len(APP_FILES) >= 4
 
 
@@ -100,9 +106,10 @@ def test_app_yaml_launches_the_backend():
     assert bundle_config["resources"]["apps"]["platform_console"][
         "user_api_scopes"
     ] == ["sql"]
-    requirements = (APP_DIR / "requirements.txt").read_text()
-    assert "--find-links wheels" in requirements
-    assert "fastapi" in requirements
+    project = (APP_DIR / "pyproject.toml").read_text()
+    assert '"fastapi==0.139.2"' in project
+    assert '"mlflow==3.14.0"' in project
+    assert 'dbx-platform = { path = "wheels/' in project
 
 
 def test_bundle_artifact_build_uses_managed_environment():

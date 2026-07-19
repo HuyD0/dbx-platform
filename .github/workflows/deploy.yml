@@ -83,21 +83,16 @@ jobs:
       - name: Verify executor identity policy
         run: bash scripts/verify_executor_identity.sh
       - name: Stage the wheel for the Platform Console app
-        # Use a commit-specific direct wheel path. Databricks Apps caches its
-        # virtualenv when requirements.txt is unchanged; a stable
-        # dbx-platform==0.2.0 requirement can therefore serve an old wheel even
-        # after bundle sync uploads new code with the same package version.
-        # build_info.json surfaces the deployed commit in /api/health so a
-        # stale-wheel deployment is diagnosable from the UI footer.
+        # Refresh the uv lock after staging the current wheel. Its wheel hash
+        # changes on every build, invalidating the Databricks Apps environment
+        # cache without making the package version commit-specific.
+        # build_info.json surfaces the deployed commit in /api/health.
         run: |
           uv run python -m build --wheel
           wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
-          build_dir="apps/platform-console/wheels/${GITHUB_SHA::7}"
-          mkdir -p "$build_dir"
-          cp "dist/$wheel" "$build_dir/$wheel"
-          sed -i \
-            "s|^dbx-platform$|wheels/${GITHUB_SHA::7}/$wheel|" \
-            apps/platform-console/requirements.txt
+          mkdir -p apps/platform-console/wheels
+          cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
+          uv lock --project apps/platform-console
           printf '{"sha": "%s", "built_at": "%s"}\n' \
             "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             > apps/platform-console/build_info.json

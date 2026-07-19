@@ -31,6 +31,13 @@ jobs:
         run: uv run pytest
       - name: Build wheel
         run: uv run python -m build --wheel
+      - name: Resolve the locked Platform Console environment
+        run: |
+          wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          mkdir -p apps/platform-console/wheels
+          cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
+          uv lock --project apps/platform-console
+          uv sync --frozen --project apps/platform-console --no-install-project
       - name: Verify packaged data (queries + policies ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
