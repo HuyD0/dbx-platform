@@ -24,6 +24,24 @@ def test_production_deploy_preserves_existing_dashboards() -> None:
     assert "--auto-approve" not in command
 
 
+def test_stale_lock_recovery_is_explicit_and_manual_only() -> None:
+    workflow = yaml.safe_load(DEPLOY_WORKFLOW.read_text())
+    dispatch = workflow[True]["workflow_dispatch"]
+    recovery = dispatch["inputs"]["recover_stale_lock"]
+    deploy_step = next(
+        step
+        for step in workflow["jobs"]["deploy"]["steps"]
+        if step.get("name") == "Deploy"
+    )
+
+    assert recovery["type"] == "boolean"
+    assert recovery["default"] is False
+    assert "github.event_name == 'workflow_dispatch'" in deploy_step["env"][
+        "RECOVER_STALE_LOCK"
+    ]
+    assert "lock_args+=(--force-lock)" in deploy_step["run"]
+
+
 def test_production_deploy_selects_every_declared_non_dashboard_resource() -> None:
     command = _deploy_command()
     resources: dict[str, dict[str, object]] = {}

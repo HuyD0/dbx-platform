@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      recover_stale_lock:
+        description: "Take over a confirmed stale Databricks bundle deployment lock"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: bundle-deploy
@@ -119,8 +125,15 @@ jobs:
         # Keep this allowlist explicit: production deploys may create/update
         # the app, owned jobs, and the dedicated warehouse, but must never use
         # --auto-approve to cross a destructive plan.
+        env:
+          RECOVER_STALE_LOCK: ${{ github.event_name == 'workflow_dispatch' && inputs.recover_stale_lock || false }}
         run: |
+          lock_args=()
+          if [[ "$RECOVER_STALE_LOCK" == "true" ]]; then
+            lock_args+=(--force-lock)
+          fi
           databricks bundle deploy -t prod \
+            "${lock_args[@]}" \
             --select apps.platform_console \
             --select sql_warehouses.platform_console_warehouse \
             --select jobs.action_executor \
