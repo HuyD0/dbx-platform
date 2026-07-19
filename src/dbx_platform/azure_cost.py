@@ -455,6 +455,57 @@ def report(
     return run_query(w, report_sql(catalog, schema, by), warehouse_id, {"days": days})
 
 
+_DETAIL_DIMENSIONS = {
+    "resource": "resource_id",
+    "meter": "meter_name",
+    "resource-group": "resource_group",
+}
+
+_BUCKETS = ("databricks", "foundry_ai", "search", "storage", "other")
+
+
+def report_detail_sql(catalog: str, schema: str, by: str, bucket: str | None = None) -> str:
+    """Aggregated detail-grain spend (resource/meter) over :days. Pure.
+
+    Reads azure_cost_details — the per-deployment/meter grain — so Foundry
+    spend can be attributed to individual model deployments. ``by`` and
+    ``bucket`` are validated against whitelists because identifiers cannot be
+    bound as statement parameters (the bucket value itself is bound).
+    """
+    dim = _DETAIL_DIMENSIONS.get(by)
+    if not dim:
+        raise ValueError(f"--by must be one of {sorted(_DETAIL_DIMENSIONS)}")
+    if bucket is not None and bucket not in _BUCKETS:
+        raise ValueError(f"--bucket must be one of {sorted(_BUCKETS)}")
+    extra = {
+        "resource": ", resource_group, resource_type",
+        "meter": "",
+        "resource-group": "",
+    }[by]
+    fq = f"{catalog}.{schema}.azure_cost_details"
+    bucket_clause = "AND service_bucket = :bucket " if bucket else ""
+    return (
+        f"SELECT {dim}{extra}, service_bucket, ROUND(SUM(cost), 2) AS cost, "
+        "MAX(currency) AS currency, "
+        "MIN(usage_date) AS first_day, MAX(usage_date) AS last_day "
+        f"FROM {fq} WHERE usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        f"{bucket_clause}"
+        f"GROUP BY {dim}{extra}, service_bucket ORDER BY cost DESC"
+    )
+
+
+def report_detail(
+    w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str,
+    by: str, days: int, bucket: str | None = None,
+) -> list[dict]:
+    params: dict[str, int | str] = {"days": days}
+    if bucket:
+        params["bucket"] = bucket
+    return run_query(
+        w, report_detail_sql(catalog, schema, by, bucket), warehouse_id, params
+    )
+
+
 def daily_bucket_sql(catalog: str, schema: str) -> str:
     """Daily spend per service bucket over the :days window. Pure."""
     fq = f"{catalog}.{schema}.azure_costs"

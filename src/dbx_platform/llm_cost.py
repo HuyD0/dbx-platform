@@ -332,6 +332,50 @@ def evaluate_budgets(
     return results
 
 
+def classify_budget_findings(evaluated: list[dict]) -> list[dict]:
+    """WARNING/CRITICAL budget threshold breaches as finding rows. Pure.
+
+    Input is ``evaluate_budgets`` output. Each breach becomes one canonical
+    finding so the scheduled rollup can persist it to platform_findings and
+    Mission Control ranks it instead of the state living only on page load.
+    """
+    findings = []
+    for row in evaluated:
+        state = str(row.get("threshold_state") or "").upper()
+        if state not in {"WARNING", "CRITICAL"}:
+            continue
+        scope_type = str(row.get("scope_type") or "workspace")
+        scope_value = str(row.get("scope_value") or "all")
+        basis = str(row.get("cost_basis") or "")
+        currency = str(row.get("currency") or "").upper()
+        month = _date_text(row.get("month"))[:7] or "current"
+        amount = _number(row.get("amount"))
+        spend = _number(row.get("spend"))
+        consumed = row.get("consumed_pct")
+        threshold = _integer(
+            row.get("critical_pct") if state == "CRITICAL" else row.get("warning_pct")
+        )
+        findings.append(
+            {
+                "resource_id": f"budget:{scope_type}:{scope_value}:{basis}:{currency}:{month}",
+                "name": f"{month} {scope_type} '{scope_value}' {basis} budget",
+                "reason": (
+                    f"{consumed}% of the {currency} {amount:,.2f} budget consumed "
+                    f"(spend {currency} {spend:,.2f}, {state.lower()} threshold {threshold}%)"
+                ),
+                "action": "review-budget-breach",
+                "severity": "HIGH" if state == "CRITICAL" else "MEDIUM",
+                "threshold_state": state,
+                # cost feeds financial-impact inference: overage past the
+                # breached threshold, never negative.
+                "cost": round(max(spend - amount * threshold / 100, 0.0), 2),
+                "resource_type": "BUDGET",
+                "team": scope_value if scope_type == "team" else "",
+            }
+        )
+    return findings
+
+
 def setup_ledger_tables(
     w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str
 ) -> list[str]:

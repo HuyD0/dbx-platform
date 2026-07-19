@@ -22,10 +22,78 @@ import { Cost } from "./Cost";
 
 const COST_TABS = [
   { id: "databricks", label: "Databricks" },
-  { id: "azure", label: "Azure" },
+  { id: "attribution", label: "Attribution" },
+  { id: "azure", label: "Azure & Foundry" },
   { id: "llm", label: "LLM & AI" },
   { id: "budgets", label: "Budgets & forecasts" },
 ];
+
+const ATTRIBUTION_DIMENSIONS = [
+  { id: "team", label: "Team" },
+  { id: "project", label: "Project" },
+  { id: "workspace", label: "Workspace" },
+];
+
+const ATTRIBUTION_WINDOWS = [7, 30, 90];
+
+function Attribution() {
+  const [dimension, setDimension] = useState("team");
+  const [days, setDays] = useState(30);
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
+        Attribution reads the <code>team</code>/<code>project</code> tags the cluster policies
+        enforce. Rows labeled <code>unallocated</code> carry no tag — tighten enforcement in
+        Data Governance to shrink them. Column names follow FOCUS vocabulary.
+      </div>
+      <div className="flex flex-wrap items-center gap-4 text-xs">
+        <div className="flex items-center gap-1" role="group" aria-label="Attribution dimension">
+          <span className="mr-1 text-muted">Attribute by:</span>
+          {ATTRIBUTION_DIMENSIONS.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDimension(d.id)}
+              aria-pressed={dimension === d.id}
+              className={`rounded-lg px-2.5 py-1 font-medium ${
+                dimension === d.id
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1" role="group" aria-label="Attribution window">
+          <span className="mr-1 text-muted">Window:</span>
+          {ATTRIBUTION_WINDOWS.map((w) => (
+            <button
+              key={w}
+              type="button"
+              onClick={() => setDays(w)}
+              aria-pressed={days === w}
+              className={`rounded-lg px-2.5 py-1 font-medium ${
+                days === w
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {w}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <FindingsSection
+        title={`Spend by ${dimension}`}
+        subtitle={`Databricks list cost attributed by the ${dimension} dimension, last ${days} days`}
+        path="/api/cost/attribution"
+        params={{ dimension, days }}
+        emptyMessage="No billed usage in the window."
+      />
+    </div>
+  );
+}
 
 const AZURE_WINDOWS = [7, 30, 90];
 
@@ -124,6 +192,13 @@ function AzureCost() {
         path="/api/cost/azure"
         params={{ days, by }}
         emptyMessage={`No Azure billing rows in the last ${days} days.`}
+      />
+      <FindingsSection
+        title="Foundry deployment drill"
+        subtitle={`Azure OpenAI / AI Foundry actuals per billing meter (per-model attribution), last ${days} days`}
+        path="/api/cost/azure-detail"
+        params={{ by: "meter", bucket: "foundry_ai", days }}
+        emptyMessage="No Foundry-bucket detail rows — the azure-cost pull populates azure_cost_details."
       />
       <FindingsSection
         title="Azure spend anomalies"
@@ -247,6 +322,7 @@ export function CostValue() {
       <Tabs tabs={COST_TABS} active={active} onChange={setActive} label="Cost and value views" />
       <div role="tabpanel">
         {active === "databricks" && <Cost />}
+        {active === "attribution" && <Attribution />}
         {active === "azure" && <AzureCost />}
         {active === "llm" && <LlmCostView />}
         {active === "budgets" && <Budgets />}

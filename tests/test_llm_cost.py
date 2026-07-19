@@ -709,3 +709,60 @@ def test_budget_evaluation_excludes_other_calendar_months():
     )[0]
     assert result["spend"] == 25
     assert result["consumed_pct"] == 25
+
+
+# --- budget-breach findings ---------------------------------------------------
+
+def test_classify_budget_findings_emits_only_breaches():
+    from dbx_platform.llm_cost import classify_budget_findings
+
+    evaluated = [
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "AZURE_ACTUAL", "currency": "EUR",
+            "month": "2026-07-01", "amount": 1000.0, "spend": 990.0,
+            "consumed_pct": 99.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "WARNING",
+        },
+        {
+            "scope_type": "team", "scope_value": "search",
+            "cost_basis": "DATABRICKS_LIST", "currency": "USD",
+            "month": "2026-07-01", "amount": 500.0, "spend": 650.0,
+            "consumed_pct": 130.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "CRITICAL",
+        },
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "PROVIDER_ESTIMATE", "currency": "USD",
+            "month": "2026-07-01", "amount": 100.0, "spend": 10.0,
+            "consumed_pct": 10.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "OK",
+        },
+    ]
+    findings = classify_budget_findings(evaluated)
+    assert len(findings) == 2
+    warning, critical = findings[0], findings[1]
+    assert warning["severity"] == "MEDIUM"
+    assert warning["action"] == "review-budget-breach"
+    # Overage past the breached threshold: 990 - 1000*0.8 = 190
+    assert warning["cost"] == 190.0
+    assert critical["severity"] == "HIGH"
+    assert critical["team"] == "search"
+    # 650 - 500*1.0 = 150 past the critical threshold
+    assert critical["cost"] == 150.0
+    assert "budget:team:search:DATABRICKS_LIST:USD:2026-07" in critical["resource_id"]
+
+
+def test_classify_budget_findings_never_reports_negative_overage():
+    from dbx_platform.llm_cost import classify_budget_findings
+
+    findings = classify_budget_findings([
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "AZURE_ACTUAL", "currency": "USD",
+            "month": "2026-07-01", "amount": 0.0, "spend": 0.0,
+            "consumed_pct": None, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "INVALID",
+        },
+    ])
+    assert findings == []

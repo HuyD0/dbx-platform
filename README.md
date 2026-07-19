@@ -122,10 +122,16 @@ Read-only/advisory CLI examples:
 
 ```bash
 dbx-platform cost report --days 30
+dbx-platform cost attribution --dimension team     # spend by enforced tag
+dbx-platform azure-cost detail --by meter --bucket foundry_ai
 dbx-platform security token-audit
 dbx-platform governance policy-sync
 dbx-platform dashboards health
 ```
+
+The utilization and Azure-spike checks accept `--store-findings` to persist
+their results to `platform_findings`; that path verifies the governed Job
+context first, so ad-hoc local runs stay report-only.
 
 The legacy mutator flags remain parseable only to fail with a migration
 message:
