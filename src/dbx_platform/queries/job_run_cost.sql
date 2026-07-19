@@ -1,9 +1,11 @@
--- Most expensive jobs over the last :days days, by list-price cost.
+-- Most expensive jobs over the last :days days, attributed by team and project.
 -- Sources: system.billing.usage x system.billing.list_prices x system.lakeflow.jobs
 SELECT
   u.workspace_id,
   u.usage_metadata.job_id                                          AS job_id,
   MAX(j.name)                                                      AS job_name,
+  COALESCE(NULLIF(u.custom_tags['team'], ''), 'unallocated')       AS team,
+  COALESCE(NULLIF(u.custom_tags['project'], ''), 'unallocated')    AS project,
   SUM(u.usage_quantity)                                            AS dbus,
   ROUND(SUM(u.usage_quantity * COALESCE(
       p.pricing.effective_list.default, p.pricing.default)), 2)    AS list_cost_usd
@@ -19,6 +21,10 @@ LEFT JOIN system.lakeflow.jobs j
 WHERE u.usage_metadata.job_id IS NOT NULL
   AND u.workspace_id = :workspace_id
   AND u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
-GROUP BY u.workspace_id, u.usage_metadata.job_id
+GROUP BY
+  u.workspace_id,
+  u.usage_metadata.job_id,
+  COALESCE(NULLIF(u.custom_tags['team'], ''), 'unallocated'),
+  COALESCE(NULLIF(u.custom_tags['project'], ''), 'unallocated')
 ORDER BY list_cost_usd DESC
 LIMIT :limit
