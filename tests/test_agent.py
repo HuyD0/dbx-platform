@@ -91,7 +91,13 @@ def test_platform_console_hosts_langgraph_agent_without_direct_invocation():
         root / "apps" / "platform-console" / "backend" / "routers" / "chat.py"
     ).read_text()
     assert "create_react_agent" in runtime
-    assert "DatabricksChatModel" in runtime
+    assert "backend.agent_runtime" in runtime
+    assert "DatabricksChatModel" in (
+        root / "apps" / "platform-console" / "backend" / "agent_runtime" / "chat_model.py"
+    ).read_text()
+    assert "configure_mlflow_tracing" in (
+        root / "apps" / "platform-console" / "backend" / "agent_runtime" / "tracing.py"
+    ).read_text()
     assert "databricks_langchain" not in runtime
     assert "get_platform_agent().invoke" in router
     assert "api_client.do(" not in router
