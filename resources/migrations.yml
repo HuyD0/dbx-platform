@@ -29,6 +29,8 @@ resources:
               - ${var.control_plane_catalog}
               - --schema
               - ${var.control_plane_schema}
+              - --app-service-principal
+              - ${resources.apps.platform_console.service_principal_client_id}
               - --operator-group
               - ${var.operator_group}
               - --approver-group

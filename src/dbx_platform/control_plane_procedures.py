@@ -1,10 +1,11 @@
 """Security-definer write broker for human Mission Control decisions.
 
 The Databricks App service principal and human groups receive no ``MODIFY`` on
-the action ledger. Verified App user tokens call these narrowly scoped Unity
-Catalog procedures with ``EXECUTE`` only. The procedures re-check the connected
-user's live account-group membership through native ``EXECUTE`` authorization
-on every call and record the App-verified forwarded-user identity as the actor.
+the action ledger. Only the App service principal receives ``EXECUTE`` on these
+narrowly scoped Unity Catalog procedures. The App re-checks the forwarded
+user's live account-group membership and passes that verified identity as the
+actor. Human groups deliberately cannot call the procedures directly and
+substitute another actor identity.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ def procedure_statements(
     catalog: str,
     schema: str,
     *,
+    app_service_principal: str,
     operator_group: str,
     approver_group: str,
 ) -> list[tuple[str, str]]:
@@ -38,14 +40,14 @@ def procedure_statements(
 
     catalog = _identifier(catalog)
     schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
     operator_group = _principal(operator_group)
     approver_group = _principal(approver_group)
     fq = f"`{catalog}`.`{schema}`"
-    # Group membership is revalidated by Unity Catalog on every CALL through
-    # the exact EXECUTE grants emitted below. Databricks does not allow
-    # is_account_group_member() inside an atomic stored-procedure transaction.
-    # Keep the procedures atomic and rely on native procedure authorization,
-    # with cp_decide_action granted only to the approver group.
+    # Databricks does not allow is_account_group_member() or session_user()
+    # inside an atomic stored-procedure transaction. Keep the procedures atomic
+    # and make the App the sole caller. Its request boundary verifies the
+    # forwarded user and live group membership before supplying actor fields.
     allowed_actions = (
         "'stale-clusters', 'orphaned-jobs', 'token-revoke', 'policy-sync', "
         "'run-job', 'configure-budget'"
@@ -399,19 +401,20 @@ END
         for name, sql in procedures.items()
     ]
     for name in procedures:
-        if name != "cp_decide_action":
+        # Remove grants from the earlier group-authorized implementation. This
+        # is intentionally idempotent and closes direct SQL identity spoofing.
+        for group in (operator_group, approver_group):
             statements.append(
                 (
-                    f"grant {operator_group} execute on {name}",
-                    f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                    f"TO `{operator_group}`",
+                    f"revoke {group} execute on {name}",
+                    f"REVOKE EXECUTE ON PROCEDURE {fq}.`{name}` FROM `{group}`",
                 )
             )
         statements.append(
             (
-                f"grant {approver_group} execute on {name}",
+                f"grant {app_service_principal} execute on {name}",
                 f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                f"TO `{approver_group}`",
+                f"TO `{app_service_principal}`",
             )
         )
     return statements
