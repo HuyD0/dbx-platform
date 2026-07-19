@@ -40,11 +40,11 @@ def procedure_statements(
     operator_group = _principal(operator_group)
     approver_group = _principal(approver_group)
     fq = f"`{catalog}`.`{schema}`"
-    operator_check = (
-        f"(is_account_group_member('{operator_group}') "
-        f"OR is_account_group_member('{approver_group}'))"
-    )
-    approver_check = f"is_account_group_member('{approver_group}')"
+    # Group membership is revalidated by Unity Catalog on every CALL through
+    # the exact EXECUTE grants emitted below. Databricks does not allow
+    # is_account_group_member() inside an atomic stored-procedure transaction.
+    # Keep the procedures atomic and rely on native procedure authorization,
+    # with cp_decide_action granted only to the approver group.
     allowed_actions = (
         "'stale-clusters', 'orphaned-jobs', 'token-revoke', 'policy-sync', "
         "'run-job', 'configure-budget'"
@@ -71,10 +71,6 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
-  IF NOT {operator_check} THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'A Mission Control operator or approver is required';
-  END IF;
   IF p_proposer_email IS NULL
      OR lower(session_user()) <> lower(p_proposer_email) THEN
     SIGNAL SQLSTATE '45000'
@@ -163,10 +159,6 @@ SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
   DECLARE v_from_status STRING;
-  IF NOT {operator_check} THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'A Mission Control operator or approver is required';
-  END IF;
   IF p_target_status NOT IN ('STALE', 'EXPIRED') THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Human transition target is not allowlisted';
@@ -227,10 +219,6 @@ AS BEGIN ATOMIC
   DECLARE v_risk STRING;
   DECLARE v_confirm_phrase STRING;
   DECLARE v_expires_at TIMESTAMP;
-  IF NOT {approver_check} THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'A current Mission Control approver is required';
-  END IF;
   IF p_approver_email IS NULL
      OR lower(session_user()) <> lower(p_approver_email) THEN
     SIGNAL SQLSTATE '45000'
@@ -351,10 +339,6 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
-  IF NOT {operator_check} THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'A Mission Control operator or approver is required';
-  END IF;
   IF p_event_type NOT IN (
     'PLAN_CREATED',
     'PLAN_REQUESTED_FROM_APP',

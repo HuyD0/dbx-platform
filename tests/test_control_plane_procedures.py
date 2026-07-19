@@ -49,7 +49,7 @@ def _action() -> ActionRequest:
     )
 
 
-def test_security_definer_procedures_are_group_checked_and_atomic():
+def test_security_definer_procedures_use_native_group_grants_and_are_atomic():
     statements = procedure_statements(
         "main",
         "dbx_platform",
@@ -60,8 +60,7 @@ def test_security_definer_procedures_are_group_checked_and_atomic():
 
     assert sql.count("SQL SECURITY DEFINER") == 4
     assert sql.count("AS BEGIN ATOMIC") == 4
-    assert "is_account_group_member('dbx-platform-operators')" in sql
-    assert "is_account_group_member('dbx-platform-approvers')" in sql
+    assert "is_account_group_member" not in sql
     assert "session_user()" in sql
     assert "sha2(p_plan_json, 256)" in sql
     assert "p_target_status NOT IN ('STALE', 'EXPIRED')" in sql
