@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Bot,
   CircleDollarSign,
   Gauge,
   ShieldCheck,
@@ -8,6 +9,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { PlanActionButton } from "../components/ActionPlanDialog";
 import { BarList } from "../components/BarList";
 import { DataTable } from "../components/DataTable";
 import {
@@ -24,6 +26,8 @@ import {
   statusTone,
 } from "../components/ui";
 import { apiGet, isUnavailable } from "../lib/api";
+import { useAssistantPanel } from "../lib/assistant-panel";
+import { useChat } from "../lib/chat";
 import { timeAgo, usd } from "../lib/format";
 import type { Envelope, MissionControlData, OverviewData, PillarOutcome, Row } from "../lib/types";
 
@@ -144,6 +148,103 @@ const PILLARS = [
   },
 ] as const;
 
+const ACTION_TITLES: Record<string, string> = {
+  "stale-clusters": "Review stale clusters",
+  "orphaned-jobs": "Pause orphaned job schedules",
+  "token-revoke": "Revoke over-age access tokens",
+  "policy-sync": "Synchronize cluster policies",
+};
+
+const PLANNABLE_ACTIONS = new Set(Object.keys(ACTION_TITLES));
+
+const DOMAIN_BASIS: Record<(typeof PILLARS)[number]["key"], string> = {
+  cost: "Spend & efficiency",
+  security: "Identity & policy",
+  risk: "Control posture",
+  performance: "SLO & reliability",
+};
+
+function humanize(value: string): string {
+  const words = value
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
+function rowText(row: Row, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function affectedCount(row: Row): number {
+  const affected = row.affected_resources;
+  return Array.isArray(affected) ? affected.length : 0;
+}
+
+interface PriorityDecision {
+  action: string | null;
+  title: string;
+  description: string;
+  pillar: string;
+  evidence: string;
+  impact: string;
+  control: string;
+}
+
+function normalizeDecision(row: Row): PriorityDecision {
+  const rawAction = rowText(row, "proposed_action_type", "action");
+  const action = rawAction && PLANNABLE_ACTIONS.has(rawAction) ? rawAction : null;
+  const pillar = humanize(rowText(row, "pillar", "area") ?? "risk");
+  const explicitTitle = rowText(row, "decision", "title", "recommendation");
+  const check = rowText(row, "check_name", "check");
+  const title =
+    explicitTitle ??
+    (rawAction ? ACTION_TITLES[rawAction] ?? humanize(rawAction) : null) ??
+    (check ? `Review ${humanize(check).toLowerCase()}` : `Review ${pillar.toLowerCase()} evidence`);
+  const evidenceValue = row.evidence;
+  const evidenceFields =
+    evidenceValue && typeof evidenceValue === "object" && !Array.isArray(evidenceValue)
+      ? Object.keys(evidenceValue).length
+      : 0;
+  const targets = affectedCount(row);
+  const evidence =
+    rowText(row, "evidence") ??
+    (targets > 0
+      ? `${targets} affected resource${targets === 1 ? "" : "s"}`
+      : evidenceFields > 0
+        ? `${evidenceFields} evidence field${evidenceFields === 1 ? "" : "s"}`
+        : check
+          ? humanize(check)
+          : "Canonical finding");
+  const financialImpact = Number(row.financial_impact_usd ?? 0);
+  const severity = humanize(rowText(row, "severity") ?? "reported");
+  const impact =
+    Number.isFinite(financialImpact) && financialImpact > 0
+      ? `${usd(financialImpact)} exposure`
+      : (rowText(row, "slo_impact") ??
+        (rowText(row, "blast_radius") &&
+        rowText(row, "blast_radius")?.toUpperCase() !== "UNKNOWN"
+          ? `${humanize(rowText(row, "blast_radius") ?? "")} blast radius`
+          : `${severity} severity`));
+  const description =
+    rowText(row, "reason", "description", "summary") ??
+    `This ${pillar.toLowerCase()} finding is ranked highest by severity, impact, and evidence age.`;
+  return {
+    action,
+    title,
+    description,
+    pillar,
+    evidence,
+    impact,
+    control: action ? "Exact plan required" : "Human review required",
+  };
+}
+
 function fallbackOutcome(
   key: string,
   data: MissionControlData,
@@ -188,6 +289,8 @@ function fallbackDecisions(data: MissionControlData): Row[] {
 }
 
 export function MissionControl() {
+  const openAssistant = useAssistantPanel();
+  const { pending: assistantPending, send } = useChat();
   const query = useQuery({
     queryKey: ["mission-control"],
     queryFn: fetchMissionControl,
@@ -238,6 +341,21 @@ export function MissionControl() {
         : null,
     },
   ];
+  const healthySources = sourceHealth.filter(
+    (source) => String(source.status).toLowerCase() === "healthy",
+  ).length;
+  const degradedSource = sourceHealth.find(
+    (source) => String(source.status).toLowerCase() !== "healthy",
+  );
+  const priority = decisions.length > 0 ? normalizeDecision(decisions[0]) : null;
+  const askAboutPriority = () => {
+    if (!priority || assistantPending) return;
+    openAssistant();
+    send(
+      `Why is "${priority.title}" the top priority for this workspace? Explain the evidence, ` +
+        `impact, source freshness, and the exact approval control that would apply. Do not execute anything.`,
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -262,40 +380,18 @@ export function MissionControl() {
         {compatibility && <Badge tone="warning">compatibility mode</Badge>}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {PILLARS.map(({ key, label, href, icon: Icon, description }) => {
-          const outcome = outcomes[key] ?? fallbackOutcome(key, data, spendTotal);
-          return (
-            <Link key={key} to={href} className="group rounded-2xl focus:outline-none">
-              <Card className="h-full transition-transform group-hover:-translate-y-0.5 group-focus-visible:ring-2 group-focus-visible:ring-accent">
-                <div className="flex items-start justify-between gap-3">
-                  <span className="rounded-xl bg-accent/10 p-2 text-accent">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <Badge tone={statusTone(outcome.status)}>{outcome.status ?? "unknown"}</Badge>
-                </div>
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <div>
-                    <div className="text-xs text-muted">{label}</div>
-                    <div className="mt-0.5 text-xl font-semibold text-ink">
-                      {outcome.value ?? outcome.open_findings ?? "—"}
-                    </div>
-                  </div>
-                  <ArrowRight className="h-4 w-4 text-muted transition-transform group-hover:translate-x-0.5" />
-                </div>
-                <p className="mt-2 text-[11px] text-muted">{outcome.summary ?? description}</p>
-              </Card>
-            </Link>
-          );
-        })}
-      </div>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Open findings"
           value={findings?.total ?? "—"}
           tone={findings?.total ? "warning" : "good"}
-          hint={findings?.run_ts ? `collected ${timeAgo(findings.run_ts)}` : "awaiting normalized run"}
+          hint={
+            decisions.length > 0
+              ? `${decisions.length} ranked for review`
+              : findings?.run_ts
+                ? `collected ${timeAgo(findings.run_ts)}`
+                : "awaiting normalized run"
+          }
         />
         <StatTile
           label="Awaiting approval"
@@ -304,14 +400,153 @@ export function MissionControl() {
           hint="No action executes without approval"
         />
         <StatTile
-          label="Latest AI briefing"
-          value={data.digest?.data?.latest_run_ts ? timeAgo(data.digest.data.latest_run_ts) : "none"}
-          hint="Evidence-backed, read-only synthesis"
+          label="Sources healthy"
+          value={`${healthySources} / ${sourceHealth.length}`}
+          tone={
+            sourceHealth.length > 0 && healthySources === sourceHealth.length
+              ? "good"
+              : "warning"
+          }
+          hint={
+            sourceHealth.length === 0
+              ? "Coverage has not been reported"
+              : degradedSource
+                ? `${degradedSource.source}: ${String(degradedSource.status).replaceAll("_", " ")}`
+                : "All reporting sources are healthy"
+          }
         />
       </div>
 
+      <section aria-labelledby="operational-posture-title">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-t-2 border-grid pt-3">
+          <div>
+            <h2 id="operational-posture-title" className="text-base font-semibold text-ink">
+              Operational posture
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Evidence stays grouped by domain; cross-domain priorities become decision briefs.
+            </p>
+          </div>
+          <Badge tone="info">4 evidence domains</Badge>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {PILLARS.map(({ key, label, href, icon: Icon, description }) => {
+            const outcome = outcomes[key] ?? fallbackOutcome(key, data, spendTotal);
+            const openFindings =
+              outcome.open_findings ??
+              (typeof outcome.value === "number" ? outcome.value : 0);
+            const criticalFindings = Number(outcome.critical_findings ?? 0);
+            const metric =
+              typeof outcome.value === "number"
+                ? `${outcome.value} open`
+                : (outcome.value ?? `${openFindings} open`);
+            return (
+              <Link
+                key={key}
+                to={href}
+                aria-label={`Open ${label}`}
+                className="group rounded-2xl focus:outline-none"
+              >
+                <Card className="blueprint-domain-card flex h-full flex-col">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="rounded-lg border border-grid bg-page/50 p-1.5 text-accent">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <h3 className="text-sm font-semibold text-ink">{label}</h3>
+                    </div>
+                    <Badge tone={statusTone(outcome.status)}>{metric}</Badge>
+                  </div>
+                  <p className="mt-3 min-h-10 text-xs leading-5 text-muted">
+                    {outcome.summary ?? description}
+                  </p>
+                  <div className="mt-auto flex items-center justify-between gap-3 border-t border-grid pt-3 text-[11px]">
+                    <span className="font-medium text-ink-2">
+                      {openFindings} finding{openFindings === 1 ? "" : "s"}
+                    </span>
+                    <span className="flex items-center gap-1 text-muted">
+                      {criticalFindings > 0
+                        ? `${criticalFindings} critical`
+                        : DOMAIN_BASIS[key]}
+                      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </div>
+                </Card>
+              </Link>
+            );
+          })}
+        </div>
+
+        {priority ? (
+          <Card className="blueprint-priority mt-3">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(25rem,0.95fr)_auto] xl:items-center">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="info">Priority 01</Badge>
+                  <Badge tone={statusTone(rowText(decisions[0], "severity"))}>
+                    {priority.pillar}
+                  </Badge>
+                </div>
+                <h3 className="mt-3 text-lg font-semibold tracking-tight text-ink">
+                  {priority.title}
+                </h3>
+                <p className="mt-1.5 max-w-2xl text-xs leading-5 text-ink-2">
+                  {priority.description}
+                </p>
+              </div>
+
+              <dl className="grid gap-2 sm:grid-cols-3">
+                {[
+                  ["Evidence", priority.evidence],
+                  ["Impact", priority.impact],
+                  ["Control", priority.control],
+                ].map(([label, value]) => (
+                  <div key={label} className="border-t-2 border-grid pt-2">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                      {label}
+                    </dt>
+                    <dd className="mt-1 text-xs font-medium leading-5 text-ink">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row xl:flex-col">
+                {priority.action ? (
+                  <PlanActionButton
+                    action={priority.action}
+                    label="Review exact plan"
+                    tone="primary"
+                  />
+                ) : (
+                  <Link
+                    to="/actions"
+                    className="rounded-lg border border-accent bg-accent px-3 py-1.5 text-center text-xs font-medium text-white hover:brightness-110"
+                  >
+                    Review in Action Center
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={askAboutPriority}
+                  disabled={assistantPending}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  Ask why this matters
+                </button>
+              </div>
+            </div>
+          </Card>
+        ) : (
+          <Card className="blueprint-priority mt-3">
+            <EmptyState message="No cross-domain decision needs attention right now." />
+          </Card>
+        )}
+      </section>
+
       <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle
             title="Top decisions"
             subtitle="Deterministically ranked by critical impact, financial value and age"
@@ -334,14 +569,14 @@ export function MissionControl() {
           )}
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle title="Data health" subtitle="Freshness and coverage are part of every answer" />
           <DataHealthList sources={sourceHealth} />
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle title="Findings by domain" subtitle="Latest stored reporting cycle" />
           {findings && Object.keys(findings.by_area).length > 0 ? (
             <BarList
@@ -352,7 +587,7 @@ export function MissionControl() {
             <EmptyState message="No stored domain findings." />
           )}
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle title="What changed" subtitle="New, resolved and materially changed since the prior run" />
           {(data.changes ?? []).length > 0 ? (
             <DataTable
@@ -372,7 +607,7 @@ export function MissionControl() {
       </div>
 
       {spendRows.length > 0 && (
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle
             title="Databricks list cost"
             subtitle="Top reported SKUs only; open Cost & Value for complete basis and coverage"

@@ -1,5 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleDotDashed, Fingerprint, History, ShieldCheck } from "lucide-react";
+import {
+  BadgeCheck,
+  CircleDotDashed,
+  FileSearch,
+  Fingerprint,
+  History,
+  Play,
+  ShieldCheck,
+  UserCheck,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { PlanActionButton } from "../components/ActionPlanDialog";
 import { ActionReviewDialog } from "../components/ActionReviewDialog";
@@ -53,6 +62,36 @@ const LEGACY_ACTIONS = [
     risk: "medium",
   },
 ];
+
+const ACTION_LIFECYCLE = [
+  {
+    label: "Evidence",
+    description: "Canonical finding and current state",
+    icon: FileSearch,
+  },
+  {
+    label: "Immutable plan",
+    description: "Exact targets, hash, TTL and rollback",
+    icon: Fingerprint,
+  },
+  {
+    label: "Human approval",
+    description: "Current membership and typed confirmation",
+    icon: UserCheck,
+  },
+  {
+    label: "Execution",
+    description: "Dedicated least-privileged executor",
+    icon: Play,
+    tone: "process",
+  },
+  {
+    label: "Verification",
+    description: "Revalidated outcome and append-only events",
+    icon: BadgeCheck,
+    tone: "complete",
+  },
+] as const;
 
 function rowsFromEnvelope(
   envelope: Envelope<ActionRequest[] | { items?: ActionRequest[] }>,
@@ -111,6 +150,36 @@ export function ActionCenter() {
           ) : undefined
         }
       />
+
+      <Card>
+        <SectionTitle
+          title="Governed action lifecycle"
+          subtitle="Every mutation follows the same fail-closed sequence."
+          right={<Badge tone="info">Required control path</Badge>}
+        />
+        <ol className="blueprint-process" aria-label="Governed action lifecycle">
+          {ACTION_LIFECYCLE.map((step, index) => {
+            const Icon = step.icon;
+            const tone = "tone" in step ? step.tone : undefined;
+            return (
+              <li
+                key={step.label}
+                className="blueprint-process-step"
+                data-tone={tone}
+              >
+                <span className="blueprint-process-node" aria-hidden="true">
+                  <span>{index + 1}</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                  <span className="text-xs font-semibold text-ink">{step.label}</span>
+                </div>
+                <p className="mt-1 text-[11px] leading-4 text-muted">{step.description}</p>
+              </li>
+            );
+          })}
+        </ol>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>

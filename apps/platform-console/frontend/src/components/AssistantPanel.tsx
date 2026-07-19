@@ -16,6 +16,8 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
 
   useEffect(() => {
     if (!open) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     previousFocus.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     window.requestAnimationFrame(() => closeRef.current?.focus());
@@ -45,6 +47,7 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = originalOverflow;
       previousFocus.current?.focus();
     };
   }, [open, onClose]);
@@ -65,11 +68,18 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
             onClose();
             navigate("/assistant");
           }}
-          className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm font-semibold text-ink hover:bg-hairline"
+          className="flex items-center gap-2 rounded-lg px-2 py-1 text-ink hover:bg-hairline"
           title="Open full page"
         >
           <Bot className="h-4 w-4 text-accent" />
-          <span id={titleId}>Assistant</span>
+          <span className="text-left">
+            <span id={titleId} className="block text-sm font-semibold">
+              Read-only investigator
+            </span>
+            <span className="block text-[10px] font-normal text-muted">
+              Workspace evidence · proposal only
+            </span>
+          </span>
         </button>
         <div className="flex items-center gap-1">
           {turns.length > 0 && (
@@ -107,10 +117,11 @@ export function AssistantLauncher({ onOpen }: { onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-accent px-4 py-2.5 text-sm font-medium text-white shadow-xl transition-transform hover:scale-105"
+      aria-label="Ask agent"
+      className="fixed bottom-4 right-4 z-30 flex h-11 w-11 items-center justify-center gap-2 rounded-full bg-accent text-sm font-medium text-white shadow-xl transition-transform hover:scale-105 sm:bottom-5 sm:right-5 sm:h-auto sm:w-auto sm:px-4 sm:py-2.5"
     >
       <Bot className="h-4 w-4" />
-      Ask agent
+      <span className="hidden sm:inline">Ask agent</span>
     </button>
   );
 }

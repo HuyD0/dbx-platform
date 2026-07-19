@@ -35,7 +35,7 @@ const SUGGESTIONS = [
 
 function JobProposalCard({ proposal }: { proposal: Proposal }) {
   return (
-    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
+    <div className="blueprint-proposal glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
         Proposed job run: <span className="font-medium text-ink">{proposal.name}</span>
       </span>
@@ -51,7 +51,7 @@ function JobProposalCard({ proposal }: { proposal: Proposal }) {
 
 function BatchJobProposalCard({ proposal }: { proposal: Proposal }) {
   return (
-    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
+    <div className="blueprint-proposal glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
         Batch proposal for{" "}
         <span className="font-medium text-ink">
@@ -67,7 +67,7 @@ function ActionProposalCard({ proposal }: { proposal: Proposal }) {
   const [open, setOpen] = useState(false);
   const action = proposal.action ?? "";
   return (
-    <div className="glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
+    <div className="blueprint-proposal glass mt-2 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs">
       <span className="text-ink-2">
         Proposed: <span className="font-medium text-ink">{action}</span>
         {typeof proposal.count === "number" && ` — ${proposal.count} item(s) in the dry-run`}
@@ -156,7 +156,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                 compact ? "text-lg" : "text-3xl md:text-4xl"
               }`}
             >
-              What should we look at?
+              Investigate this workspace
             </p>
             <p className="max-w-md text-sm text-ink-2">
               I can investigate the page you are viewing and draft evidence-backed plans.
