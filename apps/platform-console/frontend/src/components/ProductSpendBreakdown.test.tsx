@@ -13,6 +13,7 @@ const rows = [
     usage_quantity: "4",
     usage_unit: "DBU",
     list_cost_usd: "40",
+    tags: { cost_center: "platform", env: "prod" },
   },
   {
     period: "previous",
@@ -53,6 +54,7 @@ test("shows product share and an accessible workload drill-down", async () => {
     "true",
   );
   expect(screen.getByText("platform-console")).toBeInTheDocument();
+  expect(screen.getByText("cost_center: platform, env: prod")).toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: /Lakebase/ }));
   expect(screen.getByRole("button", { name: /Lakebase/ })).toHaveAttribute(

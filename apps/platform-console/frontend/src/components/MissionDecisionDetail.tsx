@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
   CheckCircle2,
+  ChevronDown,
   FileCheck2,
   FileSearch,
   Fingerprint,
@@ -132,6 +133,83 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function summarizeImpact(impact: unknown): Array<{ label: string; value: string }> {
+  if (impact == null || typeof impact !== "object" || Array.isArray(impact)) return [];
+  return Object.entries(impact)
+    .map(([key, value]) => {
+      if (typeof value === "number") return { label: humanize(key), value: value.toLocaleString() };
+      if (typeof value === "string") return { label: humanize(key), value };
+      if (typeof value === "boolean") return { label: humanize(key), value: value ? "Yes" : "No" };
+      if (Array.isArray(value)) {
+        return {
+          label: humanize(key),
+          value: `${value.length.toLocaleString()} item${value.length === 1 ? "" : "s"}`,
+        };
+      }
+      if (value && typeof value === "object") {
+        const fieldCount = Object.keys(value).length;
+        return {
+          label: humanize(key),
+          value: `${fieldCount.toLocaleString()} field${fieldCount === 1 ? "" : "s"}`,
+        };
+      }
+      return { label: humanize(key), value: "Not reported" };
+    })
+    .slice(0, 6);
+}
+
+function ImpactSummary({ impact }: { impact: unknown }) {
+  const [expanded, setExpanded] = useState(false);
+  const facts = summarizeImpact(impact);
+  const raw = typeof impact === "string" ? impact : JSON.stringify(impact, null, 2);
+
+  return (
+    <div className="rounded-xl border border-grid bg-page p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            Recorded impact
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Summary first; expand the raw JSON only when you need audit-level detail.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          className="inline-flex items-center gap-1 rounded-lg border border-grid px-2 py-1 text-xs font-medium text-ink-2 hover:bg-hairline"
+        >
+          {expanded ? "Hide JSON" : "Show JSON"}
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition ${expanded ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+      {facts.length > 0 ? (
+        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+          {facts.map((fact) => (
+            <div key={fact.label} className="rounded-lg bg-surface px-3 py-2">
+              <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">
+                {fact.label}
+              </dt>
+              <dd className="mt-1 text-sm font-medium text-ink">{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-3 text-xs text-ink-2">{raw}</p>
+      )}
+      {expanded && (
+        <pre className="mt-3 max-h-80 overflow-auto rounded-lg border border-grid bg-surface p-3 font-mono text-[11px] leading-5 text-ink-2">
+          {raw}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function DetailTabs({
   active,
   onChange,
@@ -224,14 +302,7 @@ function Overview({
       </dl>
 
       {impact != null && (
-        <div className="rounded-xl border border-grid bg-page p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-            Recorded impact
-          </p>
-          <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-xs leading-5 text-ink-2">
-            {typeof impact === "string" ? impact : JSON.stringify(impact, null, 2)}
-          </pre>
-        </div>
+        <ImpactSummary impact={impact} />
       )}
 
       {targets.length > 0 ? (

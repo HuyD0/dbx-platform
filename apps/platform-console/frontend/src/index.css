@@ -8,21 +8,21 @@
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #fbf7f8;
+  --color-page: #f7f7f5;
   --color-surface: #ffffff;
   --color-raised: #ffffff;
-  --color-tint: #f9eaed;
-  --color-ink: #240b15;
-  --color-ink-2: #4b3f43;
-  --color-muted: #806a72;
-  --color-grid: #e4d7db;
-  --color-hairline: rgba(36, 11, 21, 0.08);
+  --color-tint: #f3efef;
+  --color-ink: #1b1b1d;
+  --color-ink-2: #464145;
+  --color-muted: #6f686c;
+  --color-grid: #ded9d8;
+  --color-hairline: rgba(27, 27, 29, 0.08);
 
   --color-brand-primary: #f00037;
-  --color-brand-maroon: #240b15;
-  --color-brand-mid: #8b001f;
-  --color-rose-grey: #b79aa3;
-  --color-sand: #e4d7db;
+  --color-brand-maroon: #2f1219;
+  --color-brand-mid: #b0002a;
+  --color-rose-grey: #b9aeb2;
+  --color-sand: #ded9d8;
   --color-warning-surface: #fff8e1;
   --color-warning-accent: #ffcd67;
   --color-info-surface: #e5f6f5;
@@ -32,7 +32,7 @@
 
   --color-series-1: #006f72;
   --color-series-2: #3f7424;
-  --color-series-3: #8b001f;
+  --color-series-3: #c22f4f;
   --color-series-4: #8a6200;
 
   --color-status-info: #006f72;
@@ -41,21 +41,21 @@
   --color-status-serious: #8a432f;
   --color-status-critical: #b4233e;
 
-  --color-accent: #8b001f;
+  --color-accent: #b0002a;
   --color-blueprint: #006f72;
-  --color-process: #8b001f;
+  --color-process: #c22f4f;
 }
 
 .dark {
-  --color-page: #171315;
-  --color-surface: #211a1d;
-  --color-raised: #2b2326;
-  --color-tint: #34252a;
+  --color-page: #151515;
+  --color-surface: #202020;
+  --color-raised: #2b2b2b;
+  --color-tint: #30282b;
   --color-ink: #fbf7f8;
   --color-ink-2: #d8ccd0;
   --color-muted: #bfaeb4;
-  --color-grid: #493b40;
-  --color-hairline: rgba(251, 247, 248, 0.1);
+  --color-grid: #454044;
+  --color-hairline: rgba(255, 255, 255, 0.1);
 
   --color-warning-surface: #382d17;
   --color-info-surface: #173537;
@@ -126,7 +126,7 @@ body {
 .glass {
   background: var(--color-surface);
   border: 1px solid var(--color-grid);
-  box-shadow: 0 1px 2px rgba(36, 11, 21, 0.04);
+  box-shadow: 0 1px 2px rgba(27, 27, 29, 0.04);
 }
 .dark .glass {
   background: var(--color-surface);

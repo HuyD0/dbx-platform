@@ -79,6 +79,16 @@ function resourceName(row: Row): string {
   return `Unattributed ${type.replace(/_/g, " ")}`;
 }
 
+function tagSummary(row: Row): string {
+  const tags = row.tags;
+  if (!tags || typeof tags !== "object" || Array.isArray(tags)) return "No tags";
+  const pairs = Object.entries(tags)
+    .filter(([, value]) => value != null && String(value).trim() !== "")
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${value}`);
+  return pairs.length > 0 ? pairs.join(", ") : "No tags";
+}
+
 export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: number }) {
   const products = useMemo(() => aggregateProductSpend(rows), [rows]);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -107,7 +117,15 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
     if (!selected) return [];
     const details = new Map<
       string,
-      { product: string; workload: string; sku: string; usage: number; unit: string; cost: number }
+      {
+        product: string;
+        workload: string;
+        sku: string;
+        tags: string;
+        usage: number;
+        unit: string;
+        cost: number;
+      }
     >();
     for (const row of rows) {
       if (row.period === "previous" || !selected.productKeys.includes(productKey(row.product))) {
@@ -116,9 +134,18 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
       const product = productLabel(row.product);
       const workload = resourceName(row);
       const sku = String(row.sku_name ?? "Unknown SKU");
+      const tags = tagSummary(row);
       const unit = String(row.usage_unit ?? "");
-      const key = `${product}\u0000${workload}\u0000${sku}\u0000${unit}`;
-      const existing = details.get(key) ?? { product, workload, sku, usage: 0, unit, cost: 0 };
+      const key = `${product}\u0000${workload}\u0000${sku}\u0000${tags}\u0000${unit}`;
+      const existing = details.get(key) ?? {
+        product,
+        workload,
+        sku,
+        tags,
+        usage: 0,
+        unit,
+        cost: 0,
+      };
       const usage = Number(row.usage_quantity ?? 0);
       const cost = Number(row.list_cost_usd ?? 0);
       existing.usage += Number.isFinite(usage) ? usage : 0;
@@ -184,7 +211,9 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
         <div>
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-xs font-semibold text-ink">{selected.label} cost drivers</h3>
-            <span className="text-[11px] text-muted">Current {days}-day period</span>
+            <span className="text-[11px] text-muted">
+              Current {days}-day period · grouped by workload, SKU, and tags
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -193,6 +222,7 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
                   {selected.key === "__OTHER__" && <th className="px-2 py-2 font-medium">Product</th>}
                   <th className="px-2 py-2 font-medium">Workload</th>
                   <th className="px-2 py-2 font-medium">SKU</th>
+                  <th className="px-2 py-2 font-medium">Tags</th>
                   <th className="px-2 py-2 text-right font-medium">Usage</th>
                   <th className="px-2 py-2 text-right font-medium">List cost</th>
                 </tr>
@@ -205,6 +235,7 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
                     )}
                     <td className="max-w-52 truncate px-2 py-2 text-ink-2">{row.workload}</td>
                     <td className="max-w-72 truncate px-2 py-2 text-muted">{row.sku}</td>
+                    <td className="max-w-64 truncate px-2 py-2 text-muted">{row.tags}</td>
                     <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-muted">
                       {num(row.usage)} {row.unit}
                     </td>
