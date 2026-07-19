@@ -713,7 +713,7 @@ CAST(:expires_at AS TIMESTAMP), CAST(:updated_at AS TIMESTAMP), :idempotency_key
                 f"CALL {self._procedure('cp_transition_action')}("
                 ":workspace_id, :environment, :action_id, "
                 ":expected_statuses, :target_status, :reason, :event_id, "
-                ":details_json, :event_at)",
+                ":actor_id, :details_json, :event_at)",
                 {
                     "workspace_id": current.workspace_id,
                     "environment": current.environment,
@@ -724,6 +724,7 @@ CAST(:expires_at AS TIMESTAMP), CAST(:updated_at AS TIMESTAMP), :idempotency_key
                     "target_status": target.value,
                     "reason": reason or "",
                     "event_id": event.event_id,
+                    "actor_id": actor_id or "",
                     "details_json": canonical_json(event.details),
                     "event_at": self._ts(event.event_ts),
                 },
@@ -918,7 +919,8 @@ approver_role, confirmation, decided_at
             self._run(
                 f"CALL {self._procedure('cp_append_event')}("
                 ":workspace_id, :environment, :action_id, :event_id, "
-                ":event_type, :from_status, :to_status, :details_json, :event_at)",
+                ":event_type, :from_status, :to_status, :actor_id, "
+                ":details_json, :event_at)",
                 {
                     "workspace_id": action.workspace_id,
                     "environment": action.environment,
@@ -929,6 +931,7 @@ approver_role, confirmation, decided_at
                         event.from_status.value if event.from_status else ""
                     ),
                     "to_status": event.to_status.value if event.to_status else "",
+                    "actor_id": event.actor_id or "",
                     "details_json": canonical_json(event.details),
                     "event_at": self._ts(event.event_ts),
                 },

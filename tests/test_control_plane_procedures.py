@@ -61,7 +61,10 @@ def test_security_definer_procedures_use_native_group_grants_and_are_atomic():
     assert sql.count("SQL SECURITY DEFINER") == 4
     assert sql.count("AS BEGIN ATOMIC") == 4
     assert "is_account_group_member" not in sql
-    assert "session_user()" in sql
+    assert "session_user()" not in sql
+    assert "p_proposer_id, p_proposer_email" in sql
+    assert "p_decision, p_approver_id, p_approver_email" in sql
+    assert "p_actor_id, p_details_json" in sql
     assert "sha2(p_plan_json, 256)" in sql
     assert "p_target_status NOT IN ('STALE', 'EXPIRED')" in sql
     assert "p_target_status = 'APPROVED'" in sql
