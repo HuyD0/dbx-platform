@@ -724,6 +724,156 @@ def cmd_azure_cost_detail(args) -> int:
     return 0
 
 
+# --- estimator ----------------------------------------------------------------
+
+
+def cmd_estimator_prices_pull(args) -> int:
+    from datetime import date
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not _verify_governed_write(args, w, s):
+        return 2
+    from dbx_platform import digest, estimator, estimator_pricing
+
+    rate_card = estimator.load_rate_card()
+    snapshot_date = args.snapshot_date or date.today().isoformat()
+    region = args.region or "eastus"
+    currency = args.currency or "USD"
+    items_by_group: dict[str, list[dict]] = {}
+    for group, odata_filter in estimator_pricing.build_price_filters(
+        rate_card, region, currency
+    ):
+        items_by_group[group] = estimator_pricing.fetch_retail_prices(
+            odata_filter, currency=currency
+        )
+    rows = estimator_pricing.parse_retail_prices(items_by_group, rate_card, snapshot_date)
+    dbx_rows = estimator_pricing.parse_databricks_prices(
+        estimator_pricing.fetch_databricks_prices(w, _warehouse_id(args, s)),
+        rate_card,
+        snapshot_date,
+    )
+    rows.extend(dbx_rows)
+    environment = getattr(args, "environment", s.environment)
+    n = estimator_pricing.store_price_snapshot(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        rows,
+        snapshot_date=snapshot_date,
+        environment=environment,
+    )
+    findings, notes = estimator_pricing.classify_price_coverage(
+        rate_card, rows, snapshot_date
+    )
+    stored = digest.store_findings(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        {"cost/estimator-pricing-coverage": findings},
+        workspace_id=str(w.get_workspace_id()),
+        environment=environment,
+    )
+    notes.append(f"{stored} coverage finding rows stored; matched keys auto-resolve")
+    emit(
+        args,
+        f"Estimator price snapshot {snapshot_date} ({region}, {currency}) — {n} rows "
+        f"merged into {s.dashboard_catalog}.{s.dashboard_schema}.estimator_price_snapshots",
+        findings,
+        notes,
+    )
+    return 0
+
+
+def cmd_estimator_prices_status(args) -> int:
+    from dbx_platform import estimator_pricing
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    rows = estimator_pricing.read_snapshot_status(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        environment=getattr(args, "environment", s.environment),
+    )
+    emit(args, "Estimator price snapshot status", rows)
+    return 0
+
+
+def cmd_estimator_patterns(args) -> int:
+    from dbx_platform import estimator
+
+    patterns = estimator.load_patterns()["patterns"]
+    rows = [
+        {"pattern": key, "label": p["label"], "description": p["description"]}
+        for key, p in sorted(patterns.items())
+    ]
+    emit(args, "AI solution patterns", rows)
+    return 0
+
+
+def cmd_estimator_estimate(args) -> int:
+    """Compute one estimate from the latest stored price snapshot.
+
+    Reads requirements from a JSON file so the same input document can be
+    replayed byte-for-byte later — the CLI twin of the app's estimate API.
+    """
+    from dbx_platform import estimator, estimator_pricing
+
+    s = Settings.from_env()
+    with open(args.requirements_file, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    try:
+        req = estimator.validate_requirements(raw)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    w = get_client(args.profile)
+    snapshot_rows = estimator_pricing.read_latest_snapshot(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        environment=getattr(args, "environment", s.environment),
+        currency=req.currency,
+    )
+    if not snapshot_rows:
+        print(
+            "error: no price snapshot found. Run the estimator-prices-pull job "
+            "(or `estimator prices-pull` in a governed context) first.",
+            file=sys.stderr,
+        )
+        return 2
+    book = estimator.build_price_book(snapshot_rows, estimator.load_rate_card())
+    matrix = estimator.compute_matrix(req, rigor_pct=args.rigor, price_book=book)
+    if args.output == "json":
+        print(json.dumps(matrix, default=str))
+        return 0
+    rows = []
+    for tier, tier_data in matrix["tiers"].items():
+        for scenario, est in tier_data["scenarios"].items():
+            rows.append(
+                {
+                    "tier": tier,
+                    "scenario": scenario,
+                    **{f"{env}_monthly": est["totals_by_env"][env] for env in estimator.ENVS},
+                    "eval_tax_prod": est["eval_tax_by_env"]["prod"],
+                    "missing_prices": len(est["missing_prices"]),
+                }
+            )
+    emit(
+        args,
+        f"TCO estimate — {req.pattern}, {req.monthly_requests:,} req/mo, "
+        f"rigor {matrix['rigor_pct']}%, prices {matrix['snapshot_date']}",
+        rows,
+        [f"engine v{matrix['engine_version']}, rate card {matrix['rate_card_version']}"],
+    )
+    return 0
+
+
 # --- forecast -----------------------------------------------------------------
 
 
@@ -1970,6 +2120,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict to one allocation bucket (e.g. foundry_ai)",
     )
     x.set_defaults(func=cmd_azure_cost_detail)
+
+    # estimator
+    pe = sub.add_parser(
+        "estimator", help="AI solution cost & TCO estimates from versioned price snapshots"
+    ).add_subparsers(dest="command")
+    x = pe.add_parser(
+        "prices-pull",
+        parents=[common, governed_write],
+        help="Snapshot Azure Retail Prices + $/DBU list prices into "
+        "estimator_price_snapshots",
+    )
+    x.add_argument("--region", default=None, help="Azure region (default eastus)")
+    x.add_argument("--currency", default=None, help="Currency code (default USD)")
+    x.add_argument(
+        "--snapshot-date", default=None, help="Snapshot date override (default today)"
+    )
+    x.set_defaults(func=cmd_estimator_prices_pull)
+    x = pe.add_parser(
+        "prices-status", parents=[common, governed_write],
+        help="Freshness and coverage of the stored price snapshot",
+    )
+    x.set_defaults(func=cmd_estimator_prices_status)
+    x = pe.add_parser(
+        "patterns", parents=[common], help="List the plain-English solution patterns"
+    )
+    x.set_defaults(func=cmd_estimator_patterns)
+    x = pe.add_parser(
+        "estimate",
+        parents=[common, governed_write],
+        help="Compute a 3-tier TCO matrix from a requirements JSON file",
+    )
+    x.add_argument(
+        "--requirements-file", required=True, help="Path to a requirements JSON document"
+    )
+    x.add_argument(
+        "--rigor", type=int, default=10, help="Production review coverage %% (0-100)"
+    )
+    x.set_defaults(func=cmd_estimator_estimate)
 
     # forecast
     pf = sub.add_parser(

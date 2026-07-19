@@ -145,6 +145,7 @@ jobs:
             --select jobs.cost_forecast_train \
             --select jobs.cost_usage_report \
             --select jobs.dashboards_setup \
+            --select jobs.estimator_prices_pull \
             --select jobs.governance_check \
             --select jobs.housekeeping_report \
             --select jobs.llm_cost_rollup \
