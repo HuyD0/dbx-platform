@@ -9,7 +9,7 @@
 resources:
   experiments:
     platform_console_traces:
-      name: /Shared/dbx-platform/${bundle.target}/platform-console-traces
+      name: /Shared/dbx-platform-${bundle.target}-platform-console-traces
       lifecycle:
         prevent_destroy: true
   apps:
