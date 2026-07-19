@@ -54,6 +54,8 @@ resources:
               - ${var.action_executor_service_principal_name}
               - --approver-group
               - ${var.approver_group}
+              - --approver-group-id
+              - ${var.approver_group_id}
               - --governed-job-id
               - ${resources.jobs.cost_forecast_train.id}
               - --governed-job-id

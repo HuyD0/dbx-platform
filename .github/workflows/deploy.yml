@@ -24,6 +24,7 @@ concurrency:
 #                                     power-controller service principal
 #   DBX_PLATFORM_ACTION_EXECUTOR_SP   application ID of the separate
 #                                     allowlisted remediation executor
+#   DBX_PLATFORM_APPROVER_GROUP_ID    immutable SCIM ID of the approver group
 #
 # There is no skip-when-unconfigured guard: a deploy that cannot authenticate
 # must fail loudly rather than exit green having done nothing.
@@ -43,6 +44,7 @@ jobs:
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
     steps:
       - uses: actions/checkout@v4

@@ -71,6 +71,13 @@ variables:
       action plans and launch the out-of-band power controller.
     default: dbx-platform-approvers
 
+  approver_group_id:
+    description: >
+      Exact SCIM ID of dbx-platform-approvers. The least-privileged action
+      executor compares this immutable value with the resolved user's current
+      memberships without enumerating the workspace group directory.
+    default: ""
+
   operator_group:
     description: >
       Account group allowed to create immutable Mission Control proposals.

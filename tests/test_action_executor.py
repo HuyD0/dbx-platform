@@ -401,6 +401,7 @@ def test_workspace_approver_revalidation_uses_resolved_user_memberships():
         workspace,
         approval,
         "dbx-platform-approvers",
+        "group-1",
     )
     workspace.groups.list.assert_not_called()
     workspace.groups.get.assert_not_called()
@@ -425,6 +426,7 @@ def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift(
         workspace,
         approval,
         "dbx-platform-approvers",
+        "group-1",
     )
 
     workspace.users.get.return_value.user_name = "other@example.com"
@@ -435,7 +437,57 @@ def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift(
         workspace,
         approval,
         "dbx-platform-approvers",
+        "group-1",
     )
+
+
+def test_workspace_approver_revalidation_accepts_exact_group_id_without_display():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.users.get.return_value = SimpleNamespace(
+        id="approver-1",
+        user_name="approver@example.com",
+        active=True,
+        groups=[SimpleNamespace(display=None, value="group-1")],
+    )
+
+    assert action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "group-1",
+    )
+
+
+def test_workspace_approver_revalidation_rejects_empty_group_id():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.users.get.return_value = SimpleNamespace(
+        id="approver-1",
+        user_name="approver@example.com",
+        active=True,
+        groups=[SimpleNamespace(display="users", value=None)],
+    )
+
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "",
+    )
+    workspace.users.get.assert_not_called()
 
 
 def test_executor_rejects_missing_typed_confirmation():

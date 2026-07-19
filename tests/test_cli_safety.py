@@ -72,8 +72,26 @@ def test_distinct_executor_identities_need_no_bootstrap_exception():
         BUNDLE_VAR_runtime_executor_service_principal_name="runtime",
         BUNDLE_VAR_action_executor_service_principal_name="action",
         BUNDLE_VAR_actions_enabled="true",
+        BUNDLE_VAR_approver_group_id="152821564284515",
     )
     assert result.returncode == 0
+
+
+def test_enabled_actions_require_exact_numeric_approver_group_id():
+    common = {
+        "BUNDLE_VAR_runtime_executor_service_principal_name": "runtime",
+        "BUNDLE_VAR_action_executor_service_principal_name": "action",
+        "BUNDLE_VAR_actions_enabled": "true",
+    }
+
+    assert _executor_policy(**common).returncode == 1
+    assert (
+        _executor_policy(
+            **common,
+            BUNDLE_VAR_approver_group_id="dbx-platform-approvers",
+        ).returncode
+        == 1
+    )
 
 
 @pytest.mark.parametrize(

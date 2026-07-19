@@ -1453,6 +1453,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schema", default="dbx_platform")
     parser.add_argument("--expected-executor", required=True)
     parser.add_argument("--approver-group", default="dbx-platform-approvers")
+    parser.add_argument("--approver-group-id", required=True)
     parser.add_argument("--governed-job-id", action="append", type=int, default=[])
     return parser
 
@@ -1461,6 +1462,7 @@ def _approver_is_current_member(
     w: WorkspaceClient,
     approval: StoredApproval,
     group_name: str,
+    group_id: str,
 ) -> bool:
     """Re-resolve the approver and inspect that user's current memberships.
 
@@ -1469,6 +1471,8 @@ def _approver_is_current_member(
     identities are not allowed to enumerate.
     """
 
+    if not group_id:
+        return False
     try:
         user = w.users.get(approval.approver_id)
     except Exception:  # noqa: BLE001 - authorization failures are uniform
@@ -1483,6 +1487,7 @@ def _approver_is_current_member(
         return False
     return any(
         str(getattr(group, "display", "") or "") == group_name
+        or str(getattr(group, "value", "") or "") == group_id
         for group in (getattr(user, "groups", None) or [])
     )
 
@@ -1544,6 +1549,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 w,
                 approval,
                 args.approver_group,
+                args.approver_group_id,
             ),
         )
         result = executor.execute(args.action_id)
