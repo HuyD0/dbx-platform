@@ -77,6 +77,7 @@ def test_exact_executor_launched_job_run_is_accepted():
 
     event_call = query.call_args_list[2]
     assert event_call.kwargs["parameters"]["run_id"] == "9001"
+    assert "event_type = 'STATUS_VERIFYING'" in event_call.args[1]
     assert "$.result.run_id" in event_call.args[1]
 
 

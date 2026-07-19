@@ -195,6 +195,7 @@ def verify_approved_job_launch(
             WHERE workspace_id = :workspace_id
               AND environment = :environment
               AND action_id = :action_id
+              AND event_type = 'STATUS_VERIFYING'
               AND to_status = 'VERIFYING'
               AND CAST(get_json_object(details_json, '$.result.run_id') AS STRING)
                   = :run_id
