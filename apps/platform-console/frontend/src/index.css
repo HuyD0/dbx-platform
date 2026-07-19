@@ -2,19 +2,19 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — dark is the default theme (html.dark), light via toggle.
-   Palette follows the validated reference instance: categorical slots in
-   fixed order, reserved status colors, recessive chrome. */
+/* Design tokens — light blueprint is the first-visit theme, with a saved
+   dark blueprint variant. Categorical slots and status colors retain fixed
+   meanings across both modes. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #f9f9f7;
-  --color-surface: #fcfcfb;
-  --color-ink: #0b0b0b;
-  --color-ink-2: #52514e;
-  --color-muted: #898781;
-  --color-grid: #e1e0d9;
-  --color-hairline: rgba(11, 11, 11, 0.1);
+  --color-page: #ffffff;
+  --color-surface: #f4f4f3;
+  --color-ink: #1a1c1f;
+  --color-ink-2: #50545a;
+  --color-muted: #73777e;
+  --color-grid: #e2e4e7;
+  --color-hairline: rgba(26, 28, 31, 0.09);
 
   --color-series-1: #2a78d6;
   --color-series-2: #008300;
@@ -27,6 +27,8 @@
   --color-status-critical: #d03b3b;
 
   --color-accent: #2a78d6;
+  --color-blueprint: #339cff;
+  --color-process: #b76532;
 }
 
 .dark {
@@ -44,6 +46,8 @@
   --color-series-4: #c98500;
 
   --color-accent: #3987e5;
+  --color-blueprint: #83c3ff;
+  --color-process: #ed9b63;
 }
 
 html,
@@ -84,43 +88,168 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
 
-/* Ambient glows behind the glass — without depth to blur, glassmorphism
-   reads as flat gray. Fixed so scrolling content slides over the light. */
+/* Technical-paper field. The orthogonal grid is intentionally recessive:
+   it organizes the canvas without implying relationships between cards. */
 body {
   background-image:
-    radial-gradient(900px 520px at 12% -8%, rgba(42, 120, 214, 0.1), transparent 60%),
-    radial-gradient(760px 480px at 92% 4%, rgba(74, 58, 167, 0.07), transparent 60%),
-    radial-gradient(700px 520px at 50% 110%, rgba(27, 175, 122, 0.05), transparent 60%);
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-grid) 54%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-grid) 54%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 24px 24px;
+  background-position: -1px -1px;
   background-attachment: fixed;
 }
-.dark body {
-  background-image:
-    radial-gradient(900px 520px at 12% -8%, rgba(57, 135, 229, 0.16), transparent 60%),
-    radial-gradient(760px 480px at 92% 4%, rgba(144, 133, 233, 0.1), transparent 60%),
-    radial-gradient(700px 520px at 50% 110%, rgba(25, 158, 112, 0.07), transparent 60%);
-}
 
-/* Frosted surfaces. --alpha-* are per-mode so light glass stays readable. */
+/* Restrained drafting surfaces: mostly opaque, lightly lifted, and still
+   coordinated with the existing modal and drawer system. */
 .glass {
-  background: rgba(252, 252, 251, 0.6);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid rgba(11, 11, 11, 0.08);
+  background: rgba(244, 244, 243, 0.88);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  border: 1px solid rgba(26, 28, 31, 0.1);
+  box-shadow: 0 12px 30px rgba(26, 28, 31, 0.06);
 }
 .dark .glass {
-  background: rgba(26, 26, 25, 0.5);
+  background: rgba(26, 26, 25, 0.82);
   border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
 }
 /* Higher-opacity variant for modals/panels that sit over busy content. */
 .glass-strong {
-  background: rgba(252, 252, 251, 0.85);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
-  border: 1px solid rgba(11, 11, 11, 0.1);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  border: 1px solid rgba(26, 28, 31, 0.12);
 }
 .dark .glass-strong {
-  background: rgba(22, 22, 21, 0.82);
+  background: rgba(22, 22, 21, 0.94);
   border-color: rgba(255, 255, 255, 0.1);
+}
+
+.brand-diamond {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 58%, var(--color-grid));
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-page));
+  color: var(--color-accent);
+  box-shadow: none;
+  transform: rotate(45deg) scale(0.78);
+}
+.brand-diamond > svg {
+  transform: rotate(-45deg) scale(1.16);
+}
+
+.blueprint-domain-card {
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+.group:hover .blueprint-domain-card,
+.group:focus-visible .blueprint-domain-card {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+  box-shadow: 0 14px 34px rgba(26, 28, 31, 0.09);
+  transform: translateY(-2px);
+}
+.blueprint-priority {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-process) 38%, var(--color-grid));
+}
+.blueprint-priority::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--color-process);
+  content: "";
+}
+.blueprint-proposal {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-process) 34%, var(--color-grid));
+}
+.blueprint-proposal::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--color-process);
+  content: "";
+}
+
+.blueprint-process {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 0.75rem;
+  padding-top: 0.45rem;
+}
+.blueprint-process-step {
+  position: relative;
+  min-width: 0;
+  border-top: 2px solid color-mix(in srgb, var(--color-blueprint) 58%, var(--color-grid));
+  padding: 1rem 0.75rem 0 0;
+}
+.blueprint-process-step:last-child {
+  border-top-color: color-mix(in srgb, var(--color-status-good) 58%, var(--color-grid));
+}
+.blueprint-process-step[data-tone="process"] {
+  border-top-color: color-mix(in srgb, var(--color-process) 70%, var(--color-grid));
+}
+.blueprint-process-node {
+  position: absolute;
+  top: 0;
+  left: 0.15rem;
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border: 2px solid var(--color-blueprint);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 0.62rem;
+  font-weight: 700;
+  transform: translateY(-50%) rotate(45deg);
+}
+.blueprint-process-node > span {
+  transform: rotate(-45deg);
+}
+.blueprint-process-step[data-tone="process"] .blueprint-process-node {
+  border-color: var(--color-process);
+}
+.blueprint-process-step:last-child .blueprint-process-node {
+  border-color: var(--color-status-good);
+}
+
+@media (max-width: 640px) {
+  .blueprint-process {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-top: 0;
+  }
+  .blueprint-process-step,
+  .blueprint-process-step:last-child,
+  .blueprint-process-step[data-tone="process"] {
+    border-top: 0;
+    border-left: 2px solid color-mix(in srgb, var(--color-blueprint) 58%, var(--color-grid));
+    padding: 0.35rem 0 1rem 1.5rem;
+  }
+  .blueprint-process-step[data-tone="process"] {
+    border-left-color: color-mix(in srgb, var(--color-process) 70%, var(--color-grid));
+  }
+  .blueprint-process-step:last-child {
+    border-left-color: color-mix(in srgb, var(--color-status-good) 58%, var(--color-grid));
+    padding-bottom: 0.25rem;
+  }
+  .blueprint-process-node {
+    top: 0.6rem;
+    left: 0;
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
 }
 
 /* These glass rules are unlayered, so Tailwind's layered utilities
@@ -145,6 +274,30 @@ body {
    override the unlayered glass border anyway. */
 .glass-focus-accent:focus-within {
   border-color: var(--color-accent);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: var(--color-surface);
+  }
+  .glass-strong {
+    background: var(--color-page);
+  }
+}
+
+@media (forced-colors: active) {
+  .glass,
+  .glass-strong,
+  .brand-diamond,
+  .blueprint-priority {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .blueprint-priority::before {
+    background: Highlight;
+  }
 }
 
 /* Suggestion-chip icon colors. The light categorical steps for magenta and

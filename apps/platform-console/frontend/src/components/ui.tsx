@@ -138,13 +138,22 @@ export function statusTone(
     return "serious";
   }
   if (
-    ["pending", "awaiting", "warning", "degraded", "executing", "verifying"].some((s) =>
-      value.includes(s),
-    )
+    [
+      "pending",
+      "awaiting",
+      "attention",
+      "warning",
+      "degraded",
+      "executing",
+      "verifying",
+    ].some((s) => value.includes(s))
   ) {
     return "warning";
   }
-  if (["healthy", "success", "approved", "on", "good"].some((s) => value.includes(s))) {
+  if (
+    value === "on" ||
+    ["healthy", "success", "approved", "good"].some((s) => value.includes(s))
+  ) {
     return "good";
   }
   return "info";

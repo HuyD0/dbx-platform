@@ -21,6 +21,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { AssistantLauncher, AssistantPanel } from "./components/AssistantPanel";
 import { Badge } from "./components/ui";
 import { apiGet } from "./lib/api";
+import { AssistantPanelProvider } from "./lib/assistant-panel";
 import { ChatProvider } from "./lib/chat";
 import type { HealthResponse } from "./lib/types";
 import { ActionCenter } from "./pages/ActionCenter";
@@ -73,7 +74,7 @@ function useTheme() {
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="relative grid h-8 w-8 place-items-center rounded-xl bg-accent text-white shadow-lg shadow-accent/20">
+      <span className="brand-diamond relative grid h-8 w-8 place-items-center">
         <Sparkles className="h-4 w-4" />
       </span>
       <div>
@@ -221,103 +222,105 @@ export default function App() {
 
   return (
     <ChatProvider>
-      <a
-        href="#main-content"
-        onClick={(event) => {
-          event.preventDefault();
-          window.requestAnimationFrame(() => {
-            document.getElementById("main-content")?.focus();
-          });
-        }}
-        className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-transform focus:translate-y-0"
-      >
-        Skip to main content
-      </a>
-
-      <div className="min-h-screen">
-        <aside
-          aria-hidden={assistantOpen || undefined}
-          className="glass glass-edge-r fixed inset-y-0 z-30 hidden w-64 flex-col px-3 py-4 lg:flex"
+      <AssistantPanelProvider onOpen={() => setAssistantOpen(true)}>
+        <a
+          href="#main-content"
+          onClick={(event) => {
+            event.preventDefault();
+            window.requestAnimationFrame(() => {
+              document.getElementById("main-content")?.focus();
+            });
+          }}
+          className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-transform focus:translate-y-0"
         >
-          <Navigation health={health.data} dark={dark} toggleTheme={toggle} />
-        </aside>
+          Skip to main content
+        </a>
 
-        <header
-          aria-hidden={mobileNavOpen || assistantOpen || undefined}
-          className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center justify-between px-4 lg:hidden"
-        >
-          <Brand />
-          <button
-            ref={mobileTriggerRef}
-            type="button"
-            onClick={() => setMobileNavOpen(true)}
-            aria-label="Open navigation"
-            aria-expanded={mobileNavOpen}
-            className="rounded-lg p-2 text-ink hover:bg-hairline"
+        <div className="min-h-screen">
+          <aside
+            aria-hidden={assistantOpen || undefined}
+            className="glass glass-edge-r fixed inset-y-0 z-30 hidden w-64 flex-col px-3 py-4 lg:flex"
           >
-            <Menu className="h-5 w-5" />
-          </button>
-        </header>
+            <Navigation health={health.data} dark={dark} toggleTheme={toggle} />
+          </aside>
 
-        {mobileNavOpen && (
-          <div className="fixed inset-0 z-50 lg:hidden">
-            <div
-              aria-hidden="true"
-              onClick={() => setMobileNavOpen(false)}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            />
-            <aside
-              ref={mobileDrawerRef}
-              role="dialog"
-              aria-modal="true"
-              className="glass-strong absolute inset-y-0 left-0 flex w-[min(20rem,88vw)] flex-col p-4 shadow-2xl"
-              aria-label="Mobile navigation"
+          <header
+            aria-hidden={mobileNavOpen || assistantOpen || undefined}
+            className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center justify-between px-4 lg:hidden"
+          >
+            <Brand />
+            <button
+              ref={mobileTriggerRef}
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open navigation"
+              aria-expanded={mobileNavOpen}
+              className="grid h-11 w-11 place-items-center rounded-lg text-ink hover:bg-hairline"
             >
-              <button
-                ref={mobileCloseRef}
-                type="button"
+              <Menu className="h-5 w-5" />
+            </button>
+          </header>
+
+          {mobileNavOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <div
+                aria-hidden="true"
                 onClick={() => setMobileNavOpen(false)}
-                aria-label="Close navigation"
-                className="absolute right-3 top-3 rounded-lg p-1.5 text-muted hover:bg-hairline"
-              >
-                <X className="h-4 w-4" />
-              </button>
-              <Navigation
-                health={health.data}
-                dark={dark}
-                toggleTheme={toggle}
-                onNavigate={() => setMobileNavOpen(false)}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
               />
-            </aside>
-          </div>
-        )}
+              <aside
+                ref={mobileDrawerRef}
+                role="dialog"
+                aria-modal="true"
+                className="glass-strong absolute inset-y-0 left-0 flex w-[min(20rem,88vw)] flex-col p-4 shadow-2xl"
+                aria-label="Mobile navigation"
+              >
+                <button
+                  ref={mobileCloseRef}
+                  type="button"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="Close navigation"
+                  className="absolute right-3 top-3 rounded-lg p-1.5 text-muted hover:bg-hairline"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <Navigation
+                  health={health.data}
+                  dark={dark}
+                  toggleTheme={toggle}
+                  onNavigate={() => setMobileNavOpen(false)}
+                />
+              </aside>
+            </div>
+          )}
 
-        <main
-          id="main-content"
-          tabIndex={-1}
-          aria-hidden={mobileNavOpen || assistantOpen || undefined}
-          className="px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
-        >
-          <div className="mx-auto max-w-7xl">
-            <Routes>
-              {[...NAV, ...UTILITY_NAV].map(({ to, page }) => (
-                <Route key={to} path={to} element={page} />
-              ))}
-              <Route path="/overview" element={<Navigate to="/" replace />} />
-              <Route path="/chat" element={<Navigate to="/assistant" replace />} />
-              <Route path="/housekeeping" element={<Navigate to="/actions" replace />} />
-              <Route path="/governance" element={<Navigate to="/security?tab=governance" replace />} />
-              <Route path="/ai-ml" element={<Navigate to="/cost?tab=llm" replace />} />
-              <Route path="/digest" element={<Navigate to="/automations?tab=briefings" replace />} />
-              <Route path="/jobs" element={<Navigate to="/automations" replace />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        </main>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            aria-hidden={mobileNavOpen || assistantOpen || undefined}
+            className="px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
+          >
+            <div className="mx-auto max-w-7xl">
+              <Routes>
+                {[...NAV, ...UTILITY_NAV].map(({ to, page }) => (
+                  <Route key={to} path={to} element={page} />
+                ))}
+                <Route path="/overview" element={<Navigate to="/" replace />} />
+                <Route path="/chat" element={<Navigate to="/assistant" replace />} />
+                <Route path="/housekeeping" element={<Navigate to="/actions" replace />} />
+                <Route path="/governance" element={<Navigate to="/security?tab=governance" replace />} />
+                <Route path="/ai-ml" element={<Navigate to="/cost?tab=llm" replace />} />
+                <Route path="/digest" element={<Navigate to="/automations?tab=briefings" replace />} />
+                <Route path="/jobs" element={<Navigate to="/automations" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
+          </main>
 
-        {!mobileNavOpen && <AssistantLauncher onOpen={() => setAssistantOpen(true)} />}
-        <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
-      </div>
+          {!mobileNavOpen && <AssistantLauncher onOpen={() => setAssistantOpen(true)} />}
+          <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+        </div>
+      </AssistantPanelProvider>
     </ChatProvider>
   );
 }
