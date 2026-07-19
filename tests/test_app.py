@@ -104,6 +104,11 @@ def test_app_yaml_launches_the_backend():
     assert "fastapi" in requirements
 
 
+def test_bundle_artifact_build_uses_managed_environment():
+    bundle = yaml.safe_load((APP_DIR.parent.parent / "databricks.yml").read_text())
+    assert bundle["artifacts"]["default"]["build"] == "uv run python -m build --wheel"
+
+
 def test_app_and_controller_share_name_without_resource_cycle():
     root = APP_DIR.parent.parent
     app_resource = yaml.safe_load((root / "resources" / "app.yml").read_text())
