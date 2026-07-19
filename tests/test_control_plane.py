@@ -581,6 +581,33 @@ def _request(headers: dict[str, str]) -> Request:
     return Request({"type": "http", "headers": raw})
 
 
+def test_app_workspace_client_forces_oauth_m2m(monkeypatch):
+    deps.get_ws.cache_clear()
+    monkeypatch.setenv("DATABRICKS_APP_NAME", "platform-console")
+    workspace = MagicMock()
+    constructor = MagicMock(return_value=workspace)
+    monkeypatch.setattr("databricks.sdk.WorkspaceClient", constructor)
+
+    assert deps.get_ws() is workspace
+    constructor.assert_called_once_with(
+        auth_type="oauth-m2m",
+        scopes=["all-apis"],
+    )
+    deps.get_ws.cache_clear()
+
+
+def test_non_app_workspace_client_uses_unified_auth(monkeypatch):
+    deps.get_ws.cache_clear()
+    monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+    workspace = MagicMock()
+    factory = MagicMock(return_value=workspace)
+    monkeypatch.setattr(deps, "get_client", factory)
+
+    assert deps.get_ws() is workspace
+    factory.assert_called_once_with(None)
+    deps.get_ws.cache_clear()
+
+
 def test_forwarded_email_alone_is_never_an_identity():
     verifier = IdentityVerifier(lambda: MagicMock())
     with pytest.raises(UnauthenticatedError):
