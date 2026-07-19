@@ -16,6 +16,7 @@ import ast
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -312,6 +313,9 @@ def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
     job = MagicMock()
     job.job_id = 7
     job.settings.name = "[dbx-platform] cost-usage-report"
+    job.settings.schedule = SimpleNamespace(
+        pause_status=SimpleNamespace(value="PAUSED")
+    )
     job.settings.as_dict.return_value = {
         "name": job.settings.name,
         "tasks": [{"task_key": "report"}],
@@ -322,6 +326,16 @@ def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
     other.settings.name = "someone-elses-etl"
     ws.jobs.list.return_value = [job, other]
     ws.jobs.get.return_value = job
+    visible = client.get("/api/jobs", params={"refresh": "true"})
+    assert visible.status_code == 200
+    assert visible.json()["data"] == [
+        {
+            "job_id": 7,
+            "name": "[dbx-platform] cost-usage-report",
+            "schedule_status": "PAUSED",
+            "schedule_type": "CRON",
+        }
+    ]
     assert client.post("/api/jobs/8/run_now").status_code == 404
     ws.jobs.run_now.assert_not_called()
     resp = client.post("/api/jobs/7/run_now")

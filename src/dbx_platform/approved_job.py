@@ -118,7 +118,9 @@ def verify_approved_job_launch(
     if not action_id or not plan_hash or len(plan_hash) != 64:
         raise ApprovalGateError(
             "Stateful Jobs require an action ID and SHA-256 plan hash from "
-            "Mission Control."
+            "Mission Control. Start manual runs with Automations > Jobs & "
+            "schedules > Plan run; Databricks Run now and repair runs are "
+            "intentionally rejected."
         )
     if job_id <= 0 or run_id <= 0:
         raise ApprovalGateError("Databricks did not provide a valid Job/run identity.")

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
 import { DataTable } from "../components/DataTable";
@@ -68,9 +69,9 @@ function Budgets() {
     <div className="space-y-4">
       <Card>
         <SectionTitle
-          title="Cost guardrails"
-          subtitle="Alerts at 80% and 100% never change resources automatically"
-          right={<BudgetPlanButton label="Plan budget change" />}
+          title="Mission Control cost guardrails"
+          subtitle="Workspace evidence budgets with approval-gated changes; these are separate from Databricks account budgets"
+          right={<BudgetPlanButton label="Plan Mission Control budget" />}
         />
         {query.isPending ? (
           <Skeleton rows={4} />
@@ -94,10 +95,40 @@ function Budgets() {
           </>
         ) : (
           <EmptyState
-            message="No budget is configured. Plan a provider, team or use-case budget above."
+            message="No Mission Control budget is configured. Plan a workspace, provider, team or use-case budget above."
             positive={false}
           />
         )}
+      </Card>
+      <Card>
+        <SectionTitle
+          title="Databricks account budgets"
+          subtitle="Native account-console budgets use Databricks list price in USD and require an account admin"
+        />
+        <p className="text-xs leading-5 text-ink-2">
+          Native Databricks budgets are account-level objects, while this app currently has a
+          workspace-scoped identity and approval ledger. Create or inspect the native budget in
+          the Azure Databricks account console; Mission Control will continue to show its own
+          currency- and cost-basis-specific guardrails above.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a
+            href="https://accounts.azuredatabricks.net/"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
+          >
+            Open account console <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="https://learn.microsoft.com/azure/databricks/admin/account-settings/budgets"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
+          >
+            Azure budget documentation <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
       </Card>
       <FindingsSection
         title="Consolidated forecast"

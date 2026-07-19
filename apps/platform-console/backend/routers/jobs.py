@@ -68,9 +68,20 @@ def _platform_jobs() -> list[dict]:
     owned_ids.update(_governed_manual_job_ids())
     out = []
     for j in deps.get_ws().jobs.list():
-        name = (j.settings.name if j.settings else "") or ""
+        settings = j.settings
+        name = (settings.name if settings else "") or ""
         if j.job_id is not None and int(j.job_id) in owned_ids:
-            out.append({"job_id": j.job_id, "name": name})
+            schedule = getattr(settings, "schedule", None) if settings else None
+            pause_status = getattr(schedule, "pause_status", None)
+            schedule_status = str(
+                getattr(pause_status, "value", pause_status) or "UNSCHEDULED"
+            ).upper()
+            out.append({
+                "job_id": j.job_id,
+                "name": name,
+                "schedule_status": schedule_status,
+                "schedule_type": "CRON" if schedule is not None else "MANUAL_ONLY",
+            })
     return sorted(out, key=lambda x: x["name"])
 
 
@@ -99,6 +110,7 @@ def runs(job_id: int, limit: int = 5) -> dict:
             "run_id": r.run_id,
             "state": state.life_cycle_state.value if state and state.life_cycle_state else "",
             "result": state.result_state.value if state and state.result_state else "",
+            "state_message": state.state_message if state else "",
             "started_ms": r.start_time or 0,
             "duration_ms": (r.end_time - r.start_time)
             if r.end_time and r.start_time else None,

@@ -75,12 +75,15 @@ export interface ApplyResponse {
 export interface JobInfo {
   job_id: number;
   name: string;
+  schedule_status?: "PAUSED" | "UNPAUSED" | "UNSCHEDULED" | string;
+  schedule_type?: "CRON" | "MANUAL_ONLY" | string;
 }
 
 export interface RunInfo {
   run_id: number;
   state: string;
   result: string;
+  state_message?: string;
   started_ms: number;
   duration_ms: number | null;
 }
