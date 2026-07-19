@@ -1464,17 +1464,25 @@ def _approver_is_current_member(
     group_name: str,
     group_id: str,
 ) -> bool:
-    """Re-resolve the approver and inspect that user's current memberships.
+    """Re-resolve the approver and inspect the one configured account group.
 
-    Reading the resolved user's own groups is intentionally narrower than
-    listing the workspace group directory, which least-privileged executor
-    identities are not allowed to enumerate.
+    The workspace user endpoint can omit ``groups`` for a non-admin caller.
+    Reading the exact account group through the workspace proxy keeps the
+    executor least-privileged and avoids enumerating either users or groups.
     """
 
     if not group_id:
         return False
     try:
-        user = w.users.get(approval.approver_id)
+        user = w.users.get(
+            approval.approver_id,
+            attributes="id,userName,active",
+        )
+        group = w.api_client.do(
+            "GET",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            headers={"Accept": "application/scim+json"},
+        )
     except Exception:  # noqa: BLE001 - authorization failures are uniform
         return False
     if (
@@ -1483,12 +1491,17 @@ def _approver_is_current_member(
         or not getattr(user, "user_name", None)
         or str(user.user_name).lower() != approval.approver_email.lower()
         or getattr(user, "active", None) is not True
+        or not isinstance(group, Mapping)
+        or str(group.get("id") or "") != group_id
+        or str(group.get("displayName") or "") != group_name
     ):
         return False
+    # SCIM member display is optional. The user lookup above already binds
+    # this immutable member ID to the exact active approval email.
     return any(
-        str(getattr(group, "display", "") or "") == group_name
-        or str(getattr(group, "value", "") or "") == group_id
-        for group in (getattr(user, "groups", None) or [])
+        str(member.get("value") or "") == approval.approver_id
+        for member in (group.get("members") or [])
+        if isinstance(member, Mapping)
     )
 
 
