@@ -1456,20 +1456,16 @@ def _approver_is_current_member(
     group_name: str,
     group_id: str,
 ) -> bool:
-    """Re-resolve the approver and inspect the one configured account group.
+    """Inspect the one configured account group for the immutable approver ID.
 
-    The workspace user endpoint can omit ``groups`` for a non-admin caller.
-    Reading the exact account group through the workspace proxy keeps the
-    executor least-privileged and avoids enumerating either users or groups.
+    Cross-user workspace SCIM reads require broader identity-admin access.
+    Reading the exact account group through the workspace proxy requires only
+    manager access to that one group and avoids enumerating users or groups.
     """
 
     if not group_id:
         return False
     try:
-        user = w.users.get(
-            approval.approver_id,
-            attributes="id,userName,active",
-        )
         group = w.api_client.do(
             "GET",
             f"/api/2.0/account/scim/v2/Groups/{group_id}",
@@ -1478,18 +1474,13 @@ def _approver_is_current_member(
     except Exception:  # noqa: BLE001 - authorization failures are uniform
         return False
     if (
-        not getattr(user, "id", None)
-        or str(user.id) != approval.approver_id
-        or not getattr(user, "user_name", None)
-        or str(user.user_name).lower() != approval.approver_email.lower()
-        or getattr(user, "active", None) is not True
-        or not isinstance(group, Mapping)
+        not isinstance(group, Mapping)
         or str(group.get("id") or "") != group_id
         or str(group.get("displayName") or "") != group_name
     ):
         return False
-    # SCIM member display is optional. The user lookup above already binds
-    # this immutable member ID to the exact active approval email.
+    # SCIM member display is optional, so the account-scoped immutable ID is
+    # the load-bearing identity check.
     return any(
         str(member.get("value") or "") == approval.approver_id
         for member in (group.get("members") or [])
