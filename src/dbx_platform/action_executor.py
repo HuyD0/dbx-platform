@@ -1462,7 +1462,12 @@ def _approver_is_current_member(
     approval: StoredApproval,
     group_name: str,
 ) -> bool:
-    """Re-resolve the exact workspace group at execution time."""
+    """Re-resolve the approver and inspect that user's current memberships.
+
+    Reading the resolved user's own groups is intentionally narrower than
+    listing the workspace group directory, which least-privileged executor
+    identities are not allowed to enumerate.
+    """
 
     try:
         user = w.users.get(approval.approver_id)
@@ -1476,14 +1481,9 @@ def _approver_is_current_member(
         or getattr(user, "active", None) is not True
     ):
         return False
-    escaped = group_name.replace('"', '\\"')
-    groups = list(w.groups.list(filter=f'displayName eq "{escaped}"'))
-    if len(groups) != 1 or not groups[0].id:
-        return False
-    group = w.groups.get(groups[0].id)
     return any(
-        str(member.value or "") == approval.approver_id
-        for member in (group.members or [])
+        str(getattr(group, "display", "") or "") == group_name
+        for group in (getattr(user, "groups", None) or [])
     )
 
 

@@ -378,6 +378,66 @@ def test_executor_revalidates_current_approver_membership():
     assert applied == []
 
 
+def test_workspace_approver_revalidation_uses_resolved_user_memberships():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.users.get.return_value = SimpleNamespace(
+        id="approver-1",
+        user_name="approver@example.com",
+        active=True,
+        groups=[
+            SimpleNamespace(display="dbx-platform-approvers"),
+            SimpleNamespace(display="users"),
+        ],
+    )
+
+    assert action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+    )
+    workspace.groups.list.assert_not_called()
+    workspace.groups.get.assert_not_called()
+
+
+def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.users.get.return_value = SimpleNamespace(
+        id="approver-1",
+        user_name="approver@example.com",
+        active=True,
+        groups=[SimpleNamespace(display="users")],
+    )
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+    )
+
+    workspace.users.get.return_value.user_name = "other@example.com"
+    workspace.users.get.return_value.groups = [
+        SimpleNamespace(display="dbx-platform-approvers")
+    ]
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+    )
+
+
 def test_executor_rejects_missing_typed_confirmation():
     current = TrustedPlan([], [])
     store = FakeStore(make_action(current))
