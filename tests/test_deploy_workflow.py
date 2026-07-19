@@ -24,6 +24,29 @@ def test_production_deploy_preserves_existing_dashboards() -> None:
     assert "--auto-approve" not in command
 
 
+def test_production_deploy_waits_for_successful_main_ci() -> None:
+    workflow = yaml.safe_load(DEPLOY_WORKFLOW.read_text())
+
+    workflow_run = workflow[True]["workflow_run"]
+    deploy_job = workflow["jobs"]["deploy"]
+
+    assert "push" not in workflow[True]
+    assert workflow_run["workflows"] == ["CI"]
+    assert workflow_run["types"] == ["completed"]
+    assert workflow_run["branches"] == ["main"]
+    assert deploy_job["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' "
+        "|| github.event.workflow_run.conclusion == 'success' }}"
+    )
+    assert deploy_job["env"]["SOURCE_SHA"] == (
+        "${{ github.event_name == 'workflow_run' "
+        "&& github.event.workflow_run.head_sha || github.sha }}"
+    )
+    checkout = deploy_job["steps"][0]
+    assert checkout["uses"] == "actions/checkout@v4"
+    assert checkout["with"]["ref"] == "${{ env.SOURCE_SHA }}"
+
+
 def test_stale_lock_recovery_is_explicit_and_manual_only() -> None:
     workflow = yaml.safe_load(DEPLOY_WORKFLOW.read_text())
     dispatch = workflow[True]["workflow_dispatch"]

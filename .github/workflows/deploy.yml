@@ -1,7 +1,9 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -14,6 +16,9 @@ on:
 concurrency:
   group: bundle-deploy
   cancel-in-progress: false
+
+# Deploys run only after the main-branch CI workflow succeeds (or by manual
+# dispatch). This prevents CD from racing ahead of a failing push build.
 
 # Auth: keyless — azure/login OIDC (subject
 # repo:HuyD0/dbx-platform:environment:production) + the Databricks CLI's
@@ -37,6 +42,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -52,8 +58,11 @@ jobs:
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
       BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
+      SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -100,7 +109,7 @@ jobs:
           cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
           uv lock --refresh-package dbx-platform --project apps/platform-console
           printf '{"sha": "%s", "built_at": "%s"}\n' \
-            "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${SOURCE_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             > apps/platform-console/build_info.json
       - uses: actions/setup-node@v4
         with:
