@@ -442,3 +442,60 @@ def test_viewer_sees_masked_created_by_in_library(client, monkeypatch):
     deps.get_identity_verifier.cache_clear()
     as_viewer = client.get("/api/estimator/estimates").json()["data"]
     assert as_viewer and as_viewer[0]["created_by"] == "[redacted]"
+
+
+# --- document upload ----------------------------------------------------------
+
+
+def test_extract_document_parses_and_extracts(client, monkeypatch):
+    from backend import estimator_extraction
+    from backend.routers import estimator as estimator_router
+
+    monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
+    monkeypatch.setattr(
+        estimator_extraction,
+        "extract_requirements",
+        lambda model, text: (
+            {"pattern": "doc_chat", "monthly_requests": 1000},
+            [f"Read {len(text)} characters."],
+        ),
+    )
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("brief.md", b"# Chat over policy docs, 1000/mo", "text/markdown")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requirements"]["pattern"] == "doc_chat"
+    assert body["filename"] == "brief.md"
+    assert body["characters_used"] > 0
+
+
+def test_extract_document_rejects_unsupported_types_plainly(client, monkeypatch):
+    from backend.routers import estimator as estimator_router
+
+    monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("diagram.png", b"\x89PNG....", "image/png")},
+    )
+    assert response.status_code == 422
+    assert "Only PDF, Markdown and plain-text" in response.json()["message"]
+
+
+def test_extract_document_enforces_the_streamed_size_cap(client):
+    oversized = b"x" * (10 * 1024 * 1024 + 1)
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("big.txt", oversized, "text/plain")},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"] == "document_too_large"
+
+
+def test_extract_document_requires_operator(viewer_client):
+    response = viewer_client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("brief.md", b"hello", "text/markdown")},
+    )
+    assert response.status_code == 403

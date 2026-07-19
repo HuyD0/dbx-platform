@@ -192,3 +192,59 @@ def test_cli_new_estimator_subcommands_are_wired():
     )
     assert args.func is cli.cmd_estimator_eval_extraction
     assert args.min_pattern_accuracy == 0.8
+
+
+# --- document text extraction -------------------------------------------------
+
+
+def _pdf_bytes(text: str) -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    annotation = None
+    try:
+        from pypdf.annotations import FreeText
+
+        annotation = FreeText(
+            text=text, rect=(50, 550, 500, 650), font_size="12pt"
+        )
+    except Exception:  # pragma: no cover - annotation API drift
+        pass
+    buffer = io.BytesIO()
+    if annotation is not None:
+        writer.add_annotation(page_number=0, annotation=annotation)
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def test_text_from_document_decodes_markdown_and_text():
+    from dbx_platform.estimator_extract import text_from_document
+
+    assert "policy chat" in text_from_document("brief.md", b"# Project\npolicy chat")
+    assert text_from_document("notes.TXT", "café".encode()) == "café"
+    # invalid utf-8 never crashes the upload path
+    assert text_from_document("notes.txt", b"\xff\xfebad") != ""
+
+
+def test_text_from_document_rejects_unsupported_and_corrupt_files():
+    import pytest
+
+    from dbx_platform.estimator_extract import ExtractionError, text_from_document
+
+    with pytest.raises(ExtractionError, match="Only PDF, Markdown and plain-text"):
+        text_from_document("diagram.png", b"\x89PNG")
+    with pytest.raises(ExtractionError, match="could not be read"):
+        text_from_document("broken.pdf", b"%PDF-1.7 not really a pdf")
+
+
+def test_text_from_document_reads_pdf_or_flags_empty_text():
+    import pytest
+
+    from dbx_platform.estimator_extract import ExtractionError, text_from_document
+
+    # A text-free PDF must be a loud plain-English error, never empty text.
+    with pytest.raises(ExtractionError, match="No readable text"):
+        text_from_document("scan.pdf", _pdf_bytes(""))

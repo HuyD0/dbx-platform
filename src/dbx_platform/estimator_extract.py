@@ -383,3 +383,49 @@ def aggregate_scores(scores: list[dict]) -> dict:
             sum(1 for s in scores if s["validation_passed"]) / cases, 4
         ),
     }
+
+
+# --- document text extraction (upload path) -----------------------------------
+
+MAX_PDF_PAGES = 50
+
+
+def text_from_document(filename: str, data: bytes) -> str:
+    """Plain text from an uploaded document, ready for ``bound_text``.
+
+    PDF needs the console's ``pypdf`` (lazy import — the wheel itself stays
+    SDK-only); Markdown and plain text decode directly. Anything else gets a
+    plain-English rejection. Images/diagrams are deliberately unsupported
+    until a multimodal endpoint exists.
+    """
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if suffix in ("md", "markdown", "txt"):
+        return data.decode("utf-8", errors="replace")
+    if suffix == "pdf":
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:  # pragma: no cover - console always ships pypdf
+            raise ExtractionError(
+                "PDF reading is not available in this installation."
+            ) from exc
+        import io
+
+        try:
+            reader = PdfReader(io.BytesIO(data))
+        except Exception as exc:  # noqa: BLE001 - corrupt/encrypted uploads
+            raise ExtractionError(
+                "That PDF could not be read - it may be corrupted or "
+                "password-protected."
+            ) from exc
+        pages = reader.pages[:MAX_PDF_PAGES]
+        text = "\n".join((page.extract_text() or "") for page in pages).strip()
+        if not text:
+            raise ExtractionError(
+                "No readable text was found in that PDF. Scanned images are "
+                "not supported yet - paste the key details as text instead."
+            )
+        return text
+    raise ExtractionError(
+        "Only PDF, Markdown and plain-text files are supported. For "
+        "diagrams or images, describe the solution in the text box instead."
+    )

@@ -15,7 +15,7 @@ import { RigorSlider } from "../components/estimator/RigorSlider";
 import { ScenarioToggle } from "../components/estimator/ScenarioToggle";
 import { TcoMatrix } from "../components/estimator/TcoMatrix";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "../components/ui";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, apiUpload } from "../lib/api";
 import {
   ApiError,
   type Envelope,
@@ -51,6 +51,19 @@ export function CostPlanner() {
     onSuccess: (response) => {
       setRequirements(response.requirements);
       setWarnings(response.warnings);
+      setPhase("review");
+    },
+  });
+
+  const uploadDocument = useMutation({
+    mutationFn: (file: File) =>
+      apiUpload<ExtractResponse & { filename: string }>(
+        "/api/estimator/extract-document",
+        file,
+      ),
+    onSuccess: (response) => {
+      setRequirements(response.requirements);
+      setWarnings([`Read from “${response.filename}”.`, ...response.warnings]);
       setPhase("review");
     },
   });
@@ -129,14 +142,19 @@ export function CostPlanner() {
             patterns={patterns.data.data}
             onComplete={completeWizard}
             onExtract={(text) => extract.mutate(text)}
-            extracting={extract.isPending}
-            extractError={
-              extract.isError
-                ? extract.error instanceof ApiError && extract.error.status === 403
-                  ? "Drafting answers with AI needs operator access — the form works for everyone."
-                  : (extract.error as Error).message
-                : undefined
-            }
+            onUpload={(file) => uploadDocument.mutate(file)}
+            extracting={extract.isPending || uploadDocument.isPending}
+            extractError={(() => {
+              const error = extract.isError
+                ? extract.error
+                : uploadDocument.isError
+                  ? uploadDocument.error
+                  : undefined;
+              if (!error) return undefined;
+              return error instanceof ApiError && error.status === 403
+                ? "Drafting answers with AI needs operator access — the form works for everyone."
+                : (error as Error).message;
+            })()}
           />
         ))}
 

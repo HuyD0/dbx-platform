@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -328,4 +328,68 @@ def similar_estimates(
         "exact_match": exact[0] if exact else None,
         "similar": [row for row in rows if row not in exact],
         "bracket": {"lo": lo, "hi": hi},
+    }
+
+
+# --- document upload (PDF / Markdown / plain text) ----------------------------
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/extract-document", dependencies=[Depends(deps.require_operator)])
+async def extract_document(request: Request, file: UploadFile):
+    """Read one uploaded document into the same two-stage extraction flow.
+
+    The size cap is enforced while streaming (no global body limit exists in
+    this app), and parsing happens in the wheel (`text_from_document`) so the
+    upload path and free-text path share every downstream rule — bounded
+    text, forced tool calls, validation, human review.
+    """
+    from backend import estimator_extraction
+
+    del request  # authenticated via the global boundary + operator dependency
+    chunks: list[bytes] = []
+    received = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        received += len(chunk)
+        if received > MAX_UPLOAD_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content=payload(
+                    "document_too_large",
+                    "Documents up to 10 MB are supported - export the key "
+                    "section or paste the relevant text instead.",
+                ),
+            )
+        chunks.append(chunk)
+    from dbx_platform.estimator_extract import text_from_document
+
+    filename = file.filename or "upload"
+    try:
+        text = text_from_document(filename, b"".join(chunks))
+        requirements, warnings = estimator_extraction.extract_requirements(
+            _extraction_model(), text
+        )
+    except estimator_extraction.ExtractionError as error:
+        return JSONResponse(
+            status_code=422, content=payload("extraction_failed", str(error))
+        )
+    except Exception as error:  # noqa: BLE001 - endpoint is optional; degrade politely
+        log.info("estimator document extraction unavailable", exc_info=error)
+        return JSONResponse(
+            status_code=503,
+            content=payload(
+                "extraction_unavailable",
+                "The AI extraction step is currently unavailable; fill in the "
+                "wizard manually instead.",
+            ),
+        )
+    return {
+        "requirements": requirements,
+        "warnings": warnings,
+        "filename": filename,
+        "characters_used": min(len(text), estimator_extraction.MAX_TEXT_CHARS),
     }

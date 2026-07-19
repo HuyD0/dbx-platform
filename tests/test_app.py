@@ -263,6 +263,7 @@ def test_every_mutating_route_is_post_only(client):
         # security-definer procedure — no target mutation, no approval flow.
         "/api/estimator/estimates/record",
         "/api/estimator/extract",
+        "/api/estimator/extract-document",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"
