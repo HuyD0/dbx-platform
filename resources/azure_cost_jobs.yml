@@ -9,10 +9,9 @@ resources:
       description: >
         Pulls the subscription's actual cost (daily, by service and resource
         group) from the Azure Cost Management Query API and MERGEs it into
-        <catalog>.<schema>.azure_costs. Temporarily pulls a 365-day initial
-        backfill; restore the normal 3-day late-restatement window immediately
-        after the approved backfill succeeds. Then reports per-bucket spend
-        spikes. Writes only to platform-owned tables.
+        <catalog>.<schema>.azure_costs. Pulls a rolling 3-day window so late
+        Azure restatements are merged on the next daily run. Then reports
+        per-bucket spend spikes. Writes only to platform-owned tables.
       schedule:
         quartz_cron_expression: "0 30 6 * * ?"  # daily 06:30 UTC, before cost jobs
         timezone_id: UTC
@@ -50,7 +49,7 @@ resources:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters:
-              ["azure-cost", "pull", "--days", "365",
+              ["azure-cost", "pull", "--days", "3",
                "--subscription-id", "${var.azure_subscription_id}",
                "--service-credential", "${var.azure_service_credential}",
                "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
