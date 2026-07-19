@@ -488,3 +488,25 @@ export interface PricingStatus {
   notes: string[];
   health: SourceHealth;
 }
+
+export interface SavedEstimateSummary {
+  estimate_id: string;
+  created_at: string;
+  created_by?: string;
+  title: string;
+  pattern: string;
+  monthly_requests: number;
+  corpus_gb: number;
+  requirements_json: string;
+  requirements_hash: string;
+  engine_version?: string;
+  rate_card_version?: string;
+  snapshot_date?: string;
+  rigor_pct: number;
+}
+
+export interface SimilarEstimatesResponse {
+  exact_match: SavedEstimateSummary | null;
+  similar: SavedEstimateSummary[];
+  bracket: { lo: number; hi: number };
+}

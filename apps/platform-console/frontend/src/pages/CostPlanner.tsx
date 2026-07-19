@@ -1,8 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { BlueprintPanel } from "../components/estimator/BlueprintPanel";
+import {
+  EstimateLibrary,
+  SaveEstimateButton,
+} from "../components/estimator/EstimateLibrary";
 import { EvaluationTaxPanel } from "../components/estimator/EvaluationTaxPanel";
 import { LineItemTable } from "../components/estimator/LineItemTable";
+import { SimilarEstimates } from "../components/estimator/SimilarEstimates";
 import { PricingFreshness } from "../components/estimator/PricingFreshness";
 import { RequirementsWizard, type WizardDraft } from "../components/estimator/RequirementsWizard";
 import { ReviewRequirements } from "../components/estimator/ReviewRequirements";
@@ -10,13 +15,14 @@ import { RigorSlider } from "../components/estimator/RigorSlider";
 import { ScenarioToggle } from "../components/estimator/ScenarioToggle";
 import { TcoMatrix } from "../components/estimator/TcoMatrix";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "../components/ui";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPost, apiUpload } from "../lib/api";
 import {
   ApiError,
   type Envelope,
   type EstimateMatrix,
   type EstimatorPattern,
   type ExtractResponse,
+  type SavedEstimateSummary,
 } from "../lib/types";
 
 type Phase = "wizard" | "review" | "results";
@@ -49,6 +55,19 @@ export function CostPlanner() {
     },
   });
 
+  const uploadDocument = useMutation({
+    mutationFn: (file: File) =>
+      apiUpload<ExtractResponse & { filename: string }>(
+        "/api/estimator/extract-document",
+        file,
+      ),
+    onSuccess: (response) => {
+      setRequirements(response.requirements);
+      setWarnings([`Read from “${response.filename}”.`, ...response.warnings]);
+      setPhase("review");
+    },
+  });
+
   const estimate = useQuery({
     queryKey: ["estimator", "estimate", confirmed, rigorPct],
     queryFn: () =>
@@ -75,6 +94,16 @@ export function CostPlanner() {
   const confirmReview = (edited: Record<string, unknown>) => {
     setConfirmed(edited);
     setPhase("results");
+  };
+
+  const reuseSaved = (estimate: SavedEstimateSummary) => {
+    try {
+      setRequirements(JSON.parse(estimate.requirements_json) as Record<string, unknown>);
+    } catch {
+      return; // a malformed stored document must not crash the wizard
+    }
+    setWarnings([`Started from the saved estimate “${estimate.title}”.`]);
+    setPhase("review");
   };
 
   const matrix = estimate.data?.data;
@@ -113,25 +142,37 @@ export function CostPlanner() {
             patterns={patterns.data.data}
             onComplete={completeWizard}
             onExtract={(text) => extract.mutate(text)}
-            extracting={extract.isPending}
-            extractError={
-              extract.isError
-                ? extract.error instanceof ApiError && extract.error.status === 403
-                  ? "Drafting answers with AI needs operator access — the form works for everyone."
-                  : (extract.error as Error).message
-                : undefined
-            }
+            onUpload={(file) => uploadDocument.mutate(file)}
+            extracting={extract.isPending || uploadDocument.isPending}
+            extractError={(() => {
+              const error = extract.isError
+                ? extract.error
+                : uploadDocument.isError
+                  ? uploadDocument.error
+                  : undefined;
+              if (!error) return undefined;
+              return error instanceof ApiError && error.status === 403
+                ? "Drafting answers with AI needs operator access — the form works for everyone."
+                : (error as Error).message;
+            })()}
           />
         ))}
 
       {phase === "review" && (
-        <ReviewRequirements
-          requirements={requirements}
-          warnings={warnings}
-          patternLabel={patternLabel}
-          onConfirm={confirmReview}
-          onBack={() => setPhase("wizard")}
-        />
+        <>
+          <ReviewRequirements
+            requirements={requirements}
+            warnings={warnings}
+            patternLabel={patternLabel}
+            onConfirm={confirmReview}
+            onBack={() => setPhase("wizard")}
+          />
+          <SimilarEstimates
+            pattern={String(requirements.pattern ?? "")}
+            monthlyRequests={Number(requirements.monthly_requests ?? 0)}
+            onReuse={reuseSaved}
+          />
+        </>
       )}
 
       {phase === "results" && (
@@ -144,6 +185,17 @@ export function CostPlanner() {
                 <ScenarioToggle scenario={scenario} onChange={setScenario} />
                 <PricingFreshness snapshotDate={matrix.snapshot_date} />
               </div>
+              {confirmed && (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <SaveEstimateButton requirements={confirmed} rigorPct={rigorPct} />
+                  <SimilarEstimates
+                    pattern={String(confirmed.pattern ?? "")}
+                    monthlyRequests={Number(confirmed.monthly_requests ?? 0)}
+                    requirementsHash={matrix.requirements_hash}
+                    onReuse={reuseSaved}
+                  />
+                </div>
+              )}
               <TcoMatrix
                 matrix={matrix}
                 scenario={scenario}
@@ -166,6 +218,7 @@ export function CostPlanner() {
                 </div>
               )}
               {activeEstimate && <LineItemTable estimate={activeEstimate} />}
+              <EstimateLibrary onReuse={reuseSaved} />
             </div>
           )}
           {!matrix && !estimate.isPending && !estimate.isError && (

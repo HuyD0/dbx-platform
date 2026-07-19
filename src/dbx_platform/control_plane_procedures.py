@@ -398,3 +398,111 @@ END
             )
         )
     return statements
+
+
+def estimate_procedure_statements(
+    catalog: str,
+    schema: str,
+    *,
+    app_service_principal: str,
+) -> list[tuple[str, str]]:
+    """Security-definer append broker for the saved-estimate library.
+
+    Saving an estimate is telemetry append (no target mutation, no approval
+    flow) — the same trust shape as a proposer creating an action request:
+    the App verifies the forwarded user's role at the request boundary and
+    passes the verified identity as ``p_created_by``. Unlike the action
+    procedures, the grant here is NOT gated on ``actions_enabled``; the
+    library must work in proposal-only deployments too.
+    """
+
+    catalog = _identifier(catalog)
+    schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
+    fq = f"`{catalog}`.`{schema}`"
+
+    record_estimate = f"""
+CREATE OR REPLACE PROCEDURE {fq}.`cp_record_estimate`(
+  IN p_workspace_id STRING,
+  IN p_environment STRING,
+  IN p_estimate_id STRING,
+  IN p_created_by STRING,
+  IN p_title STRING,
+  IN p_pattern STRING,
+  IN p_monthly_requests STRING,
+  IN p_corpus_gb STRING,
+  IN p_requirements_json STRING,
+  IN p_requirements_hash STRING,
+  IN p_engine_version STRING,
+  IN p_rate_card_version STRING,
+  IN p_snapshot_date STRING,
+  IN p_rigor_pct STRING,
+  IN p_results_json STRING
+)
+LANGUAGE SQL
+SQL SECURITY DEFINER
+MODIFIES SQL DATA
+AS BEGIN ATOMIC
+  IF p_created_by IS NULL OR p_created_by = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified creator identity is required';
+  END IF;
+  IF p_workspace_id IS NULL OR p_workspace_id = ''
+     OR p_environment IS NULL OR p_environment = ''
+     OR p_estimate_id IS NULL OR p_estimate_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate scope and identifier are required';
+  END IF;
+  IF p_requirements_hash NOT RLIKE '^[0-9a-f]{{64}}$' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The requirements hash is not a canonical digest';
+  END IF;
+  IF p_requirements_json IS NULL OR p_requirements_json = ''
+     OR get_json_object(p_requirements_json, '$.pattern') <> p_pattern
+     OR p_results_json IS NULL OR p_results_json = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate document is inconsistent';
+  END IF;
+  IF CAST(p_rigor_pct AS INT) IS NULL
+     OR CAST(p_rigor_pct AS INT) < 0 OR CAST(p_rigor_pct AS INT) > 100
+     OR CAST(p_monthly_requests AS BIGINT) IS NULL
+     OR CAST(p_monthly_requests AS BIGINT) < 1 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate sizing values are out of bounds';
+  END IF;
+  IF p_title IS NULL OR p_title = '' OR length(p_title) > 200 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'A title of at most 200 characters is required';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM {fq}.`estimator_estimates`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND estimate_id = p_estimate_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate ID already exists';
+  END IF;
+  INSERT INTO {fq}.`estimator_estimates` (
+    workspace_id, environment, estimate_id, created_at, created_by, title,
+    pattern, monthly_requests, corpus_gb, requirements_json,
+    requirements_hash, engine_version, rate_card_version, snapshot_date,
+    rigor_pct, results_json
+  ) VALUES (
+    p_workspace_id, p_environment, p_estimate_id, current_timestamp(),
+    p_created_by, p_title, p_pattern, CAST(p_monthly_requests AS BIGINT),
+    CAST(p_corpus_gb AS DOUBLE), p_requirements_json, p_requirements_hash,
+    p_engine_version, p_rate_card_version, CAST(p_snapshot_date AS DATE),
+    CAST(p_rigor_pct AS INT), p_results_json
+  );
+END
+""".strip()
+
+    return [
+        (f"procedure {catalog}.{schema}.cp_record_estimate", record_estimate),
+        (
+            f"grant {app_service_principal} execute on cp_record_estimate",
+            f"GRANT EXECUTE ON PROCEDURE {fq}.`cp_record_estimate` "
+            f"TO `{app_service_principal}`",
+        ),
+    ]

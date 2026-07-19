@@ -234,3 +234,79 @@ test("free-text extraction path surfaces the operator hint on failure", async ()
   expect(onExtract).toHaveBeenCalledWith("Policy chat for 200 people");
   expect(screen.getByRole("alert")).toHaveTextContent("operator access");
 });
+
+// --- SimilarEstimates ---------------------------------------------------------
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SimilarEstimates } from "./SimilarEstimates";
+
+function withQuery(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
+const savedEstimate = {
+  estimate_id: "e1",
+  created_at: new Date().toISOString(),
+  title: "Support doc chat FY27",
+  pattern: "doc_chat",
+  monthly_requests: 4000,
+  corpus_gb: 2,
+  requirements_json: '{"pattern":"doc_chat","monthly_requests":4000}',
+  requirements_hash: "a".repeat(64),
+  snapshot_date: "2026-07-14",
+  rigor_pct: 10,
+};
+
+test("similar estimates surface exact matches and reuse past inputs", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          exact_match: savedEstimate,
+          similar: [{ ...savedEstimate, estimate_id: "e2", title: "Sibling" }],
+          bracket: { lo: 1000, hi: 10000 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const onReuse = vi.fn();
+  withQuery(
+    <SimilarEstimates
+      pattern="doc_chat"
+      monthlyRequests={4000}
+      requirementsHash={"a".repeat(64)}
+      onReuse={onReuse}
+    />,
+  );
+  expect(
+    await screen.findByRole("heading", { name: "This estimate already exists" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("same inputs")).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getAllByRole("button", { name: "Use as starting point" })[0]);
+  expect(onReuse).toHaveBeenCalledWith(savedEstimate);
+  vi.unstubAllGlobals();
+});
+
+test("similar estimates render nothing when the library has no matches", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({ exact_match: null, similar: [], bracket: { lo: 1, hi: 10 } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const { container } = withQuery(
+    <SimilarEstimates pattern="doc_chat" monthlyRequests={5} onReuse={() => {}} />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(container.querySelector("ul")).toBeNull();
+  vi.unstubAllGlobals();
+});

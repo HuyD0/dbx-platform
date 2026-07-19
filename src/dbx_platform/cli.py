@@ -860,6 +860,83 @@ def cmd_estimator_prices_status(args) -> int:
     return 0
 
 
+def cmd_estimator_prompts_sync(args) -> int:
+    """Deployment-run prompt lineage: wheel texts -> UC prompt registry."""
+
+    from dbx_platform import estimator_prompts
+
+    s = Settings.from_env()
+    try:
+        results = estimator_prompts.register_prompts(
+            s.dashboard_catalog, s.dashboard_schema
+        )
+    except ImportError:
+        print(
+            "error: mlflow>=3 is required (the estimator_prompt_sync job "
+            "environment installs it).",
+            file=sys.stderr,
+        )
+        return 2
+    emit(args, "Estimator prompt registry sync", results)
+    return 0
+
+
+def cmd_estimator_eval_extraction(args) -> int:
+    """Run the golden extraction dataset against a real endpoint; log to MLflow.
+
+    Code scorers only (pattern accuracy, field tolerance, validation pass
+    rate) — the same near-free checks the estimator recommends for its own
+    users' prototype tier.
+    """
+    from dbx_platform import estimator, estimator_extract, estimator_prompts
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    endpoint = args.endpoint or s.digest_model
+    dataset = estimator_extract.load_eval_dataset()
+    model = estimator_extract.EndpointToolCaller(w, endpoint)
+    scores = []
+    rows = []
+    for case in dataset:
+        try:
+            actual, _warnings = estimator_extract.extract_requirements(
+                model, case["text"]
+            )
+        except Exception as error:  # noqa: BLE001 - a failed case scores zero
+            actual = None
+            rows.append({"case_id": case["case_id"], "error": error.__class__.__name__})
+        score = estimator_extract.score_extraction(case["expected"], actual)
+        scores.append(score)
+        rows.append({"case_id": case["case_id"], **score})
+    metrics = estimator_extract.aggregate_scores(scores)
+    notes = [f"endpoint {endpoint}, {metrics['cases']} golden cases"]
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri("databricks")
+        mlflow.set_experiment(args.experiment)
+        with mlflow.start_run(run_name="extraction-eval"):
+            mlflow.log_params(
+                {
+                    "endpoint": endpoint,
+                    "engine_version": estimator.ENGINE_VERSION,
+                    **{
+                        f"prompt_{spec['prompt']}": spec["content_hash"]
+                        for spec in estimator_prompts.prompt_specs(
+                            s.dashboard_catalog, s.dashboard_schema
+                        )
+                    },
+                }
+            )
+            mlflow.log_metrics(metrics)
+            mlflow.log_dict({"cases": dataset}, "extraction_eval_dataset.json")
+        notes.append(f"logged to MLflow experiment {args.experiment}")
+    except ImportError:
+        notes.append("mlflow not installed; metrics reported only to stdout")
+    emit(args, "Extraction eval (code scorers)", [metrics], notes)
+    return 0 if metrics["pattern_accuracy"] >= args.min_pattern_accuracy else 1
+
+
 def cmd_estimator_patterns(args) -> int:
     from dbx_platform import estimator
 
@@ -2224,6 +2301,32 @@ def build_parser() -> argparse.ArgumentParser:
         "patterns", parents=[common], help="List the plain-English solution patterns"
     )
     x.set_defaults(func=cmd_estimator_patterns)
+    x = pe.add_parser(
+        "prompts-sync",
+        parents=[common],
+        help="Register the wheel's extraction prompts in the UC prompt registry "
+        "(deployment-run; skips unchanged content hashes)",
+    )
+    x.set_defaults(func=cmd_estimator_prompts_sync)
+    x = pe.add_parser(
+        "eval-extraction",
+        parents=[common],
+        help="Run the golden extraction dataset against a serving endpoint and "
+        "log code-scorer metrics to MLflow",
+    )
+    x.add_argument("--endpoint", default=None, help="Serving endpoint (default digest model)")
+    x.add_argument(
+        "--experiment",
+        default="/Shared/dbx-platform/estimator-extraction-eval",
+        help="MLflow experiment path or ID",
+    )
+    x.add_argument(
+        "--min-pattern-accuracy",
+        type=float,
+        default=0.8,
+        help="Exit nonzero below this pattern accuracy (the prompt-change gate)",
+    )
+    x.set_defaults(func=cmd_estimator_eval_extraction)
     x = pe.add_parser(
         "estimate",
         parents=[common, governed_write],

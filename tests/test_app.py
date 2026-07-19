@@ -259,7 +259,11 @@ def test_every_mutating_route_is_post_only(client):
         # mutate workspace state: estimate is pure math over the stored price
         # snapshot; extract only feeds the human review screen.
         "/api/estimator/estimate",
+        # Saving an estimate is telemetry append through the cp_record_estimate
+        # security-definer procedure — no target mutation, no approval flow.
+        "/api/estimator/estimates/record",
         "/api/estimator/extract",
+        "/api/estimator/extract-document",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"

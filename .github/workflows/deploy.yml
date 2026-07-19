@@ -154,7 +154,10 @@ jobs:
             --select jobs.cost_forecast_train \
             --select jobs.cost_usage_report \
             --select jobs.dashboards_setup \
+            --select experiments.estimator_extraction_eval \
+            --select jobs.estimator_extraction_eval \
             --select jobs.estimator_prices_pull \
+            --select jobs.estimator_prompt_sync \
             --select jobs.governance_check \
             --select jobs.housekeeping_report \
             --select jobs.llm_cost_rollup \
@@ -168,6 +171,11 @@ jobs:
         # Runs on serverless Spark as the deployment identity. It never starts
         # the managed SQL warehouse, so deploy-while-sleeping stays asleep.
         run: databricks bundle run schema_migrations -t prod
+      - name: Sync estimator prompts to the UC prompt registry
+        # Idempotent lineage step: registers the wheel's extraction prompt
+        # texts tagged by content hash, skipping unchanged versions, so
+        # traces, registry versions and git commits reference the same bytes.
+        run: databricks bundle run estimator_prompt_sync -t prod
       - name: Reconcile the durable runtime intent (proposal only)
         # Deploy leaves schedules paused and the warehouse asleep; the app
         # declares started: true, so deploy does start it directly.

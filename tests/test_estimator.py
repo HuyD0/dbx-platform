@@ -365,3 +365,23 @@ def test_rate_card_regexes_compile():
 def test_estimate_is_json_serializable():
     matrix = compute_matrix(DOC_CHAT, rigor_pct=10, price_book=book())
     json.dumps(matrix)
+
+
+def test_similar_bracket_bounds_cover_the_same_order_of_magnitude():
+    from dbx_platform.estimator import similar_bracket_bounds
+
+    assert similar_bracket_bounds(4000) == (1000, 10_000)
+    assert similar_bracket_bounds(100_000) == (100_000, 1_000_000)
+    assert similar_bracket_bounds(5) == (1, 10)
+    lo, hi = similar_bracket_bounds(999)
+    assert lo <= 999 < hi
+
+
+def test_estimates_table_ddl_is_append_only_with_filter_columns():
+    from dbx_platform.estimator import create_estimates_table_sql
+
+    ddl = create_estimates_table_sql("cat", "sch")
+    assert "cat.sch.estimator_estimates" in ddl
+    assert "'delta.appendOnly' = 'true'" in ddl
+    for column in ("pattern STRING", "monthly_requests BIGINT", "requirements_hash"):
+        assert column in ddl

@@ -59,6 +59,9 @@ def ws(monkeypatch) -> MagicMock:
     monkeypatch.setattr(deps, "get_ws", lambda: mock)
     monkeypatch.setattr(deps, "get_settings", lambda: Settings(warehouse_id="wh-test"))
     cache.clear()
+    # The local repository is a cached singleton; estimates saved in one test
+    # must not leak into the next.
+    deps.get_control_plane_repository.cache_clear()
     return mock
 
 
@@ -302,3 +305,197 @@ def test_extraction_tool_schema_mirrors_requirements_fields():
             continue  # chosen in stage 1, not extracted
         assert field.name in properties, f"tool schema missing {field.name}"
     assert "warnings" in properties
+
+
+# --- saved-estimate library ---------------------------------------------------
+
+
+def _library_client(client, monkeypatch):
+    from dbx_platform import estimator_pricing
+
+    monkeypatch.setattr(
+        estimator_pricing, "read_latest_snapshot", lambda *a, **k: _snapshot_rows()
+    )
+    return client
+
+
+def test_save_estimate_recomputes_server_side_and_appears_in_library(
+    client, monkeypatch
+):
+    _library_client(client, monkeypatch)
+    response = client.post(
+        "/api/estimator/estimates/record",
+        json={
+            "title": "Support doc chat",
+            "requirements": {"pattern": "doc_chat", "monthly_requests": 4000},
+            "rigor_pct": 25,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["requirements_hash"]) == 64
+    assert body["snapshot_date"] == SNAPSHOT
+
+    listing = client.get("/api/estimator/estimates").json()["data"]
+    assert len(listing) == 1
+    assert listing[0]["title"] == "Support doc chat"
+    assert listing[0]["pattern"] == "doc_chat"
+    assert "results_json" not in listing[0]
+
+
+def test_save_estimate_requires_operator(viewer_client, monkeypatch):
+    _library_client(viewer_client, monkeypatch)
+    response = viewer_client.post(
+        "/api/estimator/estimates/record",
+        json={
+            "title": "x",
+            "requirements": {"pattern": "doc_chat", "monthly_requests": 10},
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_save_estimate_fails_loud_without_snapshot(client, monkeypatch):
+    from dbx_platform import estimator_pricing
+
+    monkeypatch.setattr(estimator_pricing, "read_latest_snapshot", lambda *a, **k: [])
+    response = client.post(
+        "/api/estimator/estimates/record",
+        json={
+            "title": "x",
+            "requirements": {"pattern": "doc_chat", "monthly_requests": 10},
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "pricing_snapshot_missing"
+
+
+def test_similar_estimates_exact_and_bracket_matching(client, monkeypatch):
+    _library_client(client, monkeypatch)
+    for requests_per_month, title in ((4000, "Sibling A"), (9000, "Sibling B"),
+                                      (400_000, "Different scale")):
+        assert (
+            client.post(
+                "/api/estimator/estimates/record",
+                json={
+                    "title": title,
+                    "requirements": {
+                        "pattern": "doc_chat",
+                        "monthly_requests": requests_per_month,
+                    },
+                },
+            ).status_code
+            == 200
+        )
+
+    similar = client.get(
+        "/api/estimator/estimates/similar",
+        params={"pattern": "doc_chat", "monthly_requests": 5000},
+    ).json()
+    titles = {row["title"] for row in similar["similar"]}
+    assert titles == {"Sibling A", "Sibling B"}  # same 10^3 bracket only
+    assert similar["exact_match"] is None
+    assert similar["bracket"] == {"lo": 1000, "hi": 10000}
+
+    # exact match by requirements hash pulls the existing estimate up front
+    saved_hash = client.post(
+        "/api/estimator/estimates/record",
+        json={
+            "title": "Exact twin",
+            "requirements": {"pattern": "doc_chat", "monthly_requests": 5000},
+            "rigor_pct": 10,
+        },
+    ).json()["requirements_hash"]
+    exact = client.get(
+        "/api/estimator/estimates/similar",
+        params={
+            "pattern": "doc_chat",
+            "monthly_requests": 5000,
+            "requirements_hash": saved_hash,
+        },
+    ).json()
+    assert exact["exact_match"]["title"] == "Exact twin"
+    assert all(row["title"] != "Exact twin" for row in exact["similar"])
+
+    # different pattern never matches
+    other = client.get(
+        "/api/estimator/estimates/similar",
+        params={"pattern": "summarize", "monthly_requests": 5000},
+    ).json()
+    assert other["exact_match"] is None and other["similar"] == []
+
+
+def test_viewer_sees_masked_created_by_in_library(client, monkeypatch):
+    _library_client(client, monkeypatch)
+    client.post(
+        "/api/estimator/estimates/record",
+        json={
+            "title": "Masked",
+            "requirements": {"pattern": "summarize", "monthly_requests": 100},
+        },
+    )
+    as_operator = client.get("/api/estimator/estimates").json()["data"]
+    assert as_operator and as_operator[0]["created_by"] == "test-user"
+
+    # Same app, downgraded identity: the redaction boundary must catch the key.
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    as_viewer = client.get("/api/estimator/estimates").json()["data"]
+    assert as_viewer and as_viewer[0]["created_by"] == "[redacted]"
+
+
+# --- document upload ----------------------------------------------------------
+
+
+def test_extract_document_parses_and_extracts(client, monkeypatch):
+    from backend import estimator_extraction
+    from backend.routers import estimator as estimator_router
+
+    monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
+    monkeypatch.setattr(
+        estimator_extraction,
+        "extract_requirements",
+        lambda model, text: (
+            {"pattern": "doc_chat", "monthly_requests": 1000},
+            [f"Read {len(text)} characters."],
+        ),
+    )
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("brief.md", b"# Chat over policy docs, 1000/mo", "text/markdown")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requirements"]["pattern"] == "doc_chat"
+    assert body["filename"] == "brief.md"
+    assert body["characters_used"] > 0
+
+
+def test_extract_document_rejects_unsupported_types_plainly(client, monkeypatch):
+    from backend.routers import estimator as estimator_router
+
+    monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("diagram.png", b"\x89PNG....", "image/png")},
+    )
+    assert response.status_code == 422
+    assert "Only PDF, Markdown and plain-text" in response.json()["message"]
+
+
+def test_extract_document_enforces_the_streamed_size_cap(client):
+    oversized = b"x" * (10 * 1024 * 1024 + 1)
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("big.txt", oversized, "text/plain")},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"] == "document_too_large"
+
+
+def test_extract_document_requires_operator(viewer_client):
+    response = viewer_client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("brief.md", b"hello", "text/markdown")},
+    )
+    assert response.status_code == 403

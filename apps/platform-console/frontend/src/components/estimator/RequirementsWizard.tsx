@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { FileUp, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { EstimatorPattern } from "../../lib/types";
 import { Badge, Card, SectionTitle } from "../ui";
@@ -82,12 +82,14 @@ export function RequirementsWizard({
   patterns,
   onComplete,
   onExtract,
+  onUpload,
   extracting = false,
   extractError,
 }: {
   patterns: EstimatorPattern[];
   onComplete: (draft: WizardDraft) => void;
   onExtract?: (text: string) => void;
+  onUpload?: (file: File) => void;
   extracting?: boolean;
   extractError?: string;
 }) {
@@ -182,6 +184,33 @@ export function RequirementsWizard({
                 <Sparkles className="h-3.5 w-3.5" />
                 {extracting ? "Reading your description…" : "Draft the answers for me"}
               </button>
+              {onUpload && (
+                <div className="mt-3 border-t border-dashed border-hairline pt-3">
+                  <label
+                    htmlFor="estimator-document"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-ink-2 hover:text-ink"
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    Or upload a project document (PDF, Markdown or text, up to 10 MB)
+                  </label>
+                  <input
+                    id="estimator-document"
+                    type="file"
+                    accept=".pdf,.md,.markdown,.txt"
+                    className="sr-only"
+                    disabled={extracting}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) onUpload(file);
+                      event.target.value = "";
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-muted">
+                    Diagrams and images are not supported yet — describe those in
+                    the text box instead.
+                  </p>
+                </div>
+              )}
               {extractError && (
                 <p role="alert" className="mt-2 text-xs text-danger">
                   {extractError}

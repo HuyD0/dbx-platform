@@ -180,3 +180,88 @@ def test_sql_human_action_write_calls_broker_not_table_insert():
     assert "INSERT INTO" not in sql
     assert parameters["plan_hash"] == action.plan_hash
     assert parameters["proposer_email"] == "operator@example.com"
+
+
+# --- saved-estimate library broker -------------------------------------------
+
+
+def test_estimate_procedure_is_app_only_append_and_validated():
+    from dbx_platform.control_plane_procedures import estimate_procedure_statements
+
+    statements = estimate_procedure_statements(
+        "main",
+        "dbx_platform",
+        app_service_principal="00000000-0000-0000-0000-000000000001",
+    )
+    sql = "\n".join(statement for _description, statement in statements)
+    assert "cp_record_estimate" in sql
+    assert "SQL SECURITY DEFINER" in sql
+    assert "BEGIN ATOMIC" in sql
+    assert sql.count("INSERT INTO") == 1  # append-only: no UPDATE/DELETE
+    assert "UPDATE" not in sql and "DELETE" not in sql
+    assert "The verified creator identity is required" in sql
+    assert "'^[0-9a-f]{64}$'" in sql  # canonical requirements hash enforced
+    assert "current_timestamp()" in sql  # created_at stamped server-side
+    grants = [d for d, _ in statements if d.startswith("grant ")]
+    assert grants == [
+        "grant 00000000-0000-0000-0000-000000000001 execute on cp_record_estimate"
+    ]
+
+
+def test_estimate_procedure_grant_survives_actions_disabled_migrations():
+    """The library must work in proposal-only deployments: its grant is not
+    action machinery and never rides the actions_enabled gate."""
+
+    spark = MagicMock()
+    completed = migrations.run_migrations(
+        spark,
+        "main",
+        "dbx_platform",
+        ["team"],
+        app_service_principal="00000000-0000-0000-0000-000000000001",
+        actions_enabled=False,
+    )
+    assert any("cp_record_estimate" in step for step in completed)
+    assert "grant 00000000-0000-0000-0000-000000000001 execute on cp_record_estimate" in completed
+    # the human action procedures stay grant-filtered
+    assert not any(
+        step.startswith("grant ") and "cp_create_action" in step for step in completed
+    )
+
+
+def test_sql_estimate_write_calls_broker_not_table_insert():
+    repository = SQLControlPlaneRepository(
+        MagicMock(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        workspace_id="workspace-1",
+        environment="dev",
+    )
+    executed: list[tuple[str, dict]] = []
+    repository._run = lambda sql, params=None: executed.append((sql, params or {})) or []
+    repository.record_estimate(
+        {
+            "workspace_id": "workspace-1",
+            "environment": "dev",
+            "estimate_id": "e1",
+            "created_by": "user-1",
+            "title": "Doc chat",
+            "pattern": "doc_chat",
+            "monthly_requests": 4000,
+            "corpus_gb": 2.0,
+            "requirements_json": '{"pattern": "doc_chat"}',
+            "requirements_hash": "a" * 64,
+            "engine_version": "1",
+            "rate_card_version": "2026.07.1",
+            "snapshot_date": "2026-07-14",
+            "rigor_pct": 10,
+            "results_json": "{}",
+        }
+    )
+    assert len(executed) == 1
+    sql, params = executed[0]
+    assert "CALL" in sql and "cp_record_estimate" in sql
+    assert "INSERT" not in sql
+    assert params["monthly_requests"] == "4000"  # procedure params travel as strings
+    assert params["created_by"] == "user-1"
