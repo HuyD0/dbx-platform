@@ -254,3 +254,20 @@ def test_attribution_scopes_to_current_workspace(monkeypatch):
     assert cost.attribution(workspace, "wh", "project", 30) == []
     assert captured["parameters"] == {"days": 30, "workspace_id": "555"}
     assert "x_project" in captured["sql"]
+
+
+def test_core_cost_reports_expose_team_and_project_dimensions():
+    for query_name in ("usage_last_30d", "product_spend", "job_run_cost"):
+        sql = cost.load_query(query_name)
+        assert "custom_tags['team']" in sql
+        assert "custom_tags['project']" in sql
+        assert "AS team" in sql
+        assert "AS project" in sql
+
+
+def test_tag_coverage_reports_each_required_dimension():
+    sql = cost.load_query("untagged_usage")
+    assert "missing_team_list_cost_usd" in sql
+    assert "missing_team_pct" in sql
+    assert "missing_project_list_cost_usd" in sql
+    assert "missing_project_pct" in sql
