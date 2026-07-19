@@ -1471,6 +1471,8 @@ def _approver_is_current_member(
     identities are not allowed to enumerate.
     """
 
+    if not group_id:
+        return False
     try:
         user = w.users.get(approval.approver_id)
     except Exception:  # noqa: BLE001 - authorization failures are uniform
