@@ -69,6 +69,7 @@ class InMemoryControlPlaneRepository:
         self._resources: list[dict[str, Any]] = []
         self._runtime: dict[tuple[str, str], dict[str, Any]] = {}
         self._estimates: list[dict[str, Any]] = []
+        self._deployments: list[dict[str, Any]] = []
         self._lock = threading.RLock()
 
     def _in_scope(self, action: ActionRequest) -> bool:
@@ -360,6 +361,37 @@ class InMemoryControlPlaneRepository:
             ]
         rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
         return rows[: max(1, min(limit, 20))]
+
+    def link_deployment(self, record: dict[str, Any]) -> dict[str, Any]:
+        stored = {**record, "created_at": utc_now().isoformat()}
+        with self._lock:
+            if any(
+                row["deployment_id"] == stored.get("deployment_id")
+                for row in self._deployments
+            ):
+                raise ActionConflictError(
+                    f"Deployment {stored.get('deployment_id')} already exists."
+                )
+            self._deployments.append(dict(stored))
+        return dict(stored)
+
+    def list_deployments(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = [
+                dict(row) for row in self._deployments if self._estimate_in_scope(row)
+            ]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return rows[: max(1, min(limit, 500))]
+
+    def active_deployments(self) -> list[dict[str, Any]]:
+        with self._lock:
+            latest: dict[str, dict[str, Any]] = {}
+            for row in sorted(
+                (r for r in self._deployments if self._estimate_in_scope(r)),
+                key=lambda r: str(r.get("created_at") or ""),
+            ):
+                latest[row["estimate_id"]] = dict(row)
+        return [row for row in latest.values() if row.get("active")]
 
     # Test/local seeding helpers. They are not part of the production protocol.
     def add_finding(self, finding: dict[str, Any]) -> None:
@@ -1265,5 +1297,62 @@ LIMIT :limit""",
             "AND (requirements_hash = :requirements_hash "
             "OR (monthly_requests >= :lo AND monthly_requests < :hi)) "
             "ORDER BY created_at DESC LIMIT :limit",
+            parameters,
+        )
+
+    _DEPLOYMENT_COLUMNS = (
+        "deployment_id, estimate_id, created_at, created_by, tier, scenario, "
+        "anchor_kind, anchor_value, monthly_projected_usd, currency, active"
+    )
+
+    def link_deployment(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Append one estimate→deployment link via the security-definer broker."""
+
+        self.initialize()
+        parameters = {
+            "workspace_id": str(record["workspace_id"]),
+            "environment": str(record["environment"]),
+            "deployment_id": str(record["deployment_id"]),
+            "estimate_id": str(record["estimate_id"]),
+            "created_by": str(record["created_by"]),
+            "tier": str(record["tier"]),
+            "scenario": str(record["scenario"]),
+            "anchor_kind": str(record["anchor_kind"]),
+            "anchor_value": str(record["anchor_value"]),
+            "monthly_projected_usd": str(float(record["monthly_projected_usd"])),
+            "currency": str(record.get("currency") or "USD"),
+            "active": "true" if record.get("active", True) else "false",
+        }
+        self._run(
+            f"CALL {self._procedure('cp_link_deployment')}("
+            ":workspace_id, :environment, :deployment_id, :estimate_id, "
+            ":created_by, :tier, :scenario, :anchor_kind, :anchor_value, "
+            ":monthly_projected_usd, :currency, :active)",
+            parameters,
+        )
+        return dict(record)
+
+    def list_deployments(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        self.initialize()
+        parameters: dict[str, int | str] = {"limit": max(1, min(limit, 500))}
+        scope = self._scope_sql(parameters)
+        return self._run(
+            f"SELECT {self._DEPLOYMENT_COLUMNS} "
+            f"FROM {self._table('estimator_deployments')} "
+            f"WHERE {scope} ORDER BY created_at DESC LIMIT :limit",
+            parameters,
+        )
+
+    def active_deployments(self) -> list[dict[str, Any]]:
+        self.initialize()
+        parameters: dict[str, int | str] = {}
+        scope = self._scope_sql(parameters)
+        return self._run(
+            "WITH ranked AS ("
+            f"SELECT {self._DEPLOYMENT_COLUMNS}, ROW_NUMBER() OVER ("
+            "PARTITION BY estimate_id ORDER BY created_at DESC) AS rn "
+            f"FROM {self._table('estimator_deployments')} WHERE {scope}) "
+            f"SELECT {self._DEPLOYMENT_COLUMNS} FROM ranked "
+            "WHERE rn = 1 AND active = true",
             parameters,
         )

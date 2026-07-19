@@ -40,6 +40,14 @@ class ExtractRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class LinkDeploymentRequest(BaseModel):
+    estimate_id: str = Field(min_length=1, max_length=64)
+    tier: str
+    scenario: str
+    anchor_kind: str
+    anchor_value: str = Field(min_length=1, max_length=200)
+
+
 def _snapshot_rows(currency: str, refresh: bool = False):
     workspace_id, environment = deps.control_plane_scope()
 
@@ -393,3 +401,83 @@ async def extract_document(request: Request, file: UploadFile):
         "filename": filename,
         "characters_used": min(len(text), estimator_extraction.MAX_TEXT_CHARS),
     }
+
+
+# --- deploy-link (estimate → real cost anchor) --------------------------------
+
+
+@router.post("/deployments/link", dependencies=[Depends(deps.require_operator)])
+def link_deployment(body: LinkDeploymentRequest, request: Request):
+    """Link a saved estimate to the cost anchor it was deployed under.
+
+    The projected monthly total is read server-side from the estimate's own
+    stored results for the chosen tier + scenario — never trusted from the
+    client — so the drift check compares against exactly what the engine
+    projected.
+    """
+    import uuid
+
+    if body.tier not in estimator.TIERS or body.scenario not in estimator.SCENARIOS:
+        return JSONResponse(
+            status_code=422,
+            content=payload("invalid_deployment", "Unknown tier or scenario."),
+        )
+    if body.anchor_kind not in estimator.ANCHOR_KINDS:
+        return JSONResponse(
+            status_code=422,
+            content=payload(
+                "invalid_deployment",
+                f"anchor_kind must be one of {', '.join(estimator.ANCHOR_KINDS)}.",
+            ),
+        )
+    actor = deps.require_verified_user(request)
+    repo = deps.get_user_control_plane_repository(request)
+    estimate = repo.get_estimate(body.estimate_id)
+    if estimate is None:
+        return JSONResponse(
+            status_code=422,
+            content=payload("invalid_deployment", "That saved estimate was not found."),
+        )
+    import json as jsonlib
+
+    try:
+        results = jsonlib.loads(estimate.get("results_json") or "{}")
+        projected = float(
+            results["tiers"][body.tier]["scenarios"][body.scenario]["totals_by_env"]["prod"]
+        )
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse(
+            status_code=422,
+            content=payload(
+                "invalid_deployment",
+                "The saved estimate has no production total for that tier and scenario.",
+            ),
+        )
+    workspace_id, environment = deps.control_plane_scope()
+    record = {
+        "workspace_id": workspace_id,
+        "environment": environment,
+        "deployment_id": uuid.uuid4().hex,
+        "estimate_id": body.estimate_id,
+        "created_by": actor.actor_id,
+        "tier": body.tier,
+        "scenario": body.scenario,
+        "anchor_kind": body.anchor_kind,
+        "anchor_value": body.anchor_value.strip(),
+        "monthly_projected_usd": round(projected, 2),
+        "currency": str(estimate.get("currency") or "USD"),
+        "active": True,
+    }
+    repo.link_deployment(record)
+    return {
+        "deployment_id": record["deployment_id"],
+        "monthly_projected_usd": record["monthly_projected_usd"],
+    }
+
+
+@router.get("/deployments")
+def list_deployments(request: Request) -> dict:
+    from datetime import UTC, datetime
+
+    rows = deps.get_user_control_plane_repository(request).list_deployments()
+    return envelope(rows, datetime.now(UTC), False)

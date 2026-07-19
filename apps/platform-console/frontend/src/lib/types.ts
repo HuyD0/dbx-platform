@@ -510,3 +510,17 @@ export interface SimilarEstimatesResponse {
   similar: SavedEstimateSummary[];
   bracket: { lo: number; hi: number };
 }
+
+export interface DeploymentLink {
+  deployment_id: string;
+  estimate_id: string;
+  created_at: string;
+  created_by?: string;
+  tier: string;
+  scenario: string;
+  anchor_kind: string;
+  anchor_value: string;
+  monthly_projected_usd: number;
+  currency: string;
+  active: boolean;
+}

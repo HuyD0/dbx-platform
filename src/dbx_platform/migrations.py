@@ -12,6 +12,7 @@ import sys
 from collections.abc import Sequence
 
 from dbx_platform.control_plane_procedures import (
+    deployment_procedure_statements,
     estimate_procedure_statements,
     procedure_statements,
 )
@@ -95,16 +96,21 @@ def run_migrations(
         completed.append(
             "procedure grants skipped: actions are disabled until RBAC groups exist"
         )
-    # The estimate-library append broker is telemetry, not action machinery:
-    # its grant is deliberately NOT gated on actions_enabled, so saving
-    # estimates works in proposal-only deployments too.
-    for description, sql in estimate_procedure_statements(
-        catalog,
-        schema,
-        app_service_principal=app_service_principal,
+    # The estimate-library and deployment-link append brokers are telemetry,
+    # not action machinery: their grants are deliberately NOT gated on
+    # actions_enabled, so saving estimates and linking deployments work in
+    # proposal-only deployments too.
+    for statements in (
+        estimate_procedure_statements(
+            catalog, schema, app_service_principal=app_service_principal
+        ),
+        deployment_procedure_statements(
+            catalog, schema, app_service_principal=app_service_principal
+        ),
     ):
-        spark.sql(sql)
-        completed.append(description)
+        for description, sql in statements:
+            spark.sql(sql)
+            completed.append(description)
     return completed
 
 

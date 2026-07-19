@@ -949,6 +949,57 @@ def cmd_estimator_patterns(args) -> int:
     return 0
 
 
+def cmd_estimator_drift_check(args) -> int:
+    """Compare saved estimates against current prices and linked actuals.
+
+    Two checks, both storing findings and (unless --no-store) failing the run
+    on material drift so the job-failure email is the alert — the
+    forecast-monitor pattern.
+    """
+    from dbx_platform import estimator_monitor
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not _verify_governed_write(args, w, s):
+        return 2
+    warehouse = _warehouse_id(args, s)
+    workspace_id = str(w.get_workspace_id())
+    environment = getattr(args, "environment", s.environment)
+    findings = estimator_monitor.run_drift_check(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        workspace_id=workspace_id,
+        environment=environment,
+        days=args.days,
+        reprice_threshold_pct=args.reprice_threshold,
+        actuals_threshold_pct=args.actuals_threshold,
+    )
+    emit(args, "Estimate re-price drift", findings[estimator_monitor.REPRICING_CHECK])
+    emit(args, "Estimate vs. actuals drift", findings[estimator_monitor.ACTUALS_CHECK])
+    notes = ["Report only — re-estimate or reconcile before acting."]
+    if not args.no_store:
+        try:
+            stored = estimator_monitor.store_findings(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema, findings,
+                workspace_id=workspace_id, environment=environment,
+            )
+            notes.append(f"{stored} finding rows stored; cleared drift auto-resolves")
+        except (SystemTablesUnavailableError, RuntimeError, ValueError) as error:
+            notes.append(f"findings not stored ({error.__class__.__name__})")
+    emit(args, "Estimate drift check complete", [], notes)
+    total = sum(len(v) for v in findings.values())
+    if total:
+        print(
+            f"estimate drift detected ({total} findings) — failing so the job "
+            "notification fires.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def cmd_estimator_estimate(args) -> int:
     """Compute one estimate from the latest stored price snapshot.
 
@@ -2339,6 +2390,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--rigor", type=int, default=10, help="Production review coverage %% (0-100)"
     )
     x.set_defaults(func=cmd_estimator_estimate)
+    x = pe.add_parser(
+        "drift-check",
+        parents=[common, governed_write],
+        help="Flag saved estimates that drifted vs current prices or linked actuals",
+    )
+    x.add_argument("--no-store", action="store_true", help="Report without persisting findings")
+    x.add_argument("--days", type=int, default=30, help="Actuals lookback window")
+    x.add_argument(
+        "--reprice-threshold", type=float, default=15.0,
+        help="Re-price drift threshold %% (default 15)",
+    )
+    x.add_argument(
+        "--actuals-threshold", type=float, default=25.0,
+        help="Estimate-vs-actuals drift threshold %% (default 25)",
+    )
+    x.set_defaults(func=cmd_estimator_drift_check)
 
     # forecast
     pf = sub.add_parser(

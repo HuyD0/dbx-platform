@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { BlueprintPanel } from "../components/estimator/BlueprintPanel";
+import { DeploymentsPanel } from "../components/estimator/DeploymentsPanel";
 import {
   EstimateLibrary,
   SaveEstimateButton,
@@ -219,6 +220,7 @@ export function CostPlanner() {
               )}
               {activeEstimate && <LineItemTable estimate={activeEstimate} />}
               <EstimateLibrary onReuse={reuseSaved} />
+              <DeploymentsPanel />
             </div>
           )}
           {!matrix && !estimate.isPending && !estimate.isError && (
