@@ -341,9 +341,9 @@ For suspected identity spoofing or executor credential exposure:
 ## Validation commands
 
 ```bash
-ruff check .
-pytest
-python -m build --wheel
+uv run ruff check .
+uv run pytest
+uv run python -m build --wheel
 databricks bundle validate -t dev \
   --var runtime_executor_service_principal_name=<runtime-client-id> \
   --var action_executor_service_principal_name=<action-client-id>

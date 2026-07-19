@@ -60,4 +60,4 @@ jobs:
           # opening a PR. Bundle commands are validate-only on purpose — no
           # deploy from a comment; deploys go through the reviewed main branch.
           claude_args: |
-            --allowedTools "Bash(pip install:*),Bash(ruff:*),Bash(pytest:*),Bash(python -m build:*),Bash(databricks bundle validate:*)"
+            --allowedTools "Bash(uv sync:*),Bash(uv run ruff:*),Bash(uv run pytest:*),Bash(uv run python -m build:*),Bash(databricks bundle validate:*)"

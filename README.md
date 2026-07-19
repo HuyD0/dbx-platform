@@ -161,9 +161,7 @@ The scheduled evidence jobs are:
 ## Quick start
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync --extra dev
 
 databricks auth login \
   --host https://adb-<workspace-id>.<n>.azuredatabricks.net \
@@ -172,8 +170,8 @@ databricks auth login \
 export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-executor-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-executor-client-id>
 
-ruff check .
-pytest
+uv run ruff check .
+uv run pytest
 databricks bundle validate -t dev -p dbx-platform
 databricks bundle deploy -t dev -p dbx-platform
 databricks bundle run schema_migrations -t dev -p dbx-platform
@@ -182,7 +180,8 @@ databricks bundle run schema_migrations -t dev -p dbx-platform
 Leave `actions_enabled=false` through proposal-only validation. Before
 controlled enablement, create the approver group, apply the least-privilege
 grants, and validate one complete scheduled reporting cycle. Full setup:
-[docs/setup.md](docs/setup.md).
+[docs/setup.md](docs/setup.md). For enterprise migration pre-flight checks, see
+[docs/enterprise-migration-audit.md](docs/enterprise-migration-audit.md).
 
 ## Repository layout
 
@@ -200,9 +199,9 @@ docs/                      setup, grants, runbook, secrets, cloud CI
 ## Development
 
 ```bash
-ruff check .
-pytest
-python -m build --wheel
+uv run ruff check .
+uv run pytest
+uv run python -m build --wheel
 databricks bundle validate -t dev
 ```
 
