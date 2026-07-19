@@ -5,7 +5,7 @@
 # run; estimates themselves are pure reads stamped with the snapshot date.
 resources:
   experiments:
-    estimator_extraction_eval:
+    estimator_extraction_eval_experiment:
       name: /Shared/dbx-platform-${bundle.target}-estimator-extraction-eval
       lifecycle:
         prevent_destroy: true
@@ -72,7 +72,7 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["estimator", "eval-extraction",
-               "--experiment", "${resources.experiments.estimator_extraction_eval.id}"]
+               "--experiment", "${resources.experiments.estimator_extraction_eval_experiment.id}"]
 
     estimator_prices_pull:
       name: "[dbx-platform] estimator-prices-pull"
