@@ -70,15 +70,15 @@ def service_bucket(service_name: str) -> str:
 def build_query_body(start: str, end: str) -> dict:
     """Request body for the Query API: daily ActualCost by service + RG. Pure."""
     return {
-        "type": "ActualCost",
+        "type": "Usage",
         "timeframe": "Custom",
         "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
         "dataset": {
             "granularity": "Daily",
-            "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
+            "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
             "grouping": [
                 {"type": "Dimension", "name": "ServiceName"},
-                {"type": "Dimension", "name": "ResourceGroupName"},
+                {"type": "Dimension", "name": "ResourceGroup"},
             ],
         },
     }
@@ -88,12 +88,12 @@ def build_detail_query_body(start: str, end: str) -> dict:
     """Daily ActualCost by resource and meter for AI allocation."""
 
     return {
-        "type": "ActualCost",
+        "type": "Usage",
         "timeframe": "Custom",
         "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
         "dataset": {
             "granularity": "Daily",
-            "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
+            "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
             "grouping": [
                 {"type": "Dimension", "name": "ResourceId"},
                 {"type": "Dimension", "name": "Meter"},
@@ -149,7 +149,15 @@ def fetch_cost_query(
                 "'Cost Management Reader' role on the subscription — see "
                 "docs/cloud-setup.md (Azure Cost Management access)."
             )
-        resp.raise_for_status()
+        if not resp.ok:
+            try:
+                error = resp.json()
+            except ValueError:
+                error = {"message": resp.text[:1000]}
+            raise RuntimeError(
+                f"Azure Cost Management returned HTTP {resp.status_code}: "
+                f"{json.dumps(error, sort_keys=True)[:2000]}"
+            )
         payload = resp.json()
         pages.append(payload)
         url = (payload.get("properties") or {}).get("nextLink")
@@ -180,9 +188,11 @@ def parse_query_result(pages: list[dict]) -> list[dict]:
                 {
                     "usage_date": usage,
                     "service_name": service,
-                    "resource_group": str(col("resourcegroupname", "") or ""),
+                    "resource_group": str(
+                        col("resourcegroupname", col("resourcegroup", "")) or ""
+                    ),
                     "service_bucket": service_bucket(service),
-                    "cost": float(col("cost", 0) or 0),
+                    "cost": float(col("cost", col("pretaxcost", 0)) or 0),
                     "currency": str(col("currency", "") or ""),
                 }
             )
@@ -216,7 +226,7 @@ def parse_detail_query_result(pages: list[dict]) -> list[dict]:
                     "resource_type": resource_type,
                     "meter_name": meter,
                     "service_bucket": service_bucket(f"{resource_type} {meter}"),
-                    "cost": float(col("cost", 0) or 0),
+                    "cost": float(col("cost", col("pretaxcost", 0)) or 0),
                     "currency": str(col("currency", "") or ""),
                 }
             )

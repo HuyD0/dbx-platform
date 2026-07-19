@@ -51,7 +51,7 @@ def test_unknown_and_empty_are_other():
 # --- parse_query_result ---------------------------------------------------------
 
 def _page(rows, cols=None):
-    cols = cols or ["Cost", "UsageDate", "ServiceName", "ResourceGroupName", "Currency"]
+    cols = cols or ["PreTaxCost", "UsageDate", "ServiceName", "ResourceGroup", "Currency"]
     return {"properties": {"columns": [{"name": c} for c in cols], "rows": rows}}
 
 
@@ -108,13 +108,17 @@ def test_parse_detail_extracts_resource_and_meter():
 
 def test_query_body_shape():
     body = build_query_body("2026-07-01", "2026-07-03")
+    assert body["type"] == "Usage"
     assert body["dataset"]["granularity"] == "Daily"
+    assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
-    assert names == ["ServiceName", "ResourceGroupName"]
+    assert names == ["ServiceName", "ResourceGroup"]
 
 
 def test_detail_query_uses_resource_and_meter_dimensions():
     body = build_detail_query_body("2026-07-01", "2026-07-03")
+    assert body["type"] == "Usage"
+    assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
     assert names == ["ResourceId", "Meter"]
 
