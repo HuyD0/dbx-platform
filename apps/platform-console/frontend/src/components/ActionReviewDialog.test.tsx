@@ -26,7 +26,7 @@ const action = {
   events: [],
 };
 
-test("approval dialog traps/restores focus and requires exact confirmation", async () => {
+test("approval dialog traps/restores focus and uses a separate confirmation step", async () => {
   const user = userEvent.setup();
   vi.stubGlobal(
     "fetch",
@@ -56,17 +56,17 @@ test("approval dialog traps/restores focus and requires exact confirmation", asy
   const close = screen.getByRole("button", { name: "Close action review" });
   await waitFor(() => expect(close).toHaveFocus());
 
-  const approve = screen.getByRole("button", { name: "Approve exact plan" });
-  expect(approve).toBeDisabled();
-  await user.type(
-    screen.getByLabelText(/Type apply runtime\.hibernate 2/),
-    action.confirm_phrase,
-  );
+  const approve = screen.getByRole("button", { name: "Approve action" });
   expect(approve).toBeEnabled();
+  expect(screen.queryByLabelText(/Type apply runtime\.hibernate 2/)).not.toBeInTheDocument();
 
   close.focus();
   await user.tab({ shift: true });
   expect(screen.getByRole("button", { name: "Reject plan" })).toHaveFocus();
+
+  await user.click(approve);
+  expect(screen.getByRole("alertdialog", { name: "Confirm approval" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm approval" })).toBeEnabled();
 
   expect(await axe(dialog)).toHaveNoViolations();
   await user.keyboard("{Escape}");

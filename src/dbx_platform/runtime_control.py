@@ -659,7 +659,7 @@ class RuntimeController:
                 "wake_procedure": [
                     "Run plan-wake in the Databricks Jobs UI.",
                     "Review its exact 15-minute plan and SHA-256 hash.",
-                    "Run execute-wake with the plan ID, hash, and confirmation.",
+                    "Run execute-wake with the reviewed plan ID and hash.",
                     "Verify warehouse, app health, and exact prior schedule states.",
                 ],
             },
@@ -800,15 +800,11 @@ class RuntimeController:
         if record.status == STATUS_AWAITING_APPROVAL:
             if actor is None:
                 raise ApprovalRequiredError("An authorized human must approve this plan")
-            if confirmation != record.confirm_phrase:
-                raise ApprovalRequiredError(
-                    f"Confirmation must exactly equal: {record.confirm_phrase}"
-                )
             self.store.approve_action(
                 record.action_id,
                 record.plan_hash,
                 actor,
-                confirmation,
+                confirmation or "",
                 self.clock(),
             )
             record = self.store.get_action(action_id)
@@ -1016,11 +1012,6 @@ class RuntimeController:
             raise ApprovalRequiredError(
                 "Durable approval does not record an approver role"
             )
-        if approval.confirmation != record.confirm_phrase:
-            raise ApprovalRequiredError(
-                "Durable approval does not contain the exact typed confirmation"
-            )
-
     def _validate_record(self, record: ActionRecord, supplied_hash: str) -> None:
         if record.action_type not in ALLOWED_ACTIONS:
             raise ApprovalRequiredError(
@@ -1059,7 +1050,7 @@ class RuntimeController:
             raise ApprovalRequiredError("Action type does not match the immutable plan")
         if record.plan.get("confirm_phrase") != record.confirm_phrase:
             raise ApprovalRequiredError(
-                "Indexed confirmation phrase does not match the immutable plan"
+                "Indexed confirmation marker does not match the immutable plan"
             )
         try:
             planned_expiry = datetime.fromisoformat(
@@ -2346,7 +2337,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--plan-id", default="")
     parser.add_argument("--plan-hash", default="")
-    parser.add_argument("--confirmation", default="")
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--job", action="append", default=[])
     parser.add_argument("--warehouse-id", required=True)
@@ -2477,7 +2467,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.plan_id,
                 args.plan_hash,
                 actor=actor,
-                confirmation=args.confirmation,
             )
             output = {
                 "action_id": args.plan_id,
@@ -2506,7 +2495,7 @@ def _review_output(record: ActionRecord) -> dict[str, Any]:
         "plan": record.plan,
         "next_step": (
             "Review the full plan, then rerun the power-controller with the matching "
-            "execute operation, action ID, plan hash, and confirmation phrase."
+            "execute operation, action ID, and plan hash."
         ),
     }
 

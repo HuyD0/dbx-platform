@@ -40,7 +40,7 @@ resources:
       description: >
         Unscheduled, serverless recovery path for exact-plan Hibernate/Wake.
         Planning is read-only. Execution requires a 15-minute canonical plan,
-        matching SHA-256 hash, exact confirmation phrase, and membership in
+        matching SHA-256 hash and current membership in
         dbx-platform-approvers. This job is excluded from its managed inventory.
       max_concurrent_runs: 1
       timeout_seconds: 3600
@@ -66,8 +66,6 @@ resources:
           default: ""
         - name: plan_hash
           default: ""
-        - name: confirmation
-          default: ""
       environments:
         - environment_key: default
           spec:
@@ -86,8 +84,6 @@ resources:
               - "{{job.parameters.plan_id}}"
               - --plan-hash
               - "{{job.parameters.plan_hash}}"
-              - --confirmation
-              - "{{job.parameters.confirmation}}"
               - --run-id
               - "{{job.run_id}}"
               - --environment

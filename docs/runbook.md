@@ -30,8 +30,9 @@ Every action stores the canonical plan JSON and SHA-256 hash, exact targets,
 resource versions/preconditions, before/after state, impact, rollback,
 verification, proposer, workspace/environment, 15-minute expiry, and
 single-use idempotency key. Every approval stores the same plan hash, verified
-approver identity/role, decision, timestamp, and typed confirmation when
-required. Execution and verification produce append-only events.
+approver identity/role, decision, and timestamp. The UI requires a separate
+explicit confirmation after the approval click. Execution and verification
+produce append-only events.
 
 Any payload change, target drift, expiry before executor claim, replay, missing
 SCIM identity, lost approver-group membership, unavailable audit storage, or
@@ -42,7 +43,7 @@ failed precondition invalidates the action without a target mutation.
 1. Open **Action Center → Awaiting Approval**.
 2. Confirm workspace/environment, exact target count, before/after state,
    source freshness, blast radius, rollback, and verification.
-3. For medium/high risk, type the displayed action and target count.
+3. Select Approve, then confirm the decision in the separate confirmation step.
 4. Approve or reject. One current member of `dbx-platform-approvers` is
    sufficient and may approve their own proposal.
 5. Follow Activity through execution and verification. Do not retry by
@@ -99,12 +100,11 @@ Use **Workflows → `[dbx-platform] power-controller`**:
 1. Run `operation=plan-hibernate`.
 2. Review resources to stop, already-stopped resources, exclusions, active
    runs/queries, dependencies, estimated idle savings, retained data, wake
-   procedure, inverse state, expiry, hash, and confirmation phrase.
+   procedure, inverse state, expiry, and hash.
 3. Before expiry, rerun with:
    - `operation=execute-hibernate`
    - `plan_id=<reviewed action id>`
    - `plan_hash=<reviewed hash>`
-   - `confirmation=<exact displayed phrase>`
 
 Execution:
 
@@ -127,8 +127,7 @@ Use the same out-of-band controller in the Jobs UI:
 
 1. Run `operation=plan-wake`.
 2. Review the exact 15-minute plan/hash.
-3. Rerun with `operation=execute-wake`, plan ID, plan hash, and exact
-   confirmation.
+3. Rerun with `operation=execute-wake`, plan ID, and plan hash.
 
 The controller verifies the launcher’s current approver-group membership,
 starts the dedicated warehouse, starts and health-checks the currently

@@ -84,7 +84,9 @@ AS BEGIN ATOMIC
       SET MESSAGE_TEXT = 'The proposed action type is not allowlisted';
   END IF;
   IF (p_action_type = 'token-revoke' AND p_risk <> 'HIGH')
-     OR (p_action_type <> 'token-revoke' AND p_risk <> 'MEDIUM') THEN
+     OR (p_action_type = 'run-job' AND p_risk NOT IN ('LOW', 'MEDIUM'))
+     OR (p_action_type NOT IN ('token-revoke', 'run-job')
+         AND p_risk <> 'MEDIUM') THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'The action risk does not match the allowlisted policy';
   END IF;
@@ -103,7 +105,7 @@ AS BEGIN ATOMIC
        CAST(json_array_length(get_json_object(p_plan_json, '$.targets')) AS STRING)
      ) THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The typed confirmation phrase is not canonical';
+      SET MESSAGE_TEXT = 'The immutable confirmation marker is not canonical';
   END IF;
   IF sha2(p_plan_json, 256) <> lower(p_plan_hash)
      OR get_json_object(p_plan_json, '$.schema_version') <> '1'
@@ -224,8 +226,6 @@ SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
   DECLARE v_status STRING;
-  DECLARE v_risk STRING;
-  DECLARE v_confirm_phrase STRING;
   DECLARE v_expires_at TIMESTAMP;
   IF p_approver_id IS NULL OR p_approver_id = ''
      OR p_approver_email IS NULL OR p_approver_email = '' THEN
@@ -244,20 +244,6 @@ AS BEGIN ATOMIC
   END IF;
   SET v_status = (
     SELECT max(status) FROM {fq}.`action_requests`
-    WHERE workspace_id = p_workspace_id
-      AND environment = p_environment
-      AND action_id = p_action_id
-      AND plan_hash = p_plan_hash
-  );
-  SET v_risk = (
-    SELECT max(risk) FROM {fq}.`action_requests`
-    WHERE workspace_id = p_workspace_id
-      AND environment = p_environment
-      AND action_id = p_action_id
-      AND plan_hash = p_plan_hash
-  );
-  SET v_confirm_phrase = (
-    SELECT max(confirm_phrase) FROM {fq}.`action_requests`
     WHERE workspace_id = p_workspace_id
       AND environment = p_environment
       AND action_id = p_action_id
@@ -286,12 +272,6 @@ AS BEGIN ATOMIC
           OR CAST(p_decided_at AS TIMESTAMP) >= v_expires_at) THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'The action plan has expired';
-  END IF;
-  IF p_target_status = 'APPROVED'
-     AND v_risk IN ('MEDIUM', 'HIGH')
-     AND p_confirmation <> v_confirm_phrase THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The exact typed confirmation is required';
   END IF;
   IF EXISTS (
     SELECT 1 FROM {fq}.`action_approvals`

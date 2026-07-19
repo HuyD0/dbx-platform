@@ -72,8 +72,9 @@ def test_security_definer_procedures_are_app_only_and_atomic():
     assert "INTERVAL 15 MINUTES" in sql
     assert "json_array_length" in sql
     assert "current_timestamp() >= v_expires_at" in sql
-    assert "p_confirmation <> v_confirm_phrase" in sql
+    assert "p_confirmation <> v_confirm_phrase" not in sql
     assert "p_action_type = 'token-revoke' AND p_risk <> 'HIGH'" in sql
+    assert "p_action_type = 'run-job' AND p_risk NOT IN ('LOW', 'MEDIUM')" in sql
     assert "GRANT EXECUTE ON PROCEDURE" in sql
     assert "GRANT MODIFY" not in sql
     assert (
