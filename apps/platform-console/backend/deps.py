@@ -120,35 +120,27 @@ def get_control_plane_repository():
 
 
 def get_user_control_plane_repository(request: Request):
-    """Return a request-scoped repository authenticated as the verified user.
+    """Return the procedure-only repository after request identity verification.
 
-    Plans, approvals, rejections and their audit events are written with the
-    Databricks App forwarded user token. The app service principal therefore
-    needs SELECT only on the control-plane tables; it cannot manufacture a
-    human approval record. Production fails closed if user authorization or
-    its ``sql`` scope is missing.
+    The route must first verify the forwarded user and live group membership,
+    storing the resulting actor on the request. Writes then use the App service
+    principal to call the security-definer procedures; human SQL sessions have
+    no procedure ``EXECUTE`` and the App identity has no table ``MODIFY``.
+    Actor fields always come from the verified request identity.
     """
     if is_local_or_test():
         return get_control_plane_repository()
-    token = (
-        request.headers.get("X-Forwarded-Access-Token")
-        or request.headers.get("X-Databricks-Access-Token")
-        or ""
-    ).strip()
-    if not token:
+    actor = getattr(request.state, "actor", None)
+    if actor is None or not actor.actor_id:
         raise RuntimeError(
-            "Databricks App user authorization is required for control-plane writes."
+            "A verified Databricks App user is required for control-plane writes."
         )
-    host = str(get_ws().config.host or "").strip()
-    if not host:
-        raise RuntimeError("The Databricks workspace host is not configured.")
     settings = get_settings()
     workspace_id, environment = control_plane_scope()
     from backend.control_plane_repository import SQLControlPlaneRepository
-    from backend.identity import forwarded_user_workspace_client
 
     return SQLControlPlaneRepository(
-        forwarded_user_workspace_client(host, token),
+        get_ws(),
         warehouse_id(),
         settings.dashboard_catalog,
         settings.dashboard_schema,

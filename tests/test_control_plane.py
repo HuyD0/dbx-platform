@@ -669,35 +669,33 @@ def test_verified_viewer_cannot_propose_without_operator_membership():
         verifier.verify(request, require_proposer=True)
 
 
-def test_user_repository_uses_isolated_forwarded_user_client(monkeypatch):
+def test_user_repository_uses_app_client_after_actor_verification(monkeypatch):
     monkeypatch.setenv("DATABRICKS_APP_NAME", "platform-console")
     monkeypatch.setenv("DATABRICKS_WORKSPACE_ID", "123")
     monkeypatch.setenv("DBX_PLATFORM_ENVIRONMENT", "prod")
     workspace = MagicMock()
     workspace.config.host = "https://workspace.example"
-    user_workspace = MagicMock()
-    constructor = MagicMock(return_value=user_workspace)
     monkeypatch.setattr(deps, "get_ws", lambda: workspace)
     monkeypatch.setattr(
         deps,
         "get_settings",
         lambda: deps.Settings(warehouse_id="warehouse-1"),
     )
-    monkeypatch.setattr(
-        identity_module,
-        "forwarded_user_workspace_client",
-        constructor,
+    request = _request({"X-Forwarded-Access-Token": "opaque-user-token"})
+    request.state.actor = Actor(
+        actor_id="operator-1",
+        email="operator@example.com",
+        roles=frozenset({"proposer"}),
     )
+    repository = deps.get_user_control_plane_repository(request)
 
-    repository = deps.get_user_control_plane_repository(
-        _request({"X-Forwarded-Access-Token": "opaque-user-token"})
-    )
+    assert repository.workspace_client is workspace
 
-    assert repository.workspace_client is user_workspace
-    constructor.assert_called_once_with(
-        "https://workspace.example",
-        "opaque-user-token",
-    )
+
+def test_user_repository_rejects_unverified_request(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_APP_NAME", "platform-console")
+    with pytest.raises(RuntimeError, match="verified Databricks App user"):
+        deps.get_user_control_plane_repository(_request({}))
 
 
 def test_viewer_response_masks_proposer_approver_and_owner_identity():
