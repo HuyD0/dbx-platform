@@ -164,7 +164,7 @@ function ImpactSummary({ impact }: { impact: unknown }) {
   const raw = typeof impact === "string" ? impact : JSON.stringify(impact, null, 2);
 
   return (
-    <div className="rounded-xl border border-grid bg-page p-3">
+    <div className="mb-px rounded-xl border border-grid bg-page p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
