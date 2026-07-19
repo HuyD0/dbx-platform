@@ -34,7 +34,9 @@ artifacts:
   default:
     type: whl
     path: .
-    build: python3 -m build --wheel
+    # The deploy workflow installs build into the uv-managed environment;
+    # invoke it through uv so the bundle's artifact builder uses that same env.
+    build: uv run python -m build --wheel
 
 variables:
   platform_console_name:
