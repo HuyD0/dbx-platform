@@ -20,7 +20,11 @@ from collections.abc import Callable
 
 from dbx_platform import estimator
 
-PROMPT_NAMES = ("estimator_pattern_classify", "estimator_requirements_extract")
+PROMPT_NAMES = (
+    "estimator_pattern_classify",
+    "estimator_requirements_extract",
+    "estimator_diagram_describe",
+)
 
 
 def content_hash(text: str) -> str:

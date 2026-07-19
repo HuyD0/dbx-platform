@@ -376,11 +376,20 @@ async def extract_document(request: Request, file: UploadFile):
     from dbx_platform.estimator_extract import text_from_document
 
     filename = file.filename or "upload"
+    data = b"".join(chunks)
+    is_diagram = estimator_extraction.image_mime(filename) is not None
     try:
-        text = text_from_document(filename, b"".join(chunks))
-        requirements, warnings = estimator_extraction.extract_requirements(
-            _extraction_model(), text
-        )
+        if is_diagram:
+            # Architecture diagrams go through the vision path (describe →
+            # extract); the bound chat endpoint is already multimodal.
+            requirements, warnings = estimator_extraction.extract_from_image(
+                _extraction_model(), filename, data
+            )
+        else:
+            text = text_from_document(filename, data)
+            requirements, warnings = estimator_extraction.extract_requirements(
+                _extraction_model(), text
+            )
     except estimator_extraction.ExtractionError as error:
         return JSONResponse(
             status_code=422, content=payload("extraction_failed", str(error))
@@ -399,7 +408,7 @@ async def extract_document(request: Request, file: UploadFile):
         "requirements": requirements,
         "warnings": warnings,
         "filename": filename,
-        "characters_used": min(len(text), estimator_extraction.MAX_TEXT_CHARS),
+        "source": "diagram" if is_diagram else "document",
     }
 
 

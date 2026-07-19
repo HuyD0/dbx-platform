@@ -376,3 +376,33 @@ test("deployments panel lists only active links", async () => {
   expect(screen.queryByText(/retired/)).not.toBeInTheDocument();
   vi.unstubAllGlobals();
 });
+
+test("wizard accepts an architecture diagram image and previews it", async () => {
+  const user = userEvent.setup();
+  const onUpload = vi.fn();
+  const createUrl = vi.fn(() => "blob:preview");
+  const revokeUrl = vi.fn();
+  vi.stubGlobal("URL", { ...URL, createObjectURL: createUrl, revokeObjectURL: revokeUrl });
+
+  const { container } = render(
+    <RequirementsWizard
+      patterns={patterns}
+      onComplete={() => {}}
+      onExtract={() => {}}
+      onUpload={onUpload}
+    />,
+  );
+  const input = container.querySelector<HTMLInputElement>("#estimator-document");
+  expect(input?.getAttribute("accept")).toContain(".png");
+  // the "not supported yet" disclaimer is gone
+  expect(screen.queryByText(/not supported yet/)).not.toBeInTheDocument();
+
+  const image = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "arch.png", {
+    type: "image/png",
+  });
+  await user.upload(input!, image);
+  expect(onUpload).toHaveBeenCalledWith(image);
+  expect(createUrl).toHaveBeenCalledWith(image);
+  expect(await screen.findByAltText("Uploaded diagram preview")).toBeInTheDocument();
+  vi.unstubAllGlobals();
+});

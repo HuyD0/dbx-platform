@@ -9,6 +9,7 @@ target in tests); it must hold no logic of its own.
 from __future__ import annotations
 
 from dbx_platform.estimator_extract import (
+    MAX_IMAGE_BYTES,
     MAX_TEXT_CHARS,
     ExtractionError,
     bound_text,
@@ -16,11 +17,14 @@ from dbx_platform.estimator_extract import (
     build_pick_pattern_tool,
     catalog_summary,
     classify_pattern,
+    extract_from_image,
     extract_requirements,
+    image_mime,
     prompt_version,
 )
 
 __all__ = [
+    "MAX_IMAGE_BYTES",
     "MAX_TEXT_CHARS",
     "ExtractionError",
     "bound_text",
@@ -28,6 +32,8 @@ __all__ = [
     "build_pick_pattern_tool",
     "catalog_summary",
     "classify_pattern",
+    "extract_from_image",
     "extract_requirements",
+    "image_mime",
     "prompt_version",
 ]

@@ -125,9 +125,10 @@ def test_endpoint_tool_caller_forces_the_tool_and_parses_arguments():
 # --- prompt lineage -----------------------------------------------------------
 
 
-def test_prompt_specs_cover_both_prompts_with_stable_hashes():
+def test_prompt_specs_cover_every_prompt_with_stable_hashes():
     specs = prompt_specs("cat", "sch")
     assert [spec["prompt"] for spec in specs] == list(PROMPT_NAMES)
+    assert "estimator_diagram_describe" in PROMPT_NAMES  # vision prompt registered too
     for spec in specs:
         assert spec["registry_name"] == f"cat.sch.{spec['prompt']}"
         assert spec["content_hash"] == content_hash(spec["text"])
@@ -136,15 +137,16 @@ def test_prompt_specs_cover_both_prompts_with_stable_hashes():
 
 def test_sync_prompts_registers_only_changed_content():
     specs = prompt_specs("cat", "sch")
+    n = len(specs)
     registered: list[tuple[str, str]] = []
 
     def register(name, text, digest):
         registered.append((name, digest))
 
-    # never registered -> both register
+    # never registered -> every prompt registers
     results = sync_prompts(specs, latest_hash=lambda name: None, register=register)
-    assert [r["action"] for r in results] == ["registered", "registered"]
-    assert len(registered) == 2
+    assert [r["action"] for r in results] == ["registered"] * n
+    assert len(registered) == n
 
     # up to date -> nothing registers
     current = {spec["registry_name"]: spec["content_hash"] for spec in specs}
@@ -152,7 +154,7 @@ def test_sync_prompts_registers_only_changed_content():
     results = sync_prompts(
         specs, latest_hash=lambda name: current[name], register=register
     )
-    assert [r["action"] for r in results] == ["unchanged", "unchanged"]
+    assert [r["action"] for r in results] == ["unchanged"] * n
     assert registered == []
 
     # one stale -> exactly that one updates
@@ -160,7 +162,7 @@ def test_sync_prompts_registers_only_changed_content():
     stale[specs[0]["registry_name"]] = "outdated00000"
     registered.clear()
     results = sync_prompts(specs, latest_hash=lambda name: stale[name], register=register)
-    assert [r["action"] for r in results] == ["updated", "unchanged"]
+    assert [r["action"] for r in results] == ["updated"] + ["unchanged"] * (n - 1)
     assert registered == [(specs[0]["registry_name"], specs[0]["content_hash"])]
     assert results[0]["previous_hash"] == "outdated00000"
 
@@ -234,8 +236,8 @@ def test_text_from_document_rejects_unsupported_and_corrupt_files():
 
     from dbx_platform.estimator_extract import ExtractionError, text_from_document
 
-    with pytest.raises(ExtractionError, match="Only PDF, Markdown and plain-text"):
-        text_from_document("diagram.png", b"\x89PNG")
+    with pytest.raises(ExtractionError, match="file type is not supported"):
+        text_from_document("data.xlsx", b"PK\x03\x04")
     with pytest.raises(ExtractionError, match="could not be read"):
         text_from_document("broken.pdf", b"%PDF-1.7 not really a pdf")
 
@@ -248,3 +250,112 @@ def test_text_from_document_reads_pdf_or_flags_empty_text():
     # A text-free PDF must be a loud plain-English error, never empty text.
     with pytest.raises(ExtractionError, match="No readable text"):
         text_from_document("scan.pdf", _pdf_bytes(""))
+
+
+# --- diagram / image extraction (vision path) ---------------------------------
+
+import base64  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from dbx_platform.estimator_extract import (  # noqa: E402
+    MAX_IMAGE_BYTES,
+    build_describe_messages,
+    describe_diagram,
+    extract_from_image,
+    image_data_url,
+    image_mime,
+)
+
+
+class FakeVisionModel:
+    """Fake whose unbound .invoke returns a description; bound .invoke returns
+    queued tool-call args (the two-stage extraction)."""
+
+    def __init__(self, description: str, tool_responses: list[dict]):
+        self._description = description
+        self._responses = list(tool_responses)
+        self.saw_image = False
+
+    def invoke(self, messages):
+        # the describe call sends list content with an image_url part
+        user = messages[-1]["content"]
+        if isinstance(user, list):
+            self.saw_image = any(p.get("type") == "image_url" for p in user)
+            return SimpleNamespace(content=self._description)
+        return SimpleNamespace(tool_calls=[{"args": self._responses.pop(0)}])
+
+    def bind_tools(self, tools, *, tool_choice=None):
+        return self
+
+
+def test_image_mime_maps_supported_types_only():
+    assert image_mime("diagram.png") == "image/png"
+    assert image_mime("shot.JPG") == "image/jpeg"
+    assert image_mime("flow.webp") == "image/webp"
+    assert image_mime("notes.txt") is None
+    assert image_mime("noext") is None
+
+
+def test_image_data_url_is_base64_with_mime_prefix():
+    url = image_data_url("image/png", b"\x89PNG\r\n")
+    assert url.startswith("data:image/png;base64,")
+    assert base64.b64decode(url.split(",", 1)[1]) == b"\x89PNG\r\n"
+
+
+def test_build_describe_messages_carries_the_image_part_and_prompt():
+    messages = build_describe_messages("data:image/png;base64,AAAA")
+    assert messages[0]["role"] == "system"
+    parts = messages[-1]["content"]
+    assert any(p["type"] == "text" for p in parts)
+    image = next(p for p in parts if p["type"] == "image_url")
+    assert image["image_url"]["url"] == "data:image/png;base64,AAAA"
+
+
+def test_describe_diagram_reads_content_and_bounds_it():
+    model = FakeVisionModel("A chat bot over policy PDFs for 200 agents.", [])
+    text = describe_diagram(model, "data:image/png;base64,AAAA")
+    assert "policy PDFs" in text
+    assert model.saw_image
+
+
+def test_describe_diagram_rejects_empty_reads():
+    import pytest
+
+    from dbx_platform.estimator_extract import ExtractionError
+
+    with pytest.raises(ExtractionError, match="could not be read"):
+        describe_diagram(FakeVisionModel("", []), "data:image/png;base64,AAAA")
+
+
+def test_extract_from_image_describes_then_extracts_with_a_diagram_caveat():
+    model = FakeVisionModel(
+        "A document chat solution for about 4000 questions a month.",
+        [
+            {"pattern": "doc_chat", "confident": True},
+            {"monthly_requests": 4000, "warnings": []},
+        ],
+    )
+    requirements, warnings = extract_from_image(model, "arch.png", b"\x89PNG fake bytes")
+    assert requirements["pattern"] == "doc_chat"
+    assert requirements["monthly_requests"] == 4000
+    assert "uploaded diagram" in warnings[0]
+    assert "What was read" in warnings[0]
+
+
+def test_extract_from_image_rejects_unsupported_type_and_oversize():
+    import pytest
+
+    from dbx_platform.estimator_extract import ExtractionError
+
+    model = FakeVisionModel("x", [])
+    with pytest.raises(ExtractionError, match="PNG, JPG"):
+        extract_from_image(model, "notes.txt", b"data")
+    with pytest.raises(ExtractionError, match="up to 5 MB"):
+        extract_from_image(model, "big.png", b"x" * (MAX_IMAGE_BYTES + 1))
+
+
+def test_diagram_prompt_ships_in_the_wheel():
+    from dbx_platform import estimator
+
+    text = estimator.load_prompt("estimator_diagram_describe")
+    assert "diagram" in text.lower()

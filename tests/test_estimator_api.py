@@ -468,7 +468,31 @@ def test_extract_document_parses_and_extracts(client, monkeypatch):
     body = response.json()
     assert body["requirements"]["pattern"] == "doc_chat"
     assert body["filename"] == "brief.md"
-    assert body["characters_used"] > 0
+    assert body["source"] == "document"
+
+
+def test_extract_document_routes_images_through_the_vision_path(client, monkeypatch):
+    from backend import estimator_extraction
+    from backend.routers import estimator as estimator_router
+
+    monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
+    captured = {}
+
+    def _from_image(model, filename, data):
+        captured["filename"] = filename
+        captured["bytes"] = len(data)
+        return {"pattern": "doc_chat", "monthly_requests": 4000}, ["Read from a diagram."]
+
+    monkeypatch.setattr(estimator_extraction, "extract_from_image", _from_image)
+    response = client.post(
+        "/api/estimator/extract-document",
+        files={"file": ("architecture.png", b"\x89PNG fake bytes", "image/png")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "diagram"
+    assert body["requirements"]["pattern"] == "doc_chat"
+    assert captured["filename"] == "architecture.png"
 
 
 def test_extract_document_rejects_unsupported_types_plainly(client, monkeypatch):
@@ -477,10 +501,10 @@ def test_extract_document_rejects_unsupported_types_plainly(client, monkeypatch)
     monkeypatch.setattr(estimator_router, "_extraction_model", lambda: object())
     response = client.post(
         "/api/estimator/extract-document",
-        files={"file": ("diagram.png", b"\x89PNG....", "image/png")},
+        files={"file": ("data.xlsx", b"PK\x03\x04", "application/octet-stream")},
     )
     assert response.status_code == 422
-    assert "Only PDF, Markdown and plain-text" in response.json()["message"]
+    assert "file type is not supported" in response.json()["message"]
 
 
 def test_extract_document_enforces_the_streamed_size_cap(client):

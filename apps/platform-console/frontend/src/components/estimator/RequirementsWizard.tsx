@@ -1,5 +1,5 @@
 import { FileUp, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EstimatorPattern } from "../../lib/types";
 import { Badge, Card, SectionTitle } from "../ui";
 
@@ -97,6 +97,14 @@ export function RequirementsWizard({
   const [draft, setDraft] = useState<WizardDraft>(EMPTY);
   const [freeText, setFreeText] = useState("");
   const [showDetails, setShowDetails] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // Release the object URL when the preview changes or the wizard unmounts.
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
 
   const selected = patterns.find((p) => p.pattern === draft.pattern);
   const needsKnowledge = Boolean(selected?.defaults.needs_knowledge_base);
@@ -191,23 +199,38 @@ export function RequirementsWizard({
                     className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-ink-2 hover:text-ink"
                   >
                     <FileUp className="h-3.5 w-3.5" />
-                    Or upload a project document (PDF, Markdown or text, up to 10 MB)
+                    Or upload a document or architecture diagram (PDF, Markdown, text,
+                    or a PNG/JPG image, up to 10 MB)
                   </label>
                   <input
                     id="estimator-document"
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt"
+                    accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp,.gif"
                     className="sr-only"
                     disabled={extracting}
                     onChange={(event) => {
                       const file = event.target.files?.[0];
-                      if (file) onUpload(file);
+                      if (file) {
+                        setPreview(
+                          file.type.startsWith("image/")
+                            ? URL.createObjectURL(file)
+                            : null,
+                        );
+                        onUpload(file);
+                      }
                       event.target.value = "";
                     }}
                   />
+                  {preview && (
+                    <img
+                      src={preview}
+                      alt="Uploaded diagram preview"
+                      className="mt-2 max-h-40 rounded-lg border border-hairline"
+                    />
+                  )}
                   <p className="mt-1 text-xs text-muted">
-                    Diagrams and images are not supported yet — describe those in
-                    the text box instead.
+                    A diagram is read by an AI model into plain-English requirements
+                    you review before any cost is computed.
                   </p>
                 </div>
               )}

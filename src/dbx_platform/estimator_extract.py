@@ -426,6 +426,114 @@ def text_from_document(filename: str, data: bytes) -> str:
             )
         return text
     raise ExtractionError(
-        "Only PDF, Markdown and plain-text files are supported. For "
-        "diagrams or images, describe the solution in the text box instead."
+        "That file type is not supported. Upload a PDF, Markdown or text "
+        "document, an architecture diagram image, or use the text box."
     )
+
+
+# --- diagram / image extraction (vision path) ---------------------------------
+
+# Claude's per-image base64 limit; fail early with a plain message rather than
+# let the serving endpoint reject an oversized image.
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+SUPPORTED_IMAGE_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
+def image_mime(filename: str) -> str | None:
+    """Mime type for a supported image upload, else None. Pure."""
+
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return SUPPORTED_IMAGE_TYPES.get(suffix)
+
+
+def image_data_url(mime_type: str, data: bytes) -> str:
+    """OpenAI-style base64 data URL for an image. Pure."""
+
+    import base64
+
+    return f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def build_describe_messages(data_url: str) -> list[dict]:
+    """Vision prompt asking the model to describe the diagram in plain English.
+
+    The user content is a list of parts (text + image_url); the chat adapter
+    passes list content through untouched, and the bound endpoint
+    (Claude Sonnet) is vision-capable.
+    """
+    return [
+        {"role": "system", "content": estimator.load_prompt("estimator_diagram_describe")},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Describe the AI solution shown in this diagram.",
+                },
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        },
+    ]
+
+
+def _message_text(result) -> str:
+    """Read plain text from a chat result whose content may be parts."""
+
+    content = getattr(result, "content", "")
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "") for part in content if isinstance(part, dict)
+        ).strip()
+    return str(content or "").strip()
+
+
+def describe_diagram(model, data_url: str) -> str:
+    """One vision call: diagram → bounded plain-English description."""
+
+    result = model.invoke(build_describe_messages(data_url))
+    text = _message_text(result)
+    if not text:
+        raise ExtractionError(
+            "The diagram could not be read. Add a clearer image or describe "
+            "the solution in the text box instead."
+        )
+    return bound_text(text)
+
+
+def extract_from_image(model, filename: str, data: bytes) -> tuple[dict, list[str]]:
+    """Diagram image → validated requirements, via describe-then-extract.
+
+    The image is turned into plain-English text by a vision call, then run
+    through the same two-stage extraction as any other text — so the result
+    still lands on the human review screen, never straight into the engine.
+    """
+    mime = image_mime(filename)
+    if mime is None:
+        raise ExtractionError(
+            "Only PNG, JPG, WEBP and GIF diagrams are supported."
+        )
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ExtractionError(
+            "Diagram images up to 5 MB are supported - export a smaller image."
+        )
+    description = describe_diagram(model, image_data_url(mime, data))
+    requirements, warnings = extract_requirements(model, description)
+    snippet = description[:200] + ("…" if len(description) > 200 else "")
+    warnings.insert(
+        0,
+        "Read from an uploaded diagram, so double-check the interpreted "
+        f"requirements before trusting the numbers. What was read: “{snippet}”",
+    )
+    _tag_trace(
+        {
+            "prompt_describe_version": prompt_version("estimator_diagram_describe"),
+            "source": "diagram",
+        }
+    )
+    return requirements, warnings
