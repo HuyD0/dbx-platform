@@ -704,8 +704,18 @@ def test_health_reports_workspace_scope(client):
 def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
     captured: dict = {}
 
-    def fake_report(w, warehouse, catalog, schema, by, days):
-        captured["by"] = by
+    def fake_report(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(by=by, workspace_id=workspace_id, environment=environment)
         return [{"service_bucket": "foundry_ai", "cost": 42.0}]
 
     from backend.routers import cost as cost_router
@@ -713,7 +723,44 @@ def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
     monkeypatch.setattr(cost_router.azure_cost, "report", fake_report)
     body = client.get("/api/cost/azure?by=bucket").json()
     assert captured["by"] == "bucket"
+    assert captured["workspace_id"]
+    assert captured["environment"]
     assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_cost_reconciliation_is_workspace_scoped(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_reconciliation(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            days=days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return [{"comparison_status": "CURRENCY_MISMATCH", "variance": None}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(
+        cost_router.azure_cost,
+        "reconciliation",
+        fake_reconciliation,
+    )
+    body = client.get("/api/cost/reconciliation?days=30").json()
+
+    assert captured["days"] == 30
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["variance"] is None
 
 
 def test_azure_cost_rejects_unknown_dimension(client):
@@ -806,15 +853,34 @@ def test_cost_attribution_rejects_unknown_dimension(client):
 def test_azure_detail_passes_validated_bucket(client, monkeypatch):
     captured: dict = {}
 
-    def fake_detail(w, warehouse, catalog, schema, by, days, bucket=None):
-        captured.update(by=by, bucket=bucket)
+    def fake_detail(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        bucket=None,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            by=by,
+            bucket=bucket,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
         return [{"meter_name": "gpt-4o input", "service_bucket": "foundry_ai", "cost": 12.5}]
 
     from backend.routers import cost as cost_router
 
     monkeypatch.setattr(cost_router.azure_cost, "report_detail", fake_detail)
     body = client.get("/api/cost/azure-detail?by=meter&bucket=foundry_ai").json()
-    assert captured == {"by": "meter", "bucket": "foundry_ai"}
+    assert captured["by"] == "meter"
+    assert captured["bucket"] == "foundry_ai"
+    assert captured["workspace_id"]
+    assert captured["environment"]
     assert body["data"][0]["service_bucket"] == "foundry_ai"
 
 

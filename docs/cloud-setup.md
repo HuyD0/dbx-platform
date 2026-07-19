@@ -260,9 +260,16 @@ Then wire the bundle variables and deploy:
 
 ```bash
 export BUNDLE_VAR_azure_subscription_id=ea936670-dda1-4884-8467-49c225bf3e83
+export BUNDLE_VAR_azure_cost_resource_groups=<workspace-rg>,<managed-databricks-rg>,<allocated-ai-rg>
 export BUNDLE_VAR_azure_service_credential=dbx_dev
 databricks bundle deploy -t prod
 ```
+
+`azure_cost_resource_groups` is required at runtime. Include only resource
+groups whose charges are allocated to this workspace, including the Databricks
+managed resource group and Azure AI groups used by its workloads. The pull
+fails closed when the allowlist is empty; it never stamps a subscription-wide
+bill with the current workspace ID.
 
 The job identity also needs `ACCESS` on the UC service credential, plus the
 `dbx_dev.dbx_platform` schema grants above (the ingest MERGEs into
@@ -284,6 +291,7 @@ First-run order (stateful/costly manual runs go through Action Center):
 |---|---|
 | `azure-cost pull` → 403 with the Cost Management Reader hint | The role assignment above is missing, on the wrong identity, or still propagating (can take a few minutes). |
 | `azure-cost pull` → `DefaultAzureCredential` errors inside a job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |
+| `azure-cost pull` rejects an empty resource-group scope | Set `--resource-groups` or `BUNDLE_VAR_azure_cost_resource_groups`; subscription-wide cost cannot be attributed to one workspace. |
 | Forecast training → `need >= N days of features` | Not enough approved/scheduled billing history exists; complete the backfill action first. |
 
 ---

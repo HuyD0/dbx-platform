@@ -19,15 +19,19 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from datetime import date, timedelta
 
 from databricks.sdk import WorkspaceClient
 
-from dbx_platform.system_tables import run_query
+from dbx_platform.system_tables import load_query, run_query
 
 _ARM_SCOPE = "https://management.azure.com/.default"
 _API_VERSION = "2023-11-01"
 _MAX_RETRIES = 5
+_MAX_QUERY_DAYS = 31
+_MAX_SQL_PARAMETER_BYTES = 900_000
+_CLIENT_TYPE = "GitHubCopilotForAzure"
 
 # Columns of the azure_costs table; parse_query_result emits dicts with
 # exactly these keys (plus ingestion adds the timestamp server-side).
@@ -43,6 +47,7 @@ def inclusive_date_window(end: date, days: int) -> tuple[date, date]:
     if days < 1:
         raise ValueError("Azure cost collection days must be at least 1.")
     return end - timedelta(days=days - 1), end
+
 
 DETAIL_ROW_SCHEMA = (
     "array<struct<usage_date:date,resource_id:string,resource_group:string,"
@@ -75,8 +80,82 @@ def service_bucket(service_name: str) -> str:
 
 # --- Cost Management Query API ------------------------------------------------
 
-def build_query_body(start: str, end: str) -> dict:
-    """Request body for the Query API: daily ActualCost by service + RG. Pure."""
+def parse_resource_groups(value: str | Sequence[str]) -> tuple[str, ...]:
+    """Normalize the resource-group allowlist used for workspace attribution."""
+
+    raw = value.split(",") if isinstance(value, str) else value
+    groups = tuple(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
+    if not groups:
+        raise ValueError(
+            "Azure cost ingestion requires at least one resource group. Pass "
+            "--resource-groups or set BUNDLE_VAR_azure_cost_resource_groups."
+        )
+    return groups
+
+
+def resource_group_scope_filter(value: str | Sequence[str]) -> str:
+    """Return a stable persisted identity for an allowlist."""
+
+    return ",".join(sorted(group.casefold() for group in parse_resource_groups(value)))
+
+
+def split_date_windows(
+    start: str,
+    end: str,
+    *,
+    max_days: int = _MAX_QUERY_DAYS,
+) -> list[tuple[str, str]]:
+    """Split an inclusive range into Cost Management Query-safe windows."""
+
+    first = date.fromisoformat(str(start)[:10])
+    last = date.fromisoformat(str(end)[:10])
+    if first > last:
+        raise ValueError("start must be on or before end")
+    if max_days < 1:
+        raise ValueError("max_days must be positive")
+    windows: list[tuple[str, str]] = []
+    current = first
+    while current <= last:
+        window_end = min(current + timedelta(days=max_days - 1), last)
+        windows.append((current.isoformat(), window_end.isoformat()))
+        current = window_end + timedelta(days=1)
+    return windows
+
+
+def _validate_query_window(start: str, end: str) -> None:
+    if len(split_date_windows(start, end)) != 1:
+        raise ValueError(
+            f"Azure daily cost queries may cover at most {_MAX_QUERY_DAYS} days; "
+            "split the requested range first."
+        )
+
+
+def _resource_group_filter(resource_groups: str | Sequence[str]) -> dict:
+    return {
+        "dimensions": {
+            "name": "ResourceGroup",
+            "operator": "In",
+            "values": list(parse_resource_groups(resource_groups)),
+        }
+    }
+
+
+def _inclusive_lookback(days: int) -> int:
+    value = int(days)
+    if value < 1:
+        raise ValueError("days must be positive")
+    return value - 1
+
+
+def build_query_body(
+    start: str,
+    end: str,
+    *,
+    resource_groups: str | Sequence[str],
+) -> dict:
+    """Daily billed usage by service/RG within an explicit workspace scope."""
+
+    _validate_query_window(start, end)
     return {
         "type": "Usage",
         "timeframe": "Custom",
@@ -88,13 +167,20 @@ def build_query_body(start: str, end: str) -> dict:
                 {"type": "Dimension", "name": "ServiceName"},
                 {"type": "Dimension", "name": "ResourceGroup"},
             ],
+            "filter": _resource_group_filter(resource_groups),
         },
     }
 
 
-def build_detail_query_body(start: str, end: str) -> dict:
-    """Daily ActualCost by resource and meter for AI allocation."""
+def build_detail_query_body(
+    start: str,
+    end: str,
+    *,
+    resource_groups: str | Sequence[str],
+) -> dict:
+    """Daily billed usage by resource/meter within a workspace scope."""
 
+    _validate_query_window(start, end)
     return {
         "type": "Usage",
         "timeframe": "Custom",
@@ -106,6 +192,7 @@ def build_detail_query_body(start: str, end: str) -> dict:
                 {"type": "Dimension", "name": "ResourceId"},
                 {"type": "Dimension", "name": "Meter"},
             ],
+            "filter": _resource_group_filter(resource_groups),
         },
     }
 
@@ -137,19 +224,35 @@ def fetch_cost_query(
         f"https://management.azure.com/subscriptions/{subscription_id}"
         f"/providers/Microsoft.CostManagement/query?api-version={_API_VERSION}"
     )
-    body = body or build_query_body(start, end)
+    if body is None:
+        raise ValueError("A resource-scoped Azure Cost Management query body is required.")
     pages: list[dict] = []
     retries = 0
     while url:
         resp = requests.post(
             url,
             json=body,
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "ClientType": _CLIENT_TYPE,
+            },
             timeout=60,
         )
         if resp.status_code == 429 and retries < _MAX_RETRIES:
             retries += 1
-            time.sleep(int(resp.headers.get("Retry-After", "15")))
+            retry_headers = (
+                "Retry-After",
+                "x-ms-ratelimit-microsoft.costmanagement-qpu-retry-after",
+                "x-ms-ratelimit-microsoft.costmanagement-entity-retry-after",
+                "x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after",
+            )
+            waits = []
+            for header in retry_headers:
+                try:
+                    waits.append(int(resp.headers.get(header, "0")))
+                except (TypeError, ValueError):
+                    continue
+            time.sleep(max(waits, default=15))
             continue
         if resp.status_code == 403:
             raise RuntimeError(
@@ -247,11 +350,12 @@ def create_table_sql(catalog: str, schema: str) -> str:
     """DDL for the azure_costs table. Pure."""
     return (
         f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.azure_costs ("
-        "workspace_id STRING, environment STRING, usage_date DATE, "
+        "workspace_id STRING, environment STRING, subscription_id STRING, "
+        "scope_filter STRING, usage_date DATE, "
         "service_name STRING, resource_group STRING, "
         "service_bucket STRING, cost DOUBLE, currency STRING, "
         "ingested_at TIMESTAMP) "
-        "COMMENT 'Azure bill (Cost Management Query API), daily by service/RG'"
+        "COMMENT 'Resource-scoped Azure bill, daily by service/RG'"
     )
 
 
@@ -260,11 +364,12 @@ def create_detail_table_sql(catalog: str, schema: str) -> str:
 
     return (
         f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.azure_cost_details ("
-        "workspace_id STRING, environment STRING, usage_date DATE, "
+        "workspace_id STRING, environment STRING, subscription_id STRING, "
+        "scope_filter STRING, usage_date DATE, "
         "resource_id STRING, resource_group STRING, "
         "resource_type STRING, meter_name STRING, service_bucket STRING, "
         "cost DOUBLE, currency STRING, ingested_at TIMESTAMP) "
-        "COMMENT 'Azure actual cost, daily by resource and meter'"
+        "COMMENT 'Resource-scoped Azure billed cost, daily by resource and meter'"
     )
 
 
@@ -279,23 +384,28 @@ def merge_costs_sql(catalog: str, schema: str) -> str:
     return (
         f"MERGE INTO {fq} t USING ("
         "SELECT :workspace_id AS workspace_id, :environment AS environment, "
+        ":subscription_id AS subscription_id, :scope_filter AS scope_filter, "
         "item.usage_date, item.service_name, item.resource_group, "
         "item.service_bucket, item.cost, item.currency "
         f"FROM (SELECT explode(from_json(:rows, '{COST_ROW_SCHEMA}')) AS item)"
         ") s "
         "ON t.workspace_id = s.workspace_id AND t.environment = s.environment "
+        "AND t.subscription_id = s.subscription_id "
         "AND t.usage_date = s.usage_date AND t.service_name = s.service_name "
         "AND t.resource_group = s.resource_group "
         "AND t.currency = s.currency "
         "WHEN MATCHED THEN UPDATE SET t.cost = s.cost, "
-        "t.service_bucket = s.service_bucket, t.ingested_at = current_timestamp() "
+        "t.service_bucket = s.service_bucket, t.scope_filter = s.scope_filter, "
+        "t.ingested_at = current_timestamp() "
         "WHEN NOT MATCHED THEN INSERT "
-        "(workspace_id, environment, usage_date, service_name, resource_group, "
-        "service_bucket, cost, currency, ingested_at) "
-        "VALUES (s.workspace_id, s.environment, s.usage_date, s.service_name, "
-        "s.resource_group, s.service_bucket, s.cost, s.currency, current_timestamp()) "
+        "(workspace_id, environment, subscription_id, scope_filter, usage_date, "
+        "service_name, resource_group, service_bucket, cost, currency, ingested_at) "
+        "VALUES (s.workspace_id, s.environment, s.subscription_id, s.scope_filter, "
+        "s.usage_date, s.service_name, s.resource_group, s.service_bucket, s.cost, "
+        "s.currency, current_timestamp()) "
         "WHEN NOT MATCHED BY SOURCE AND t.workspace_id = :workspace_id "
         "AND t.environment = :environment "
+        "AND t.subscription_id = :subscription_id "
         "AND t.usage_date BETWEEN CAST(:window_start AS DATE) "
         "AND CAST(:window_end AS DATE) THEN DELETE"
     )
@@ -308,25 +418,30 @@ def merge_detail_costs_sql(catalog: str, schema: str) -> str:
     return (
         f"MERGE INTO {fq} t USING ("
         "SELECT :workspace_id AS workspace_id, :environment AS environment, "
+        ":subscription_id AS subscription_id, :scope_filter AS scope_filter, "
         "item.usage_date, item.resource_id, item.resource_group, "
         "item.resource_type, item.meter_name, item.service_bucket, item.cost, "
         "item.currency "
         f"FROM (SELECT explode(from_json(:rows, '{DETAIL_ROW_SCHEMA}')) AS item)"
         ") s "
         "ON t.workspace_id = s.workspace_id AND t.environment = s.environment "
+        "AND t.subscription_id = s.subscription_id "
         "AND t.usage_date = s.usage_date AND t.resource_id = s.resource_id "
         "AND t.meter_name = s.meter_name AND t.currency = s.currency "
         "WHEN MATCHED THEN UPDATE SET t.resource_group = s.resource_group, "
         "t.resource_type = s.resource_type, t.service_bucket = s.service_bucket, "
-        "t.cost = s.cost, t.ingested_at = current_timestamp() "
+        "t.cost = s.cost, t.scope_filter = s.scope_filter, "
+        "t.ingested_at = current_timestamp() "
         "WHEN NOT MATCHED THEN INSERT "
-        "(workspace_id, environment, usage_date, resource_id, resource_group, "
-        "resource_type, meter_name, service_bucket, cost, currency, ingested_at) "
-        "VALUES (s.workspace_id, s.environment, s.usage_date, s.resource_id, "
-        "s.resource_group, s.resource_type, s.meter_name, s.service_bucket, "
-        "s.cost, s.currency, current_timestamp()) "
+        "(workspace_id, environment, subscription_id, scope_filter, usage_date, "
+        "resource_id, resource_group, resource_type, meter_name, service_bucket, "
+        "cost, currency, ingested_at) "
+        "VALUES (s.workspace_id, s.environment, s.subscription_id, s.scope_filter, "
+        "s.usage_date, s.resource_id, s.resource_group, s.resource_type, s.meter_name, "
+        "s.service_bucket, s.cost, s.currency, current_timestamp()) "
         "WHEN NOT MATCHED BY SOURCE AND t.workspace_id = :workspace_id "
         "AND t.environment = :environment "
+        "AND t.subscription_id = :subscription_id "
         "AND t.usage_date BETWEEN CAST(:window_start AS DATE) "
         "AND CAST(:window_end AS DATE) THEN DELETE"
     )
@@ -341,16 +456,28 @@ def store_costs(
     *,
     workspace_id: str,
     environment: str,
+    subscription_id: str,
+    scope_filter: str,
     window_start: str,
     window_end: str,
 ) -> int:
-    """Atomically replace the exact coarse-cost window for this deployment."""
+    """Replace the exact coarse-cost window in parameter-safe atomic units."""
 
-    params = _reconciliation_params(
-        rows, workspace_id, environment, window_start, window_end
-    )
     try:
-        run_query(w, merge_costs_sql(catalog, schema), warehouse_id, params)
+        _store_reconciled_rows(
+            w,
+            warehouse_id,
+            merge_costs_sql(catalog, schema),
+            rows,
+            workspace_id=workspace_id,
+            environment=environment,
+            subscription_id=subscription_id,
+            scope_filter=scope_filter,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    except ValueError:
+        raise
     except Exception as exc:
         raise RuntimeError(
             f"Unable to reconcile required table {catalog}.{schema}.azure_costs; "
@@ -368,16 +495,28 @@ def store_detail_costs(
     *,
     workspace_id: str,
     environment: str,
+    subscription_id: str,
+    scope_filter: str,
     window_start: str,
     window_end: str,
 ) -> int:
-    """Atomically replace the exact resource/meter window for this deployment."""
+    """Replace resource/meter cost in parameter-safe atomic units."""
 
-    params = _reconciliation_params(
-        rows, workspace_id, environment, window_start, window_end
-    )
     try:
-        run_query(w, merge_detail_costs_sql(catalog, schema), warehouse_id, params)
+        _store_reconciled_rows(
+            w,
+            warehouse_id,
+            merge_detail_costs_sql(catalog, schema),
+            rows,
+            workspace_id=workspace_id,
+            environment=environment,
+            subscription_id=subscription_id,
+            scope_filter=scope_filter,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    except ValueError:
+        raise
     except Exception as exc:
         raise RuntimeError(
             f"Unable to reconcile required table "
@@ -387,17 +526,76 @@ def store_detail_costs(
     return len(rows)
 
 
+def _store_reconciled_rows(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    sql: str,
+    rows: list[dict],
+    *,
+    workspace_id: str,
+    environment: str,
+    subscription_id: str,
+    scope_filter: str,
+    window_start: str,
+    window_end: str,
+) -> None:
+    """Use one MERGE when possible; split oversized payloads by exact day."""
+
+    params = _reconciliation_params(
+        rows,
+        workspace_id,
+        environment,
+        subscription_id,
+        scope_filter,
+        window_start,
+        window_end,
+    )
+    if len(params["rows"].encode("utf-8")) <= _MAX_SQL_PARAMETER_BYTES:
+        run_query(w, sql, warehouse_id, params)
+        return
+
+    first = date.fromisoformat(params["window_start"])
+    last = date.fromisoformat(params["window_end"])
+    current = first
+    while current <= last:
+        day = current.isoformat()
+        day_rows = [row for row in rows if str(row.get("usage_date"))[:10] == day]
+        day_params = _reconciliation_params(
+            day_rows,
+            workspace_id,
+            environment,
+            subscription_id,
+            scope_filter,
+            day,
+            day,
+        )
+        size = len(day_params["rows"].encode("utf-8"))
+        if size > _MAX_SQL_PARAMETER_BYTES:
+            raise ValueError(
+                f"Azure cost payload for {day} is {size} bytes; it exceeds the "
+                "safe Databricks statement parameter limit after daily splitting."
+            )
+        run_query(w, sql, warehouse_id, day_params)
+        current += timedelta(days=1)
+
+
 def _reconciliation_params(
     rows: list[dict],
     workspace_id: str,
     environment: str,
+    subscription_id: str,
+    scope_filter: str,
     window_start: str,
     window_end: str,
 ) -> dict[str, str]:
     """Validate an exact inclusive window and serialize its replacement rows."""
 
-    if not workspace_id.strip() or not environment.strip():
-        raise ValueError("workspace_id and environment are required for cost reconciliation")
+    required = (workspace_id, environment, subscription_id, scope_filter)
+    if any(not str(value).strip() for value in required):
+        raise ValueError(
+            "workspace_id, environment, subscription_id and scope_filter are "
+            "required for cost reconciliation"
+        )
     try:
         start = date.fromisoformat(str(window_start)[:10])
         end = date.fromisoformat(str(window_end)[:10])
@@ -416,6 +614,8 @@ def _reconciliation_params(
         "rows": json.dumps(rows, default=str),
         "workspace_id": workspace_id,
         "environment": environment,
+        "subscription_id": subscription_id,
+        "scope_filter": scope_filter,
         "window_start": start.isoformat(),
         "window_end": end.isoformat(),
     }
@@ -441,18 +641,44 @@ def report_sql(catalog: str, schema: str, by: str) -> str:
         raise ValueError(f"--by must be one of {sorted(_REPORT_DIMENSIONS)}")
     fq = f"{catalog}.{schema}.azure_costs"
     return (
-        f"SELECT {dim}, ROUND(SUM(cost), 2) AS cost, MAX(currency) AS currency, "
-        "MIN(usage_date) AS first_day, MAX(usage_date) AS last_day "
-        f"FROM {fq} WHERE usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
-        f"GROUP BY {dim} ORDER BY cost DESC"
+        "WITH current_scope AS ("
+        "SELECT subscription_id, scope_filter "
+        f"FROM {fq} WHERE workspace_id = :workspace_id "
+        "AND environment = :environment AND COALESCE(scope_filter, '') <> '' "
+        "ORDER BY ingested_at DESC LIMIT 1"
+        ") "
+        f"SELECT c.{dim}, ROUND(SUM(c.cost), 2) AS cost, "
+        "MAX(c.currency) AS currency, MIN(c.usage_date) AS first_day, "
+        "MAX(c.usage_date) AS last_day "
+        f"FROM {fq} c INNER JOIN current_scope s "
+        "ON c.subscription_id = s.subscription_id AND c.scope_filter = s.scope_filter "
+        "WHERE c.usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "AND c.workspace_id = :workspace_id AND c.environment = :environment "
+        f"GROUP BY c.{dim} ORDER BY cost DESC"
     )
 
 
 def report(
-    w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str,
-    by: str, days: int,
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    by: str,
+    days: int,
+    *,
+    workspace_id: str,
+    environment: str,
 ) -> list[dict]:
-    return run_query(w, report_sql(catalog, schema, by), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        report_sql(catalog, schema, by),
+        warehouse_id,
+        {
+            "days": _inclusive_lookback(days),
+            "workspace_id": workspace_id,
+            "environment": environment,
+        },
+    )
 
 
 _DETAIL_DIMENSIONS = {
@@ -478,27 +704,49 @@ def report_detail_sql(catalog: str, schema: str, by: str, bucket: str | None = N
     if bucket is not None and bucket not in _BUCKETS:
         raise ValueError(f"--bucket must be one of {sorted(_BUCKETS)}")
     extra = {
-        "resource": ", resource_group, resource_type",
+        "resource": ", c.resource_group, c.resource_type",
         "meter": "",
         "resource-group": "",
     }[by]
     fq = f"{catalog}.{schema}.azure_cost_details"
-    bucket_clause = "AND service_bucket = :bucket " if bucket else ""
+    coarse_fq = f"{catalog}.{schema}.azure_costs"
+    bucket_clause = "AND c.service_bucket = :bucket " if bucket else ""
     return (
-        f"SELECT {dim}{extra}, service_bucket, ROUND(SUM(cost), 2) AS cost, "
-        "MAX(currency) AS currency, "
-        "MIN(usage_date) AS first_day, MAX(usage_date) AS last_day "
-        f"FROM {fq} WHERE usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "WITH current_scope AS ("
+        "SELECT subscription_id, scope_filter "
+        f"FROM {coarse_fq} WHERE workspace_id = :workspace_id "
+        "AND environment = :environment AND COALESCE(scope_filter, '') <> '' "
+        "ORDER BY ingested_at DESC LIMIT 1"
+        ") "
+        f"SELECT c.{dim}{extra}, c.service_bucket, "
+        "ROUND(SUM(c.cost), 2) AS cost, MAX(c.currency) AS currency, "
+        "MIN(c.usage_date) AS first_day, MAX(c.usage_date) AS last_day "
+        f"FROM {fq} c INNER JOIN current_scope s "
+        "ON c.subscription_id = s.subscription_id AND c.scope_filter = s.scope_filter "
+        "WHERE c.usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "AND c.workspace_id = :workspace_id AND c.environment = :environment "
         f"{bucket_clause}"
-        f"GROUP BY {dim}{extra}, service_bucket ORDER BY cost DESC"
+        f"GROUP BY c.{dim}{extra}, c.service_bucket ORDER BY cost DESC"
     )
 
 
 def report_detail(
-    w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str,
-    by: str, days: int, bucket: str | None = None,
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    by: str,
+    days: int,
+    bucket: str | None = None,
+    *,
+    workspace_id: str,
+    environment: str,
 ) -> list[dict]:
-    params: dict[str, int | str] = {"days": days}
+    params: dict[str, int | str] = {
+        "days": _inclusive_lookback(days),
+        "workspace_id": workspace_id,
+        "environment": environment,
+    }
     if bucket:
         params["bucket"] = bucket
     return run_query(
@@ -510,16 +758,83 @@ def daily_bucket_sql(catalog: str, schema: str) -> str:
     """Daily spend per service bucket over the :days window. Pure."""
     fq = f"{catalog}.{schema}.azure_costs"
     return (
-        "SELECT usage_date, service_bucket, ROUND(SUM(cost), 2) AS cost "
-        f"FROM {fq} WHERE usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
-        "GROUP BY usage_date, service_bucket ORDER BY usage_date, service_bucket"
+        "WITH current_scope AS ("
+        "SELECT subscription_id, scope_filter "
+        f"FROM {fq} WHERE workspace_id = :workspace_id "
+        "AND environment = :environment AND COALESCE(scope_filter, '') <> '' "
+        "ORDER BY ingested_at DESC LIMIT 1"
+        ") "
+        "SELECT c.usage_date, c.service_bucket, ROUND(SUM(c.cost), 2) AS cost "
+        f"FROM {fq} c INNER JOIN current_scope s "
+        "ON c.subscription_id = s.subscription_id AND c.scope_filter = s.scope_filter "
+        "WHERE c.usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "AND c.workspace_id = :workspace_id AND c.environment = :environment "
+        "GROUP BY c.usage_date, c.service_bucket "
+        "ORDER BY c.usage_date, c.service_bucket"
     )
 
 
 def fetch_daily_buckets(
-    w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str, days: int
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    days: int,
+    *,
+    workspace_id: str,
+    environment: str,
 ) -> list[dict]:
-    return run_query(w, daily_bucket_sql(catalog, schema), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        daily_bucket_sql(catalog, schema),
+        warehouse_id,
+        {
+            "days": _inclusive_lookback(days),
+            "workspace_id": workspace_id,
+            "environment": environment,
+        },
+    )
+
+
+def reconciliation_sql(catalog: str, schema: str) -> str:
+    """Daily SKU-family comparison without invoice-line claims."""
+
+    return (
+        load_query("azure_databricks_reconciliation")
+        .replace(
+            "__AZURE_COST_DETAIL_TABLE__",
+            f"{catalog}.{schema}.azure_cost_details",
+        )
+        .replace(
+            "__AZURE_COST_TABLE__",
+            f"{catalog}.{schema}.azure_costs",
+        )
+    )
+
+
+def reconciliation(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    days: int,
+    *,
+    workspace_id: str,
+    environment: str,
+) -> list[dict]:
+    """Compare list and billed cost only where currency permits variance."""
+
+    return run_query(
+        w,
+        reconciliation_sql(catalog, schema),
+        warehouse_id,
+        {
+            "days": _inclusive_lookback(days),
+            "workspace_id": workspace_id,
+            "environment": environment,
+        },
+        row_limit=50_000,
+    )
 
 
 # --- spike classification (pure) ----------------------------------------------

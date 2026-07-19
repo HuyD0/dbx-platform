@@ -287,6 +287,18 @@ Interpret labels literally:
 - `provider estimate`: AI Gateway/provider estimate, never silently combined
   with actual billed cost.
 
+Azure billed cost is ingested only after Cost Management applies the configured
+resource-group allowlist. The Databricks/Azure reconciliation view is a daily
+SKU-family bridge, not invoice-line equivalence; it withholds variance when the
+Azure billing currency is not USD. Compute, storage, networking, commitments,
+credits, and tax lines can remain unmatched by design.
+
+Paid Genie usage is included from `billing_origin_product = 'GENIE'` in the
+Databricks list-cost basis. SQL warehouse compute used by Genie remains a
+separate Databricks product cost. Use native Databricks Genie budgets for
+near-real-time alerts or blocking; Mission Control budgets are analytical,
+approval-gated guardrails and do not replace native enforcement.
+
 Do not add currencies without a documented conversion source/rate/time.
 Request telemetry allocates billed totals to workloads but does not claim
 invoice-accurate per-request cost. Keep an explicit `unallocated/uncovered`

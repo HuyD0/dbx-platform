@@ -7,11 +7,10 @@ resources:
     azure_cost_pull:
       name: "[dbx-platform] azure-cost-pull"
       description: >
-        Pulls the subscription's actual cost (daily, by service and resource
-        group) from the Azure Cost Management Query API and MERGEs it into
-        <catalog>.<schema>.azure_costs. Pulls a rolling 3-day window so late
-        Azure restatements are merged on the next daily run. Then reports
-        per-bucket spend spikes. Writes only to platform-owned tables.
+        Pulls resource-group-scoped billed cost from the Azure Cost Management
+        Query API and MERGEs it into <catalog>.<schema>.azure_costs. Pulls a
+        rolling 3-day window so late restatements are merged on the next daily
+        run. Fails closed if no resource-group allowlist is configured.
       schedule:
         quartz_cron_expression: "0 30 6 * * ?"  # daily 06:30 UTC, before cost jobs
         timezone_id: UTC
@@ -48,6 +47,7 @@ resources:
             parameters:
               ["azure-cost", "pull", "--days", "3",
                "--subscription-id", "${var.azure_subscription_id}",
+               "--resource-groups", "${var.azure_cost_resource_groups}",
                "--service-credential", "${var.azure_service_credential}",
                "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
                "--approved-action-id", "{{job.parameters.approved_action_id}}",

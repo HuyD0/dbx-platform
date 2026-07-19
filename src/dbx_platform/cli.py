@@ -247,7 +247,9 @@ def cmd_llm_cost_rollup(args) -> int:
     workspace_id = str(w.get_workspace_id())
     environment = getattr(args, "environment", s.environment)
     window_end = date.today()
-    window_start = window_end - timedelta(days=days)
+    if days < 1:
+        raise ValueError("--days must be positive")
+    window_start = window_end - timedelta(days=days - 1)
     notes: list[str] = []
     costs: list[dict] = []
     usage: list[dict] = []
@@ -305,7 +307,7 @@ def cmd_llm_cost_rollup(args) -> int:
             source_key="databricks-hosted-billing",
             source_type="cost",
             freshness="throughout the day",
-            retention_days=400,
+            retention_days=365,
             cost_basis="DATABRICKS_LIST",
             coverage_start=(window_start.isoformat() if billing_status != "unavailable" else None),
             coverage_end=(window_end.isoformat() if billing_status != "unavailable" else None),
@@ -380,20 +382,21 @@ def cmd_llm_cost_rollup(args) -> int:
         azure = azure_result.rows
         normalized_azure = llm_cost.normalize_cost_rows(
             azure,
-            "azure_costs",
+            azure_result.source,
             "AZURE_ACTUAL",
             environment=environment,
             workspace_id=workspace_id,
         )
         costs.extend(normalized_azure)
-        cost_scopes.append(
-            {
-                "workspace_id": workspace_id,
-                "environment": environment,
-                "source": "azure_costs",
-                "cost_basis": "AZURE_ACTUAL",
-            }
-        )
+        for source in ("azure_cost_details", "azure_costs"):
+            cost_scopes.append(
+                {
+                    "workspace_id": workspace_id,
+                    "environment": environment,
+                    "source": source,
+                    "cost_basis": "AZURE_ACTUAL",
+                }
+            )
         azure_status = azure_result.status
         azure_note = (
             f"{azure_result.notes}; late adjustments may restate prior days"
@@ -600,47 +603,82 @@ def cmd_azure_cost_pull(args) -> int:
     end = date.today()
     start, end = azure_cost.inclusive_date_window(end, days)
     cred = secrets.get_credential(args.service_credential or None)
-    pages = azure_cost.fetch_cost_query(cred, sub, start.isoformat(), end.isoformat())
-    rows = azure_cost.parse_query_result(pages)
+    resource_groups = azure_cost.parse_resource_groups(
+        args.resource_groups or s.azure_cost_resource_groups
+    )
+    scope_filter = azure_cost.resource_group_scope_filter(resource_groups)
     workspace_id = str(w.get_workspace_id())
     environment = getattr(args, "environment", s.environment)
-    n = azure_cost.store_costs(
-        w,
-        _warehouse_id(args, s),
-        s.dashboard_catalog,
-        s.dashboard_schema,
-        rows,
-        workspace_id=workspace_id,
-        environment=environment,
-        window_start=start.isoformat(),
-        window_end=end.isoformat(),
-    )
-    try:
-        detail_pages = azure_cost.fetch_cost_query(
+    warehouse = _warehouse_id(args, s)
+    rows: list[dict] = []
+    detail_count = 0
+    detail_failures: list[str] = []
+    for window_start, window_end in azure_cost.split_date_windows(
+        start.isoformat(), end.isoformat()
+    ):
+        pages = azure_cost.fetch_cost_query(
             cred,
             sub,
-            start.isoformat(),
-            end.isoformat(),
-            body=azure_cost.build_detail_query_body(start.isoformat(), end.isoformat()),
+            window_start,
+            window_end,
+            body=azure_cost.build_query_body(
+                window_start,
+                window_end,
+                resource_groups=resource_groups,
+            ),
         )
-        detail_rows = azure_cost.parse_detail_query_result(detail_pages)
-    except Exception as error:  # noqa: BLE001 - coarse actuals remain authoritative
-        detail_note = (
-            "resource/meter allocation unavailable; coarse actuals succeeded "
-            f"({error.__class__.__name__})"
-        )
-    else:
-        detail_count = azure_cost.store_detail_costs(
+        window_rows = azure_cost.parse_query_result(pages)
+        azure_cost.store_costs(
             w,
-            _warehouse_id(args, s),
+            warehouse,
             s.dashboard_catalog,
             s.dashboard_schema,
-            detail_rows,
+            window_rows,
             workspace_id=workspace_id,
             environment=environment,
-            window_start=start.isoformat(),
-            window_end=end.isoformat(),
+            subscription_id=sub,
+            scope_filter=scope_filter,
+            window_start=window_start,
+            window_end=window_end,
         )
+        rows.extend(window_rows)
+        try:
+            detail_pages = azure_cost.fetch_cost_query(
+                cred,
+                sub,
+                window_start,
+                window_end,
+                body=azure_cost.build_detail_query_body(
+                    window_start,
+                    window_end,
+                    resource_groups=resource_groups,
+                ),
+            )
+            detail_rows = azure_cost.parse_detail_query_result(detail_pages)
+            detail_count += azure_cost.store_detail_costs(
+                w,
+                warehouse,
+                s.dashboard_catalog,
+                s.dashboard_schema,
+                detail_rows,
+                workspace_id=workspace_id,
+                environment=environment,
+                subscription_id=sub,
+                scope_filter=scope_filter,
+                window_start=window_start,
+                window_end=window_end,
+            )
+        except Exception as error:  # noqa: BLE001 - report partial storage precisely
+            detail_failures.append(
+                f"{window_start}..{window_end}: {error.__class__.__name__}"
+            )
+    n = len(rows)
+    if detail_failures:
+        detail_note = (
+            f"resource/meter allocation failed for {len(detail_failures)} window(s); "
+            "coarse billed cost was stored"
+        )
+    else:
         detail_note = f"{detail_count} resource/meter rows merged for AI allocation"
     by_bucket: dict[str, float] = {}
     for r in rows:
@@ -654,8 +692,17 @@ def cmd_azure_cost_pull(args) -> int:
         f"Azure bill pull {start}..{end} — {n} rows merged into "
         f"{s.dashboard_catalog}.{s.dashboard_schema}.azure_costs",
         summary,
-        [detail_note],
+        [
+            f"Azure scope: {sub}; resource groups: {scope_filter}",
+            detail_note,
+            *detail_failures,
+        ],
     )
+    if detail_failures:
+        raise RuntimeError(
+            "Azure coarse billed cost was stored, but detail allocation was incomplete: "
+            + "; ".join(detail_failures)
+        )
     return 0
 
 
@@ -672,6 +719,8 @@ def cmd_azure_cost_report(args) -> int:
         s.dashboard_schema,
         args.by,
         days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
     )
     emit(args, f"Azure spend by {args.by} — last {days}d", rows)
     return 0
@@ -687,7 +736,13 @@ def cmd_azure_cost_spikes(args) -> int:
         return 2
     days = args.days if args.days is not None else 14
     rows = azure_cost.fetch_daily_buckets(
-        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
     )
     findings = azure_cost.classify_azure_spend(rows, s.azure_spike_pct, s.azure_spike_min_cost)
     notes = ["Report only — investigate the bucket's resources before acting."]
@@ -718,6 +773,8 @@ def cmd_azure_cost_detail(args) -> int:
         args.by,
         days,
         args.bucket or None,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
     )
     scope = f" ({args.bucket})" if args.bucket else ""
     emit(args, f"Azure detail spend by {args.by}{scope} — last {days}d", rows)
@@ -886,7 +943,13 @@ def cmd_forecast_build_features(args) -> int:
 
     days = args.days if args.days is not None else 365
     rows = azure_cost.fetch_daily_buckets(
-        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     feats = forecast_features.build_features(rows)
     n = forecast_features.store_features(
@@ -963,6 +1026,8 @@ def cmd_forecast_predict(args) -> int:
         s.dashboard_schema,
         args.model_name or s.forecast_model_name,
         horizon,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     emit(args, f"Azure cost forecast — next {horizon}d (P10/P50/P90)", rows)
     return 0
@@ -977,7 +1042,12 @@ def cmd_forecast_monitor(args) -> int:
 
     warehouse = _warehouse_id(args, s)
     drift, errors, findings = forecast_monitor.run_monitoring(
-        w, warehouse, s.dashboard_catalog, s.dashboard_schema
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     emit(args, "Feature drift (PSI vs reference window)", drift)
     emit(args, "Matured forecast accuracy by series", errors)
@@ -2083,6 +2153,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--subscription-id",
         default=None,
         help="Azure subscription (default: DBX_PLATFORM_AZURE_SUBSCRIPTION_ID)",
+    )
+    x.add_argument(
+        "--resource-groups",
+        default=None,
+        help=(
+            "Comma-separated Azure resource groups allocated to this workspace "
+            "(required; defaults to DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS)"
+        ),
     )
     x.add_argument(
         "--service-credential",

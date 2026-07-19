@@ -111,6 +111,14 @@ variables:
       BUNDLE_VAR_azure_subscription_id.
     default: ""
 
+  azure_cost_resource_groups:
+    description: >
+      Comma-separated allowlist of Azure resource groups whose billed charges
+      belong to this Databricks workspace. Ingestion fails closed when empty.
+      Include the Databricks managed resource group and Azure AI resource
+      groups intentionally allocated to this workspace.
+    default: ""
+
   azure_service_credential:
     description: >
       Unity Catalog service credential name used for keyless Azure auth from

@@ -3,19 +3,25 @@ from datetime import date
 
 import pytest
 
+from dbx_platform import azure_cost
 from dbx_platform.azure_cost import (
     build_detail_query_body,
     build_query_body,
     classify_azure_spend,
     create_detail_table_sql,
     create_table_sql,
+    fetch_cost_query,
     inclusive_date_window,
     merge_costs_sql,
     merge_detail_costs_sql,
     parse_detail_query_result,
     parse_query_result,
+    parse_resource_groups,
+    reconciliation_sql,
     report_sql,
+    resource_group_scope_filter,
     service_bucket,
+    split_date_windows,
     store_costs,
     store_detail_costs,
 )
@@ -122,20 +128,93 @@ def test_parse_detail_extracts_resource_and_meter():
 # --- SQL builders ---------------------------------------------------------------
 
 def test_query_body_shape():
-    body = build_query_body("2026-07-01", "2026-07-03")
+    body = build_query_body(
+        "2026-07-01",
+        "2026-07-03",
+        resource_groups=["rg-workspace", "rg-ai"],
+    )
     assert body["type"] == "Usage"
     assert body["dataset"]["granularity"] == "Daily"
     assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
     assert names == ["ServiceName", "ResourceGroup"]
+    assert body["dataset"]["filter"]["dimensions"]["values"] == [
+        "rg-workspace",
+        "rg-ai",
+    ]
 
 
 def test_detail_query_uses_resource_and_meter_dimensions():
-    body = build_detail_query_body("2026-07-01", "2026-07-03")
+    body = build_detail_query_body(
+        "2026-07-01",
+        "2026-07-03",
+        resource_groups="rg-workspace,rg-ai",
+    )
     assert body["type"] == "Usage"
     assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
     assert names == ["ResourceId", "Meter"]
+
+
+def test_resource_scope_fails_closed_and_normalizes_duplicates():
+    with pytest.raises(ValueError, match="requires at least one resource group"):
+        parse_resource_groups(" , ")
+    assert parse_resource_groups("rg-ai, rg-data,rg-ai") == ("rg-ai", "rg-data")
+    assert resource_group_scope_filter("RG-Data,rg-ai") == "rg-ai,rg-data"
+
+
+def test_historical_window_is_split_to_31_days():
+    windows = split_date_windows("2025-07-20", "2026-07-19")
+    assert windows[0] == ("2025-07-20", "2025-08-19")
+    assert windows[-1][1] == "2026-07-19"
+    assert len(windows) == 12
+
+
+def test_query_builder_rejects_unsplit_daily_range():
+    with pytest.raises(ValueError, match="at most 31 days"):
+        build_query_body(
+            "2026-01-01",
+            "2026-02-01",
+            resource_groups=["rg-workspace"],
+        )
+
+
+def test_fetch_sends_cost_management_client_header(monkeypatch):
+    seen = {}
+
+    class Credential:
+        def get_token(self, _scope):
+            return type("Token", (), {"token": "secret"})()
+
+    class Response:
+        status_code = 200
+        headers = {}
+        ok = True
+
+        def json(self):
+            return {"properties": {"rows": []}}
+
+    def post(url, *, json, headers, timeout):
+        seen.update(url=url, body=json, headers=headers, timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr("requests.post", post)
+    body = build_query_body(
+        "2026-07-01",
+        "2026-07-03",
+        resource_groups=["rg-workspace"],
+    )
+
+    assert fetch_cost_query(
+        Credential(),
+        "sub-1",
+        "2026-07-01",
+        "2026-07-03",
+        body=body,
+    ) == [{"properties": {"rows": []}}]
+    assert seen["headers"]["ClientType"] == "GitHubCopilotForAzure"
+    assert seen["headers"]["Authorization"] == "Bearer secret"
+    assert seen["body"] == body
 
 
 def test_merge_sql_targets_table_and_binds_rows_param():
@@ -145,6 +224,7 @@ def test_merge_sql_targets_table_and_binds_rows_param():
     assert "t.usage_date = s.usage_date" in sql
     assert "t.workspace_id = :workspace_id" in sql
     assert "t.environment = :environment" in sql
+    assert "t.subscription_id = :subscription_id" in sql
     assert "t.currency = s.currency" in sql
     assert "WHEN NOT MATCHED BY SOURCE" in sql
     assert "t.usage_date BETWEEN CAST(:window_start AS DATE)" in sql
@@ -156,6 +236,7 @@ def test_detail_merge_uses_resource_meter_key():
     assert "t.resource_id = s.resource_id" in sql
     assert "t.meter_name = s.meter_name" in sql
     assert "t.workspace_id = :workspace_id" in sql
+    assert "t.subscription_id = :subscription_id" in sql
     assert "WHEN NOT MATCHED BY SOURCE" in sql
 
 
@@ -164,6 +245,8 @@ def test_create_table_sql_has_bucket_column():
     assert "resource_id STRING" in create_detail_table_sql("main", "dbx_platform")
     assert "workspace_id STRING" in create_table_sql("main", "dbx_platform")
     assert "environment STRING" in create_detail_table_sql("main", "dbx_platform")
+    assert "subscription_id STRING" in create_table_sql("main", "dbx_platform")
+    assert "scope_filter STRING" in create_detail_table_sql("main", "dbx_platform")
 
 
 def test_migration_extends_legacy_azure_tables_with_deployment_scope():
@@ -171,6 +254,8 @@ def test_migration_extends_legacy_azure_tables_with_deployment_scope():
         assert MIGRATION_COLUMNS[table] == {
             "workspace_id": "STRING",
             "environment": "STRING",
+            "subscription_id": "STRING",
+            "scope_filter": "STRING",
         }
 
 
@@ -201,6 +286,8 @@ def test_store_reconciles_empty_window_once_without_ddl(
         [],
         workspace_id="w1",
         environment="prod",
+        subscription_id="sub-1",
+        scope_filter="rg-ai,rg-data",
         window_start="2026-07-14",
         window_end="2026-07-17",
     ) == 0
@@ -213,6 +300,8 @@ def test_store_reconciles_empty_window_once_without_ddl(
     assert json.loads(params["rows"]) == []
     assert params["workspace_id"] == "w1"
     assert params["environment"] == "prod"
+    assert params["subscription_id"] == "sub-1"
+    assert params["scope_filter"] == "rg-ai,rg-data"
     assert params["window_start"] == "2026-07-14"
     assert params["window_end"] == "2026-07-17"
 
@@ -246,12 +335,59 @@ def test_store_uses_one_atomic_merge_for_large_late_adjustment_window(monkeypatc
         rows,
         workspace_id="w1",
         environment="prod",
+        subscription_id="sub-1",
+        scope_filter="rg-ai",
         window_start="2026-07-14",
         window_end="2026-07-17",
     )
 
     assert len(calls) == 1
     assert len(json.loads(calls[0][1]["rows"])) == 2001
+
+
+def test_oversized_payload_splits_into_exact_daily_merges(monkeypatch):
+    calls = []
+    monkeypatch.setattr(azure_cost, "_MAX_SQL_PARAMETER_BYTES", 240)
+    monkeypatch.setattr(
+        azure_cost,
+        "run_query",
+        lambda _w, sql, _warehouse, params=None, **_kwargs: (
+            calls.append((sql, params)) or []
+        ),
+    )
+    rows = [
+        {
+            "usage_date": day,
+            "service_name": "Azure Databricks",
+            "resource_group": "rg",
+            "service_bucket": "databricks",
+            "cost": 1.0,
+            "currency": "CAD",
+        }
+        for day in ("2026-07-14", "2026-07-15")
+    ]
+
+    store_costs(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        rows,
+        workspace_id="w1",
+        environment="prod",
+        subscription_id="sub-1",
+        scope_filter="rg",
+        window_start="2026-07-14",
+        window_end="2026-07-15",
+    )
+
+    assert len(calls) == 2
+    assert [
+        (params["window_start"], params["window_end"]) for _, params in calls
+    ] == [
+        ("2026-07-14", "2026-07-14"),
+        ("2026-07-15", "2026-07-15"),
+    ]
 
 
 def test_store_rejects_rows_outside_reprocessed_window(monkeypatch):
@@ -277,6 +413,8 @@ def test_store_rejects_rows_outside_reprocessed_window(monkeypatch):
             ],
             workspace_id="w1",
             environment="prod",
+            subscription_id="sub-1",
+            scope_filter="rg",
             window_start="2026-07-14",
             window_end="2026-07-17",
         )
@@ -296,19 +434,38 @@ def test_store_failure_has_migration_guidance(monkeypatch):
             [],
             workspace_id="w1",
             environment="prod",
+            subscription_id="sub-1",
+            scope_filter="rg",
             window_start="2026-07-14",
             window_end="2026-07-17",
         )
 
 
 def test_report_sql_whitelists_dimension():
-    assert "GROUP BY service_bucket" in report_sql("main", "dbx_platform", "bucket")
+    sql = report_sql("main", "dbx_platform", "bucket")
+    assert "GROUP BY c.service_bucket" in sql
+    assert "workspace_id = :workspace_id" in sql
+    assert "environment = :environment" in sql
+    assert "COALESCE(scope_filter, '') <> ''" in sql
+    assert "c.scope_filter = s.scope_filter" in sql
     try:
         report_sql("main", "dbx_platform", "usage_date; DROP TABLE x")
     except ValueError:
         pass
     else:
         raise AssertionError("unexpected dimension must raise")
+
+
+def test_reconciliation_is_family_level_and_currency_safe():
+    sql = reconciliation_sql("main", "dbx_platform")
+    assert "system.billing.usage" in sql
+    assert "main.dbx_platform.azure_cost_details" in sql
+    assert "main.dbx_platform.azure_costs" in sql
+    assert "CURRENCY_MISMATCH" in sql
+    assert "UPPER(a.azure_currency) = 'USD'" in sql
+    assert "COALESCE(scope_filter, '') <> ''" in sql
+    assert "a.scope_filter = s.scope_filter" in sql
+    assert "not invoice-line equivalence" in sql
 
 
 # --- classify_azure_spend -------------------------------------------------------
@@ -364,7 +521,10 @@ def test_report_detail_sql_whitelists_dimension_and_bucket():
 
     sql = report_detail_sql("main", "dbx_platform", "meter")
     assert "azure_cost_details" in sql
-    assert "GROUP BY meter_name, service_bucket" in sql
+    assert "GROUP BY c.meter_name, c.service_bucket" in sql
+    assert "workspace_id = :workspace_id" in sql
+    assert "COALESCE(scope_filter, '') <> ''" in sql
+    assert "c.scope_filter = s.scope_filter" in sql
     with pytest.raises(ValueError):
         report_detail_sql("main", "dbx_platform", "usage_date; DROP TABLE x")
     with pytest.raises(ValueError):
@@ -375,7 +535,7 @@ def test_report_detail_sql_resource_dimension_carries_group_and_type():
     from dbx_platform.azure_cost import report_detail_sql
 
     sql = report_detail_sql("main", "dbx_platform", "resource")
-    assert "resource_id, resource_group, resource_type" in sql
+    assert "c.resource_id, c.resource_group, c.resource_type" in sql
 
 
 def test_report_detail_sql_binds_bucket_filter():
