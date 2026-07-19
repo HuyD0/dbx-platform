@@ -387,11 +387,6 @@ def test_workspace_approver_revalidation_uses_exact_account_group():
         confirmation="apply run-job 1",
     )
     workspace = MagicMock()
-    workspace.users.get.return_value = SimpleNamespace(
-        id="approver-1",
-        user_name="approver@example.com",
-        active=True,
-    )
     workspace.api_client.do.return_value = {
         "id": "group-1",
         "displayName": "dbx-platform-approvers",
@@ -407,10 +402,7 @@ def test_workspace_approver_revalidation_uses_exact_account_group():
         "dbx-platform-approvers",
         "group-1",
     )
-    workspace.users.get.assert_called_once_with(
-        "approver-1",
-        attributes="id,userName,active",
-    )
+    workspace.users.get.assert_not_called()
     workspace.api_client.do.assert_called_once_with(
         "GET",
         "/api/2.0/account/scim/v2/Groups/group-1",
@@ -429,11 +421,6 @@ def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift(
         confirmation="apply run-job 1",
     )
     workspace = MagicMock()
-    workspace.users.get.return_value = SimpleNamespace(
-        id="approver-1",
-        user_name="approver@example.com",
-        active=True,
-    )
     workspace.api_client.do.return_value = {
         "id": "group-1",
         "displayName": "dbx-platform-approvers",
@@ -446,11 +433,10 @@ def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift(
         "group-1",
     )
 
-    workspace.users.get.return_value.user_name = "other@example.com"
     workspace.api_client.do.return_value = {
         "id": "group-1",
         "displayName": "dbx-platform-approvers",
-        "members": [{"value": "approver-1", "display": "approver@example.com"}]
+        "members": [{"value": "approver-2", "display": "approver@example.com"}]
     }
     assert not action_executor._approver_is_current_member(
         workspace,
@@ -469,11 +455,6 @@ def test_workspace_approver_revalidation_rejects_group_lookup_failure():
         confirmation="apply run-job 1",
     )
     workspace = MagicMock()
-    workspace.users.get.return_value = SimpleNamespace(
-        id="approver-1",
-        user_name="approver@example.com",
-        active=True,
-    )
     workspace.api_client.do.side_effect = PermissionError("forbidden")
 
     assert not action_executor._approver_is_current_member(
@@ -493,11 +474,6 @@ def test_workspace_approver_revalidation_rejects_empty_group_id():
         confirmation="apply run-job 1",
     )
     workspace = MagicMock()
-    workspace.users.get.return_value = SimpleNamespace(
-        id="approver-1",
-        user_name="approver@example.com",
-        active=True,
-    )
 
     assert not action_executor._approver_is_current_member(
         workspace,
@@ -505,6 +481,7 @@ def test_workspace_approver_revalidation_rejects_empty_group_id():
         "dbx-platform-approvers",
         "",
     )
+    workspace.api_client.do.assert_not_called()
     workspace.users.get.assert_not_called()
 
 
