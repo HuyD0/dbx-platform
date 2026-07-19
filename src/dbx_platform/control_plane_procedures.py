@@ -3,7 +3,8 @@
 The Databricks App service principal and human groups receive no ``MODIFY`` on
 the action ledger. Verified App user tokens call these narrowly scoped Unity
 Catalog procedures with ``EXECUTE`` only. The procedures re-check the connected
-user's account-group membership and record ``session_user()`` as the actor.
+user's live account-group membership through native ``EXECUTE`` authorization
+on every call and record ``session_user()`` as the actor.
 """
 
 from __future__ import annotations
