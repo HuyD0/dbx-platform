@@ -81,15 +81,49 @@ function actionEventRows(events: ActionEvent[]): Row[] {
   }));
 }
 
-function Detail({ label, value }: { label: string; value: unknown }) {
+function describeDetail(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "object" && value !== null) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return "No entries";
+    return keys
+      .slice(0, 3)
+      .map((key) => key.replaceAll("_", " "))
+      .join(", ");
+  }
+  return String(value);
+}
+
+function Detail({
+  label,
+  description,
+  value,
+}: {
+  label: string;
+  description: string;
+  value: unknown;
+}) {
   if (value === undefined || value === null || value === "") return null;
+  const textValue = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
-    <div className="rounded-lg border border-grid bg-page/30 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-5 text-ink-2">
-        {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+    <details className="group rounded-xl border border-grid bg-surface p-3 shadow-sm" open>
+      <summary className="cursor-pointer list-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-primary">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+            <p className="mt-1 text-sm font-medium text-ink">{describeDetail(value)}</p>
+            <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+          </div>
+          <span className="rounded-full border border-grid px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            Details
+          </span>
+        </div>
+      </summary>
+      <pre className="mt-3 max-h-80 overflow-auto rounded-lg border border-grid bg-page p-3 font-mono text-xs leading-5 text-ink-2">
+        {textValue}
       </pre>
-    </div>
+    </details>
   );
 }
 
@@ -265,11 +299,34 @@ export function ActionReviewDialog({
               />
             )}
 
-            <div className="grid gap-2 md:grid-cols-3">
-              <Detail label="Impact" value={action.impact} />
-              <Detail label="Rollback" value={action.rollback} />
-              <Detail label="Verification" value={action.verification} />
-            </div>
+            <section aria-labelledby="plan-review-heading" className="space-y-3">
+              <div>
+                <h3 id="plan-review-heading" className="text-sm font-semibold text-ink">
+                  Plan review guide
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  Start with the plain-language summary on each card. Expand or scroll the details
+                  only when you need the exact immutable JSON used for approval and verification.
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Detail
+                  label="Impact"
+                  description="What will change if this exact plan is approved."
+                  value={action.impact}
+                />
+                <Detail
+                  label="Rollback"
+                  description="How the executor would restore the prior state if needed."
+                  value={action.rollback}
+                />
+                <Detail
+                  label="Verification"
+                  description="Checks that must pass before or after execution."
+                  value={action.verification}
+                />
+              </div>
+            </section>
 
             {action.events.length > 0 && (
               <DataTable

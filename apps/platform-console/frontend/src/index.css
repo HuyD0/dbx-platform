@@ -2,25 +2,26 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brand system. The shell is deliberately neutral: red identifies the product
-   and primary actions, while operational states keep their own semantic
-   colors. Light is the first-visit theme and dark remains user-selectable. */
+/* Brand system. The shell is deliberately neutral: blue identifies primary actions
+   while Databricks red stays as a restrained product accent. Operational states
+   keep their own semantic colors. Light is the first-visit theme and dark remains
+   user-selectable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #fbf7f8;
+  --color-page: #f7f9fc;
   --color-surface: #ffffff;
   --color-raised: #ffffff;
-  --color-tint: #f9eaed;
-  --color-ink: #240b15;
-  --color-ink-2: #4b3f43;
-  --color-muted: #806a72;
-  --color-grid: #e4d7db;
-  --color-hairline: rgba(36, 11, 21, 0.08);
+  --color-tint: #eaf2ff;
+  --color-ink: #111827;
+  --color-ink-2: #374151;
+  --color-muted: #667085;
+  --color-grid: #d6deea;
+  --color-hairline: rgba(17, 24, 39, 0.08);
 
-  --color-brand-primary: #f00037;
-  --color-brand-maroon: #240b15;
-  --color-brand-mid: #8b001f;
+  --color-brand-primary: #2563eb;
+  --color-brand-maroon: #111827;
+  --color-brand-mid: #1d4ed8;
   --color-rose-grey: #b79aa3;
   --color-sand: #e4d7db;
   --color-warning-surface: #fff8e1;
@@ -41,21 +42,21 @@
   --color-status-serious: #8a432f;
   --color-status-critical: #b4233e;
 
-  --color-accent: #8b001f;
+  --color-accent: #1d4ed8;
   --color-blueprint: #006f72;
-  --color-process: #8b001f;
+  --color-process: #6d28d9;
 }
 
 .dark {
-  --color-page: #171315;
-  --color-surface: #211a1d;
-  --color-raised: #2b2326;
-  --color-tint: #34252a;
-  --color-ink: #fbf7f8;
-  --color-ink-2: #d8ccd0;
-  --color-muted: #bfaeb4;
-  --color-grid: #493b40;
-  --color-hairline: rgba(251, 247, 248, 0.1);
+  --color-page: #0f172a;
+  --color-surface: #111827;
+  --color-raised: #1f2937;
+  --color-tint: #172554;
+  --color-ink: #f8fafc;
+  --color-ink-2: #dbe4f0;
+  --color-muted: #a8b3c7;
+  --color-grid: #334155;
+  --color-hairline: rgba(226, 232, 240, 0.12);
 
   --color-warning-surface: #382d17;
   --color-info-surface: #173537;
@@ -74,9 +75,13 @@
   --color-status-serious: #ffad91;
   --color-status-critical: #ff8da0;
 
-  --color-accent: #ff4c70;
+  --color-brand-primary: #60a5fa;
+  --color-brand-maroon: #111827;
+  --color-brand-mid: #3b82f6;
+
+  --color-accent: #93c5fd;
   --color-blueprint: #5ed5d7;
-  --color-process: #ff6a88;
+  --color-process: #c4b5fd;
 }
 
 html,
