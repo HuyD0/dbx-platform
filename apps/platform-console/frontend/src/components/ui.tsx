@@ -221,7 +221,7 @@ const errorGuidance: Record<string, string> = {
   unauthenticated: "Your Databricks user identity could not be verified.",
   unauthorized: "Your identity is not authorized for this governed operation.",
   control_plane_unavailable: "Mission Control storage is temporarily unavailable.",
-  agent_unavailable: "The platform agent's serving endpoint is not reachable.",
+  agent_unavailable: "The backend LangGraph agent is not reachable.",
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
 };
 

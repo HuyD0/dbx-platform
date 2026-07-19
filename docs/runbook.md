@@ -164,6 +164,29 @@ asleep, but still starts the app, which declares `started: true`. A routine
 merge to `main` therefore restarts the app even when the toolkit is hibernated;
 only the warehouse and schedules stay asleep until an approved Wake.
 
+## Assistant model access
+
+The FastAPI backend hosts the LangGraph ReAct agent in-process. The graph uses
+the Databricks-hosted endpoint configured by `var.chat_model` (default
+`databricks-claude-sonnet-4-5`) as its LLM. The bundle binds that endpoint as
+the `chat-model` App resource with `CAN_QUERY` and injects its exact name
+through `DBX_PLATFORM_CHAT_ENDPOINT`.
+
+The graph receives the current page context and browser-held conversation. Its
+allowlisted tools reuse package checks for SQL-backed operational evidence and
+the canonical `platform_findings` repository for privileged scheduled
+evidence. It has no executor or target-mutation tool.
+
+If chat returns `agent_unavailable`, verify that the endpoint is `READY`, the
+App deployment includes the `chat-model` resource, and the active deployment
+contains `DBX_PLATFORM_CHAT_ENDPOINT`. Also verify the App environment
+installed `databricks-langchain` and `langgraph` from `requirements.txt`.
+
+The optional MLflow-serving wrapper under `agents/platform_agent/` remains
+disabled; the App does not need it. Its deployment helper intentionally exits
+because separate model registration/deployment is a governed mutation without
+an allowlisted executor action.
+
 ## Protected forecast training
 
 `cost-forecast-train` is unscheduled and runs as the action executor identity.

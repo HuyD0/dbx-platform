@@ -46,6 +46,13 @@ variables:
       dependency cycle while preserving an exact, non-discovered target.
     default: platform-console
 
+  chat_model:
+    description: >
+      Databricks-hosted foundation-model endpoint queried by the read-only
+      Mission Control assistant. The App receives only CAN_QUERY through its
+      resource binding.
+    default: databricks-claude-sonnet-4-5
+
   actions_enabled:
     description: >
       Enables approval and executor submission in the Platform Console. Keep

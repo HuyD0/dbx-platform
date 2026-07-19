@@ -127,6 +127,26 @@ def test_app_and_controller_share_name_without_resource_cycle():
     assert "${resources.apps.platform_console.name}" not in parameters
 
 
+def test_chat_model_is_bound_to_the_app_with_query_only_access():
+    root = APP_DIR.parent.parent
+    bundle = yaml.safe_load((root / "databricks.yml").read_text())
+    resource = yaml.safe_load(
+        (root / "resources" / "app.yml").read_text()
+    )["resources"]["apps"]["platform_console"]
+    assert bundle["variables"]["chat_model"]["default"].startswith("databricks-")
+    assert {
+        "name": "DBX_PLATFORM_CHAT_ENDPOINT",
+        "value_from": "chat-model",
+    } in resource["config"]["env"]
+    chat_resource = next(
+        item for item in resource["resources"] if item["name"] == "chat-model"
+    )
+    assert chat_resource["serving_endpoint"] == {
+        "name": "${var.chat_model}",
+        "permission": "CAN_QUERY",
+    }
+
+
 # --- TestClient behavior ----------------------------------------------------
 
 @pytest.fixture()
@@ -402,8 +422,10 @@ def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
     assert resp.json()["error"] == "warehouse_not_configured"
 
 
-def test_chat_degrades_when_the_agent_endpoint_is_missing(client, ws):
-    ws.api_client.do.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
+def test_chat_degrades_when_the_backend_agent_is_unavailable(client, monkeypatch):
+    agent = MagicMock()
+    agent.invoke.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 503
     assert resp.json()["error"] == "agent_unavailable"
@@ -411,9 +433,10 @@ def test_chat_degrades_when_the_agent_endpoint_is_missing(client, ws):
 
 def test_chat_denies_viewers_before_invoking_app_sp_agent(
     client,
-    ws,
     monkeypatch,
 ):
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
     deps.get_identity_verifier.cache_clear()
     resp = client.post(
@@ -422,19 +445,16 @@ def test_chat_denies_viewers_before_invoking_app_sp_agent(
     )
     assert resp.status_code == 403
     assert resp.json()["error"] == "unauthorized"
-    ws.api_client.do.assert_not_called()
+    agent.invoke.assert_not_called()
 
 
-def test_chat_parses_agent_proposals(client, ws):
-    ws.api_client.do.return_value = {
-        "output": [{
-            "type": "message",
-            "content": [{"type": "output_text", "text": (
-                "Two stale clusters are burning money.\n"
-                'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
-            )}],
-        }],
-    }
+def test_chat_parses_backend_agent_proposals(client, monkeypatch):
+    agent = MagicMock()
+    agent.invoke.return_value = (
+        "Two stale clusters are burning money.\n"
+        'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
+    )
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post(
         "/api/chat",
         json={
@@ -451,10 +471,9 @@ def test_chat_parses_agent_proposals(client, ws):
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
-    invocation = ws.api_client.do.call_args.kwargs["body"]["input"]
+    invocation = agent.invoke.call_args.args[0]
     assert invocation[0]["role"] == "system"
     assert "Every factual claim must cite" in invocation[0]["content"]
-    assert invocation[1]["role"] == "system"
     assert "PAGE_CONTEXT" in invocation[1]["content"]
     assert "/security-risk" in invocation[1]["content"]
     assert invocation[-1] == {"role": "user", "content": "clean up"}
