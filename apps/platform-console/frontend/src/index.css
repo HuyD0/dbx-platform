@@ -368,3 +368,38 @@ nav a[aria-current="page"] {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Action reviews present dense approval JSON, so scope the calmer accessible
+   palette there first without moving the whole shell's visual baselines. */
+.action-review-theme {
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-page: #f7f9fc;
+  --color-tint: #eaf2ff;
+  --color-ink: #111827;
+  --color-ink-2: #374151;
+  --color-muted: #667085;
+  --color-grid: #d6deea;
+  --color-hairline: rgba(17, 24, 39, 0.08);
+  --color-brand-primary: #2563eb;
+  --color-brand-maroon: #111827;
+  --color-brand-mid: #1d4ed8;
+  --color-accent: #1d4ed8;
+  --color-process: #6d28d9;
+}
+.dark .action-review-theme {
+  --color-page: #0f172a;
+  --color-surface: #111827;
+  --color-raised: #1f2937;
+  --color-tint: #172554;
+  --color-ink: #f8fafc;
+  --color-ink-2: #dbe4f0;
+  --color-muted: #a8b3c7;
+  --color-grid: #334155;
+  --color-hairline: rgba(226, 232, 240, 0.12);
+  --color-brand-primary: #60a5fa;
+  --color-brand-maroon: #111827;
+  --color-brand-mid: #3b82f6;
+  --color-accent: #93c5fd;
+  --color-process: #c4b5fd;
+}
