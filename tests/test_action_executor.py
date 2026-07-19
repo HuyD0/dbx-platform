@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -635,6 +636,11 @@ def test_run_job_succeeds_only_after_exact_child_run_terminates_successfully():
     assert result["verification"]["result_state"] == "SUCCESS"
     assert store.transitions[-1] == ("VERIFYING", "SUCCEEDED")
     workspace.jobs.wait_get_run_job_terminated_or_skipped.assert_called_once()
+    run_call = workspace.jobs.run_now.call_args.kwargs
+    assert run_call["idempotency_token"] == hashlib.sha256(
+        b"run-job:key-1:91"
+    ).hexdigest()
+    assert run_call["idempotency_token"] != "key-1"
 
 
 def test_run_job_failure_is_recorded_as_failed_action():
