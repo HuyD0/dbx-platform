@@ -511,7 +511,7 @@ def cmd_llm_cost_rollup(args) -> int:
 
 
 def cmd_azure_cost_pull(args) -> int:
-    from datetime import date, timedelta
+    from datetime import date
 
     s = Settings.from_env()
     w = get_client(args.profile)
@@ -522,7 +522,7 @@ def cmd_azure_cost_pull(args) -> int:
     sub = args.subscription_id or s.azure_subscription_id
     days = args.days if args.days is not None else 3
     end = date.today()
-    start = end - timedelta(days=days)
+    start, end = azure_cost.inclusive_date_window(end, days)
     cred = secrets.get_credential(args.service_credential or None)
     pages = azure_cost.fetch_cost_query(cred, sub, start.isoformat(), end.isoformat())
     rows = azure_cost.parse_query_result(pages)

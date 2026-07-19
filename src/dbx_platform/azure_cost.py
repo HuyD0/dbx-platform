@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from databricks.sdk import WorkspaceClient
 
@@ -35,6 +35,14 @@ COST_ROW_SCHEMA = (
     "array<struct<usage_date:date,service_name:string,resource_group:string,"
     "service_bucket:string,cost:double,currency:string>>"
 )
+
+
+def inclusive_date_window(end: date, days: int) -> tuple[date, date]:
+    """Return exactly ``days`` calendar dates, including both endpoints."""
+
+    if days < 1:
+        raise ValueError("Azure cost collection days must be at least 1.")
+    return end - timedelta(days=days - 1), end
 
 DETAIL_ROW_SCHEMA = (
     "array<struct<usage_date:date,resource_id:string,resource_group:string,"
