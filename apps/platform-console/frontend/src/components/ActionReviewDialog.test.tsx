@@ -97,6 +97,9 @@ test("approval dialog traps/restores focus and uses a separate confirmation step
   const approve = screen.getByRole("button", { name: "Approve action" });
   expect(approve).toBeEnabled();
   expect(screen.queryByLabelText(/Type apply runtime\.hibernate 2/)).not.toBeInTheDocument();
+  expect(screen.getByText("Plan review guide")).toBeInTheDocument();
+  expect(screen.getByText(/Start with the plain-language summary/i)).toBeInTheDocument();
+  expect(screen.getByText("changed resource count")).toBeInTheDocument();
 
   close.focus();
   await user.tab({ shift: true });
