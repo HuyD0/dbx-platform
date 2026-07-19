@@ -12,6 +12,17 @@ from fastapi import Request
 from backend.control_plane import Actor, ControlPlaneError
 
 
+def forwarded_user_workspace_client(host: str, token: str) -> WorkspaceClient:
+    """Create a client that uses only the forwarded user's bearer token.
+
+    Databricks Apps injects the app service principal's OAuth client credentials
+    into the runtime. The SDK credential strategy named ``pat`` is its static
+    bearer-token strategy; selecting it explicitly prevents those app
+    credentials from being combined with the forwarded user token.
+    """
+    return WorkspaceClient(host=host, token=token, auth_type="pat")
+
+
 class UnauthenticatedError(ControlPlaneError):
     code = "unauthenticated"
 
@@ -45,7 +56,7 @@ class IdentityVerifier:
         self.allow_local_identity = allow_local_identity
         self.user_workspace_client_factory = (
             user_workspace_client_factory
-            or (lambda host, token: WorkspaceClient(host=host, token=token))
+            or forwarded_user_workspace_client
         )
 
     def verify(
