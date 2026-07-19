@@ -28,6 +28,21 @@ def _build_info() -> dict | None:
     return info if isinstance(info, dict) else None
 
 
+# Cached on success only, so a workspace blip at startup cannot pin health to
+# a null scope for the process lifetime.
+_workspace_id_cache: str | None = None
+
+
+def _workspace_id() -> str | None:
+    global _workspace_id_cache
+    if _workspace_id_cache is None:
+        try:
+            _workspace_id_cache, _ = deps.control_plane_scope()
+        except Exception:  # noqa: BLE001 — health must answer even without the workspace
+            return None
+    return _workspace_id_cache
+
+
 @router.get("/api/health")
 def health() -> dict:
     return {
@@ -36,6 +51,7 @@ def health() -> dict:
         "build": _build_info(),
         "actions_enabled": deps.actions_enabled(),
         "environment": os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev"),
+        "workspace_id": _workspace_id(),
     }
 
 
