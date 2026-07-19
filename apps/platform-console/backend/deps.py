@@ -11,7 +11,6 @@ import os
 import time
 from functools import lru_cache
 
-from databricks.sdk import WorkspaceClient
 from fastapi import Request
 
 from dbx_platform.client import get_client
@@ -146,9 +145,10 @@ def get_user_control_plane_repository(request: Request):
     settings = get_settings()
     workspace_id, environment = control_plane_scope()
     from backend.control_plane_repository import SQLControlPlaneRepository
+    from backend.identity import forwarded_user_workspace_client
 
     return SQLControlPlaneRepository(
-        WorkspaceClient(host=host, token=token),
+        forwarded_user_workspace_client(host, token),
         warehouse_id(),
         settings.dashboard_catalog,
         settings.dashboard_schema,

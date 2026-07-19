@@ -15,6 +15,7 @@ APP_DIR = Path(__file__).resolve().parent.parent / "apps" / "platform-console"
 sys.path.insert(0, str(APP_DIR))
 
 from backend import cache, deps  # noqa: E402
+from backend import identity as identity_module  # noqa: E402
 from backend.action_executor_client import ActionExecutorClient  # noqa: E402
 from backend.control_plane import (  # noqa: E402
     ActionConflictError,
@@ -621,6 +622,32 @@ def test_token_identity_and_group_are_verified_server_side():
     workspace.api_client.do.assert_not_called()
 
 
+def test_default_user_client_isolated_from_app_oauth_credentials(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "app-service-principal")
+    monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "app-secret")
+    workspace = MagicMock()
+    workspace.config.host = "https://workspace.example"
+    user_workspace = MagicMock()
+    user_workspace.api_client.do.return_value = {
+        "id": "user-1",
+        "userName": "operator@example.com",
+        "groups": [],
+    }
+    constructor = MagicMock(return_value=user_workspace)
+    monkeypatch.setattr(identity_module, "WorkspaceClient", constructor)
+
+    actor = IdentityVerifier(lambda: workspace).verify(
+        _request({"X-Forwarded-Access-Token": "opaque-user-token"})
+    )
+
+    assert actor.actor_id == "user-1"
+    constructor.assert_called_once_with(
+        host="https://workspace.example",
+        token="opaque-user-token",
+        auth_type="pat",
+    )
+
+
 def test_verified_viewer_cannot_propose_without_operator_membership():
     workspace = MagicMock()
     workspace.config.host = "https://workspace.example"
@@ -640,6 +667,37 @@ def test_verified_viewer_cannot_propose_without_operator_membership():
     assert not viewer.has_role("proposer")
     with pytest.raises(UnauthorizedError):
         verifier.verify(request, require_proposer=True)
+
+
+def test_user_repository_uses_isolated_forwarded_user_client(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_APP_NAME", "platform-console")
+    monkeypatch.setenv("DATABRICKS_WORKSPACE_ID", "123")
+    monkeypatch.setenv("DBX_PLATFORM_ENVIRONMENT", "prod")
+    workspace = MagicMock()
+    workspace.config.host = "https://workspace.example"
+    user_workspace = MagicMock()
+    constructor = MagicMock(return_value=user_workspace)
+    monkeypatch.setattr(deps, "get_ws", lambda: workspace)
+    monkeypatch.setattr(
+        deps,
+        "get_settings",
+        lambda: deps.Settings(warehouse_id="warehouse-1"),
+    )
+    monkeypatch.setattr(
+        identity_module,
+        "forwarded_user_workspace_client",
+        constructor,
+    )
+
+    repository = deps.get_user_control_plane_repository(
+        _request({"X-Forwarded-Access-Token": "opaque-user-token"})
+    )
+
+    assert repository.workspace_client is user_workspace
+    constructor.assert_called_once_with(
+        "https://workspace.example",
+        "opaque-user-token",
+    )
 
 
 def test_viewer_response_masks_proposer_approver_and_owner_identity():
