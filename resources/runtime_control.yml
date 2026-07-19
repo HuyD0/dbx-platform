@@ -51,6 +51,10 @@ resources:
         project: dbx-platform
         control_plane: power-controller
       permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          # The controller verifies the launcher and exact run metadata through
+          # Jobs API get/get-run before it plans or mutates anything.
+          level: CAN_VIEW
         - group_name: ${var.approver_group}
           level: CAN_MANAGE_RUN
         - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
