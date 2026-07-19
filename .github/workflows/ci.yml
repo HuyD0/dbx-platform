@@ -36,7 +36,9 @@ jobs:
           wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
           mkdir -p apps/platform-console/wheels
           cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
-          uv lock --project apps/platform-console
+          # The local wheel keeps the same name/version while its contents change.
+          # Refresh it explicitly so uv records the newly built artifact hash.
+          uv lock --refresh-package dbx-platform --project apps/platform-console
           uv sync --frozen --project apps/platform-console --no-install-project
           apps/platform-console/.venv/bin/python -m unittest discover \
             -s apps/platform-console/tests -v
@@ -52,6 +54,11 @@ jobs:
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
     runs-on: ubuntu-latest
+    # Visual baselines are generated in this exact image. Pinning its digest
+    # keeps Chromium, system fonts, and rasterization stable across runner updates.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --ipc=host
     permissions:
       contents: read
     steps:
@@ -70,6 +77,17 @@ jobs:
       - name: Typecheck and build
         working-directory: apps/platform-console/frontend
         run: npm run build
+      - name: Responsive browser and visual tests
+        working-directory: apps/platform-console/frontend
+        run: npm run test:e2e
+      - name: Upload browser test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-console-playwright-report
+          path: apps/platform-console/frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   bundle-validate:
     # Push/dispatch only — never on pull_request. The `production` environment

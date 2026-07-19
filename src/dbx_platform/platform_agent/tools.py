@@ -131,26 +131,49 @@ def get_llm_cost_and_efficiency(days: int = 30) -> str:
 
     s = _settings()
     w = _client()
+    workspace_id = str(w.get_workspace_id())
     try:
         cost_rows = llm_cost.databricks_cost(
-            w, s.warehouse_id, days, gateway_enriched=True
+            w,
+            s.warehouse_id,
+            days,
+            gateway_enriched=True,
+            workspace_id=workspace_id,
         )
     except Exception:  # noqa: BLE001 - compatibility with pre-Gateway schemas
         cost_rows = llm_cost.databricks_cost(
-            w, s.warehouse_id, days, gateway_enriched=False
+            w,
+            s.warehouse_id,
+            days,
+            gateway_enriched=False,
+            workspace_id=workspace_id,
         )
     try:
-        usage_rows = llm_cost.gateway_usage(w, s.warehouse_id, min(days, 90))
+        usage_rows = llm_cost.gateway_usage(
+            w,
+            s.warehouse_id,
+            min(days, 90),
+            workspace_id=workspace_id,
+        )
     except Exception:  # noqa: BLE001 - compatibility with serving usage
-        usage_rows = llm_cost.endpoint_usage(w, s.warehouse_id, min(days, 90))
+        usage_rows = llm_cost.endpoint_usage(
+            w,
+            s.warehouse_id,
+            min(days, 90),
+            workspace_id=workspace_id,
+        )
     costs = llm_cost.normalize_cost_rows(
         cost_rows,
         "system.billing.usage",
         "DATABRICKS_LIST",
         environment=s.environment,
+        workspace_id=workspace_id,
     )
     usage = llm_cost.normalize_usage_rows(
-        usage_rows, "model usage", environment=s.environment
+        usage_rows,
+        "model usage",
+        environment=s.environment,
+        workspace_id=workspace_id,
     )
     summary = llm_cost.summarize(costs, usage, days)
     efficiency_report = llm_cost.efficiency(costs, usage)

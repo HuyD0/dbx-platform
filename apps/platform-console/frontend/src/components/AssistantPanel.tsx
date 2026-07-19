@@ -1,4 +1,4 @@
-import { Bot, Eraser, X } from "lucide-react";
+import { Bot, Eraser, LockKeyhole, X } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useChat } from "../lib/chat";
@@ -7,7 +7,7 @@ import { ChatThread } from "./ChatThread";
 /** Slide-over assistant available on every page, sharing the Chat page's
  * conversation. Esc closes it; the header link expands to the full page. */
 export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { clear, turns } = useChat();
+  const { clear, focus, setFocus, turns } = useChat();
   const navigate = useNavigate();
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -104,6 +104,28 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
           </button>
         </div>
       </div>
+      <div className="border-b border-grid px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3 text-[11px]">
+          <span className="inline-flex items-center gap-1.5 font-medium text-ink-2">
+            <LockKeyhole className="h-3.5 w-3.5 text-accent" />
+            Read-only — cannot execute changes
+          </span>
+          {focus && (
+            <button
+              type="button"
+              onClick={() => setFocus(null)}
+              className="rounded-md px-1.5 py-1 text-muted hover:bg-hairline hover:text-ink"
+            >
+              Clear focus
+            </button>
+          )}
+        </div>
+        {focus && (
+          <p className="mt-1 truncate text-xs text-ink" title={focus.label}>
+            Focused on: {focus.label}
+          </p>
+        )}
+      </div>
       <ChatThread compact />
     </div>
   );
@@ -112,11 +134,15 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
 /** Floating pill that opens the assistant — hidden on the full chat page. */
 export function AssistantLauncher({ onOpen }: { onOpen: () => void }) {
   const location = useLocation();
-  if (["/chat", "/assistant"].includes(location.pathname)) return null;
+  const { setFocus } = useChat();
+  if (["/", "/chat", "/assistant"].includes(location.pathname)) return null;
   return (
     <button
       type="button"
-      onClick={onOpen}
+      onClick={() => {
+        setFocus(null);
+        onOpen();
+      }}
       aria-label="Ask agent"
       className="fixed bottom-4 right-4 z-30 flex h-11 w-11 items-center justify-center gap-2 rounded-full bg-accent text-sm font-medium text-white shadow-xl transition-transform hover:scale-105 sm:bottom-5 sm:right-5 sm:h-auto sm:w-auto sm:px-4 sm:py-2.5"
     >

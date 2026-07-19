@@ -2,20 +2,29 @@ import { useMutation } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { apiPost } from "./api";
-import type { ChatResponse, Proposal } from "./types";
+import type { AssistantCitation, ChatResponse, Proposal } from "./types";
+
+export interface ChatFocus {
+  actionId: string;
+  label: string;
+}
 
 export interface Turn {
   role: "user" | "assistant";
   content: string;
   proposals?: Proposal[];
+  citations?: AssistantCitation[];
+  focusActionId?: string;
 }
 
 interface ChatState {
   turns: Turn[];
   pending: boolean;
   error: unknown;
-  send: (text: string) => void;
+  focus: ChatFocus | null;
+  send: (text: string, focusOverride?: ChatFocus | null) => void;
   clear: () => void;
+  setFocus: (focus: ChatFocus | null) => void;
 }
 
 /** One conversation shared by the Chat page and the slide-over assistant
@@ -25,10 +34,17 @@ const ChatContext = createContext<ChatState | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [focus, setFocus] = useState<ChatFocus | null>(null);
   const location = useLocation();
 
   const mutation = useMutation({
-    mutationFn: (history: Turn[]) => {
+    mutationFn: ({
+      history,
+      requestFocus,
+    }: {
+      history: Turn[];
+      requestFocus: ChatFocus | null;
+    }) => {
       const search = new URLSearchParams(location.search);
       const filters = Object.fromEntries(
         Array.from(search.entries()).slice(0, 30),
@@ -38,29 +54,37 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         context: {
           route: location.pathname,
           query: location.search,
+          focus_action_id: requestFocus?.actionId,
           filters,
           selected_resources: [],
         },
       });
     },
-    onSuccess: (resp) =>
+    onSuccess: (resp, variables) =>
       setTurns((t) => [
         ...t,
-        { role: "assistant", content: resp.message, proposals: resp.proposals },
+        {
+          role: "assistant",
+          content: resp.message,
+          proposals: resp.proposals,
+          citations: resp.citations ?? [],
+          focusActionId: variables.requestFocus?.actionId,
+        },
       ]),
   });
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, focusOverride?: ChatFocus | null) => {
       const trimmed = text.trim();
       if (!trimmed || mutation.isPending) return;
+      const requestFocus = focusOverride === undefined ? focus : focusOverride;
       setTurns((prev) => {
         const next: Turn[] = [...prev, { role: "user", content: trimmed }];
-        mutation.mutate(next);
+        mutation.mutate({ history: next, requestFocus });
         return next;
       });
     },
-    [mutation],
+    [focus, mutation],
   );
 
   const clear = useCallback(() => {
@@ -69,8 +93,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [mutation]);
 
   const value = useMemo(
-    () => ({ turns, pending: mutation.isPending, error: mutation.error, send, clear }),
-    [turns, mutation.isPending, mutation.error, send, clear],
+    () => ({
+      turns,
+      pending: mutation.isPending,
+      error: mutation.error,
+      focus,
+      send,
+      clear,
+      setFocus,
+    }),
+    [turns, mutation.isPending, mutation.error, focus, send, clear],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

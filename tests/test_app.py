@@ -32,7 +32,9 @@ APP_FILES = sorted(
 sys.path.insert(0, str(APP_DIR))
 
 from backend import cache, deps  # noqa: E402
-from backend.proposals import parse_proposals  # noqa: E402
+from backend.control_plane import ActionRequest, Actor, RiskLevel  # noqa: E402
+from backend.control_plane_repository import InMemoryControlPlaneRepository  # noqa: E402
+from backend.proposals import parse_evidence_citations, parse_proposals  # noqa: E402
 from backend.routers import actions  # noqa: E402
 
 from dbx_platform.config import Settings  # noqa: E402
@@ -482,6 +484,9 @@ def test_chat_parses_backend_agent_proposals(client, monkeypatch):
     agent.invoke.return_value = (
         "Two stale clusters are burning money.\n"
         'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
+        "EVIDENCE:tool=get_canonical_findings;"
+        "source=canonical platform_findings;"
+        "observed_at=2026-07-18T12:00:00+00:00\n"
     )
     monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post(
@@ -500,12 +505,138 @@ def test_chat_parses_backend_agent_proposals(client, monkeypatch):
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
+    assert body["citations"] == [
+        {
+            "citation_id": body["citations"][0]["citation_id"],
+            "tool": "get_canonical_findings",
+            "source": "canonical platform_findings",
+            "observed_at": "2026-07-18T12:00:00+00:00",
+        }
+    ]
     invocation = agent.invoke.call_args.args[0]
     assert invocation[0]["role"] == "system"
     assert "Every factual claim must cite" in invocation[0]["content"]
-    assert "PAGE_CONTEXT" in invocation[1]["content"]
-    assert "/security-risk" in invocation[1]["content"]
+    assert "PAGE_CONTEXT" in invocation[0]["content"]
+    assert "/security-risk" in invocation[0]["content"]
     assert invocation[-1] == {"role": "user", "content": "clean up"}
+
+
+def test_chat_resolves_focused_action_server_side(client, monkeypatch):
+    workspace_id, environment = deps.control_plane_scope()
+    action = ActionRequest.create(
+        action_type="policy-sync",
+        workspace_id=workspace_id,
+        environment=environment,
+        targets=[
+            {
+                "resource_type": "POLICY",
+                "resource_id": "policy-1",
+                "owner_email": "operator@example.com",
+                "notes": ("x" * 2_000) + "TARGET_SENTINEL_END",
+                "confirm_phrase": "DO NOT SEND THIS PHRASE",
+                "execution_payload": {"operation": "DO_NOT_SEND"},
+            }
+        ],
+        parameters={},
+        preconditions={"state_sha256": "abc"},
+        before_state={},
+        after_state={},
+        impact={
+            "target_count": 1,
+            "analysis": ("y" * 2_000) + "IMPACT_SENTINEL_END",
+        },
+        rollback={"supported": False},
+        verification={"strategy": "re-read"},
+        risk=RiskLevel.MEDIUM,
+        proposer=Actor(
+            actor_id="test-operator",
+            roles=frozenset({"operator", "proposer"}),
+        ),
+    )
+    deps.get_control_plane_repository().create_action(action)
+    agent = MagicMock()
+    agent.invoke.return_value = "This exact plan remains read-only."
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": action.action_id},
+        },
+    )
+
+    assert response.status_code == 200
+    trusted = agent.invoke.call_args.args[0][0]["content"]
+    assert "TRUSTED_ACTION_CONTEXT" in trusted
+    assert action.action_id in trusted
+    assert "policy-sync" in trusted
+    assert action.confirm_phrase not in trusted
+    assert "DO NOT SEND THIS PHRASE" not in trusted
+    assert "DO_NOT_SEND" not in trusted
+    assert "operator@example.com" not in trusted
+    assert "[redacted]" in trusted
+    assert "TARGET_SENTINEL_END" not in trusted
+    assert "IMPACT_SENTINEL_END" not in trusted
+    assert "[truncated]" in trusted
+
+
+def test_chat_rejects_unknown_focused_action(client, monkeypatch):
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": "missing-action"},
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "action_not_found"
+    agent.invoke.assert_not_called()
+
+
+def test_chat_rejects_out_of_scope_focused_action(client, monkeypatch):
+    workspace_id, environment = deps.control_plane_scope()
+    repository = InMemoryControlPlaneRepository()
+    foreign = ActionRequest.create(
+        action_type="policy-sync",
+        workspace_id=f"{workspace_id}-foreign",
+        environment=environment,
+        targets=[{"resource_type": "POLICY", "resource_id": "policy-foreign"}],
+        parameters={},
+        preconditions={"state_sha256": "foreign"},
+        before_state={},
+        after_state={},
+        impact={"target_count": 1},
+        rollback={"supported": False},
+        verification={"strategy": "re-read"},
+        risk=RiskLevel.MEDIUM,
+        proposer=Actor(
+            actor_id="foreign-operator",
+            roles=frozenset({"operator", "proposer"}),
+        ),
+    )
+    repository.create_action(foreign)
+    repository.workspace_id = workspace_id
+    repository.environment = environment
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_control_plane_repository", lambda: repository)
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": foreign.action_id},
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "action_not_found"
+    agent.invoke.assert_not_called()
 
 
 # --- proposal marker parsing (pure) ----------------------------------------
@@ -533,3 +664,23 @@ def test_parse_proposals_leaves_malformed_markers_visible():
     clean, proposals = parse_proposals(text)
     assert clean == text
     assert proposals == []
+
+
+def test_parse_evidence_citations_deduplicates_and_preserves_malformed_markers():
+    valid = (
+        "EVIDENCE:tool=security-audit;source=platform_findings;"
+        "observed_at=2026-07-18T12:00:00+00:00"
+    )
+    malformed = "EVIDENCE:tool=security-audit;source=platform_findings"
+    invalid_time = (
+        "EVIDENCE:tool=security-audit;source=platform_findings;"
+        "observed_at=recently"
+    )
+    clean, citations = parse_evidence_citations(
+        f"Grounded answer.\n{valid}\n{valid}\n{malformed}\n{invalid_time}"
+    )
+
+    assert clean == f"Grounded answer.\n\n{malformed}\n{invalid_time}"
+    assert len(citations) == 1
+    assert citations[0]["tool"] == "security-audit"
+    assert citations[0]["source"] == "platform_findings"

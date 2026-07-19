@@ -5,14 +5,14 @@ import { MemoryRouter } from "react-router-dom";
 import { expect, test, vi } from "vitest";
 import App from "./App";
 
-function renderApp() {
+function renderApp(initialEntry = "/") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter
-        initialEntries={["/"]}
+        initialEntries={[initialEntry]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <App />
@@ -20,6 +20,27 @@ function renderApp() {
     </QueryClientProvider>,
   );
 }
+
+test("global assistant launcher does not cover Mission Control decision actions", () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: "dependency_unavailable",
+          message: "Test source unavailable.",
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const mission = renderApp("/");
+  expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+  mission.unmount();
+
+  renderApp("/actions");
+  expect(screen.getByRole("button", { name: "Ask agent" })).toBeInTheDocument();
+});
 
 test("skip link and mobile drawer are keyboard complete", async () => {
   const user = userEvent.setup();
@@ -218,7 +239,7 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   ).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Cost" })).toBeInTheDocument();
   expect(
-    screen.getByRole("heading", { name: "Synchronize cluster policies" }),
+    screen.getByRole("heading", { name: "Synchronize managed policies" }),
   ).toBeInTheDocument();
   expect(screen.getByText("3 affected resources")).toBeInTheDocument();
   expect(screen.getByText("Exact plan required")).toBeInTheDocument();

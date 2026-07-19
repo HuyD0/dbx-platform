@@ -104,10 +104,10 @@ function Navigation({
         end={to === "/"}
         onClick={onNavigate}
         className={({ isActive }) =>
-          `group flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition-colors ${
+          `group flex items-center gap-2.5 rounded-xl border-l-2 px-2.5 py-2 text-[13px] font-medium transition-colors ${
             isActive
-              ? "bg-accent/12 text-accent"
-              : "text-ink-2 hover:bg-hairline hover:text-ink"
+              ? "border-transparent bg-tint text-accent"
+              : "border-transparent text-ink-2 hover:bg-hairline hover:text-ink"
           }`
         }
       >
@@ -317,7 +317,9 @@ export default function App() {
             </div>
           </main>
 
-          {!mobileNavOpen && <AssistantLauncher onOpen={() => setAssistantOpen(true)} />}
+          {!mobileNavOpen && location.pathname !== "/" && (
+            <AssistantLauncher onOpen={() => setAssistantOpen(true)} />
+          )}
           <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         </div>
       </AssistantPanelProvider>
