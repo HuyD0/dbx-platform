@@ -238,7 +238,10 @@ Key placements:
      a new `queries/usage_by_tag.sql` (COALESCE `custom_tags['team']` →
      `'unallocated'`, joined to `list_prices` exactly like `product_spend.sql`),
      validated against a frozen allowlist copying the `BREAKDOWN_DIMENSIONS` pattern
-     from `llm_cost.py:32`.
+     from `llm_cost.py:32`. Name the columns after FOCUS (§9) from day one —
+     `SubAccountId` (=workspace_id), `ServiceName` (=billing_origin_product),
+     `SkuId`, `Tags`, `x_Team`/`x_UseCase` — so Databricks and Azure rows share one
+     schema and the team learns industry-standard vocabulary, not repo dialect.
 3. **Tag coverage funnel** (Data Governance): three stages, each from an existing
    endpoint, each linking to its fix —
    **enforced by policy** (`/api/governance/policy-drift` + `/tag-compliance`; the
@@ -275,8 +278,12 @@ approval-gated action is the ceiling.
 ### 6.4 Enablement
 
 - **Glossary** (~40 entries: DBU, list vs actual cost, meter, resource group, PTU vs
-  PAYG, `billing_origin_product`, TTFT…) wired into the existing `HelpTip` on every
-  KPI label.
+  PAYG, `billing_origin_product`, TTFT, FOCUS, FinOps, ListCost vs BilledCost vs
+  EffectiveCost…) wired into the existing `HelpTip` on every KPI label.
+- **A standard curriculum instead of a homegrown one**: the FinOps Foundation's free
+  training (including "Introduction to FOCUS") plus the FinOps Framework capability
+  names used on this review's scorecard (§2, §9) give a team new to both platforms
+  an industry-recognized learning path the console can link to directly.
 - **"Why this matters" explainers** on section titles, with links to Microsoft
   Learn/Databricks docs and to the matching dashboard (e.g., on Azure & Foundry:
   "Azure OpenAI bills under 'Cognitive Services'; fine-tuned hosting bills hourly
@@ -308,10 +315,17 @@ SQL builder, per repo convention).
 
 **Phase 3 — genuinely new collection + presentation foundation** (~4–6 weeks,
 highest risk). Only three things truly require *new* data rather than surfacing:
-1. **Azure resource-tag ingestion** (extend the existing Resource Graph fetch; join
-   `resource_id → team/project` — including Foundry's auto-applied `project` tag —
-   into the LLM rollup so AZURE_ACTUAL rows stop being `unallocated`). This closes
-   the one real data gap in the attribution story.
+1. **Azure tag-attributed cost ingestion — preferably via the FOCUS export** (§9):
+   Microsoft Cost Management natively exports FOCUS-formatted cost data (Parquet,
+   daily, to a storage account), and the FOCUS dataset carries the **`Tags` column
+   natively** along with resource, meter, and amortized cost in one feed. Ingesting
+   it closes the `team='unallocated'` gap on AZURE_ACTUAL rows (including Foundry's
+   auto-applied `project` tag) with a standard schema instead of a custom join.
+   Prerequisites: EA/MCA billing (FOCUS exports aren't supported on legacy
+   MOSP/pay-as-you-go), a storage account, and ~daily latency. Fallback if those
+   don't hold: extend the existing Resource Graph fetch to pull resource tags and
+   join `resource_id → team/project` into the LLM rollup (zero new infra, but a
+   bespoke mapping to maintain).
 2. **Native Databricks budget / budget-policy read-through** so the Budgets tab shows
    configured-vs-actual meters instead of a link-out (read-only; creation stays in
    the account console).
@@ -336,6 +350,52 @@ the persona's core question ("trending toward budget?") is unanswerable in table
 - **Tag writing from the console** — recommendations flow into the plan/approve
   path; no direct tag mutation, ever.
 
+## 9. FOCUS & FinOps Framework alignment
+
+[FOCUS](https://focus.finops.org/) (FinOps Open Cost and Usage Specification) is the
+FinOps Foundation's open, provider-agnostic billing schema — standard column names
+and semantics (`BilledCost`, `ListCost`, `EffectiveCost`, `ChargePeriodStart/End`,
+`ServiceName`, `ServiceCategory`, `SubAccountId`, `SkuId`, `Tags`,
+`PricingQuantity`/`PricingUnit`) so every vendor's bill reads the same. FOCUS 1.2
+went GA in 2025 and extended the spec toward SaaS/PaaS providers. The
+[FinOps Framework](https://www.finops.org/) is the surrounding discipline:
+capabilities such as allocation, anomaly management, forecasting, budgeting, unit
+economics, and workload optimization, organized into Inform → Optimize → Operate.
+
+Both apply to this redesign in five concrete ways:
+
+1. **FOCUS names the distinction this codebase already invented.** The app's
+   `cost_basis` separation — `DATABRICKS_LIST` vs `AZURE_ACTUAL` vs
+   `PROVIDER_ESTIMATE`, deliberately never blended (§5.3) — is FOCUS's `ListCost` vs
+   `BilledCost`/`EffectiveCost` distinction. Adopt the standard vocabulary in labels
+   and the glossary; keep the non-blending behavior exactly as is.
+2. **FOCUS-aligned schema for the new attribution endpoints** (§6.2):
+   `workspace_id → SubAccountId`, `billing_origin_product → ServiceName`,
+   `sku_name → SkuId`, `custom_tags → Tags`, with `x_Team`/`x_UseCase` following
+   FOCUS's `x_` convention for custom columns. Note: Databricks has no native FOCUS
+   export confirmed in its official docs as of 2026-07; `system.billing.usage` maps
+   cleanly and community mappings are well-established, so the console need not wait
+   on the vendor.
+3. **The Azure FOCUS export is the preferred Phase 3 implementation** for
+   tag-attributed Foundry cost (§7 Phase 3 item 1): one standard daily Parquet feed
+   with `Tags`, resource, meter, and amortized cost — replacing a bespoke Resource
+   Graph tag-join, subject to the EA/MCA prerequisite.
+4. **FinOps capability names on the scorecard.** The gaps in §2–§4 are, in framework
+   terms: *allocation* (the attribution spine), *anomaly management* + *budgeting*
+   (the proactive layer), *forecasting* (per-series forecasts), *workload
+   optimization* (right-sizing findings), and *unit economics* (the LLM tokenomics
+   endpoint already computes cost per request/successful task — label it with the
+   standard term). Using these names makes progress measurable against an external
+   yardstick and gives the team a shared language with finance. The console's
+   viewer/operator/approver roles map naturally onto FinOps personas.
+5. **Interop for free.** FOCUS-formatted data plugs into Microsoft's FinOps toolkit,
+   Fabric FinOps workspaces, and Power BI templates — reinforcing §8: finance-facing
+   reporting is consumed downstream, not rebuilt in the console.
+
+Scope limit, stated honestly: FOCUS standardizes *billing* data. Token-level and
+request-level attribution (gateway telemetry, TTFT, per-request tags) remain the job
+of `system.ai_gateway.usage` and the LLM ledger — already the right design.
+
 ---
 
 *Method note: findings compiled from three parallel code audits (frontend IA,
@@ -344,4 +404,7 @@ load-bearing claims re-verified directly: the `by="service"` hardcode
 (`backend/routers/cost.py:90`), the environment-only workspace card
 (`frontend/src/App.tsx:128-134`), zero `custom_tags` selections in the general cost
 SQL, zero app references to `ai_model_catalog`/`ai_model_access`/`ai_app_monitoring`,
-and zero frontend occurrences of foundry/openai/cognitive.*
+and zero frontend occurrences of foundry/openai/cognitive. FOCUS/FinOps references:
+the FOCUS specification (focus.finops.org), the FinOps Framework (finops.org), and
+[Microsoft Cost Management exports](https://learn.microsoft.com/azure/cost-management-billing/costs/tutorial-improved-exports)
+(FOCUS dataset support, formats, and agreement-type limitations).*
