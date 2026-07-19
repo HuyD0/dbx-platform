@@ -68,6 +68,7 @@ class InMemoryControlPlaneRepository:
         self._findings: list[dict[str, Any]] = []
         self._resources: list[dict[str, Any]] = []
         self._runtime: dict[tuple[str, str], dict[str, Any]] = {}
+        self._estimates: list[dict[str, Any]] = []
         self._lock = threading.RLock()
 
     def _in_scope(self, action: ActionRequest) -> bool:
@@ -301,6 +302,64 @@ class InMemoryControlPlaneRepository:
                 if row.get("workspace_id") == workspace_id
                 and row.get("environment") == environment
             ]
+
+    def record_estimate(self, record: dict[str, Any]) -> dict[str, Any]:
+        stored = {**record, "created_at": utc_now().isoformat()}
+        with self._lock:
+            if any(
+                row["estimate_id"] == stored.get("estimate_id")
+                for row in self._estimates
+            ):
+                raise ActionConflictError(
+                    f"Estimate {stored.get('estimate_id')} already exists."
+                )
+            self._estimates.append(dict(stored))
+        return dict(stored)
+
+    def _estimate_in_scope(self, row: dict[str, Any]) -> bool:
+        return (
+            self.workspace_id is None or row.get("workspace_id") == self.workspace_id
+        ) and (self.environment is None or row.get("environment") == self.environment)
+
+    def list_estimates(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = [
+                {k: v for k, v in row.items() if k != "results_json"}
+                for row in self._estimates
+                if self._estimate_in_scope(row)
+            ]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return rows[: max(1, min(limit, 500))]
+
+    def get_estimate(self, estimate_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            for row in self._estimates:
+                if row.get("estimate_id") == estimate_id and self._estimate_in_scope(row):
+                    return dict(row)
+        return None
+
+    def find_similar_estimates(
+        self,
+        *,
+        pattern: str,
+        lo: int,
+        hi: int,
+        requirements_hash: str = "",
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = [
+                {k: v for k, v in row.items() if k != "results_json"}
+                for row in self._estimates
+                if self._estimate_in_scope(row)
+                and row.get("pattern") == pattern
+                and (
+                    (requirements_hash and row.get("requirements_hash") == requirements_hash)
+                    or lo <= int(row.get("monthly_requests") or 0) < hi
+                )
+            ]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return rows[: max(1, min(limit, 20))]
 
     # Test/local seeding helpers. They are not part of the production protocol.
     def add_finding(self, finding: dict[str, Any]) -> None:
@@ -1113,3 +1172,98 @@ LIMIT :limit""",
         for row in rows:
             row["metadata"] = json.loads(row.pop("metadata_json") or "{}")
         return rows
+
+    # --- saved-estimate library (append via cp_record_estimate, direct reads) ---
+
+    _ESTIMATE_LIST_COLUMNS = (
+        "estimate_id, created_at, created_by, title, pattern, monthly_requests, "
+        "corpus_gb, requirements_json, requirements_hash, engine_version, "
+        "rate_card_version, snapshot_date, rigor_pct"
+    )
+
+    def record_estimate(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Append one estimate through the security-definer procedure.
+
+        The App identity has no MODIFY on the table; ``cp_record_estimate``
+        revalidates the document and stamps ``created_at`` server-side.
+        """
+        self.initialize()
+        parameters = {
+            "workspace_id": str(record["workspace_id"]),
+            "environment": str(record["environment"]),
+            "estimate_id": str(record["estimate_id"]),
+            "created_by": str(record["created_by"]),
+            "title": str(record["title"]),
+            "pattern": str(record["pattern"]),
+            "monthly_requests": str(int(record["monthly_requests"])),
+            "corpus_gb": str(float(record.get("corpus_gb") or 0.0)),
+            "requirements_json": str(record["requirements_json"]),
+            "requirements_hash": str(record["requirements_hash"]),
+            "engine_version": str(record.get("engine_version") or ""),
+            "rate_card_version": str(record.get("rate_card_version") or ""),
+            "snapshot_date": str(record.get("snapshot_date") or ""),
+            "rigor_pct": str(int(record.get("rigor_pct") or 0)),
+            "results_json": str(record["results_json"]),
+        }
+        self._run(
+            f"CALL {self._procedure('cp_record_estimate')}("
+            ":workspace_id, :environment, :estimate_id, :created_by, :title, "
+            ":pattern, :monthly_requests, :corpus_gb, :requirements_json, "
+            ":requirements_hash, :engine_version, :rate_card_version, "
+            ":snapshot_date, :rigor_pct, :results_json)",
+            parameters,
+        )
+        return dict(record)
+
+    def list_estimates(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        self.initialize()
+        parameters: dict[str, int | str] = {"limit": max(1, min(limit, 500))}
+        scope = self._scope_sql(parameters)
+        return self._run(
+            f"SELECT {self._ESTIMATE_LIST_COLUMNS} "
+            f"FROM {self._table('estimator_estimates')} "
+            f"WHERE {scope} ORDER BY created_at DESC LIMIT :limit",
+            parameters,
+        )
+
+    def get_estimate(self, estimate_id: str) -> dict[str, Any] | None:
+        self.initialize()
+        parameters: dict[str, int | str] = {"estimate_id": estimate_id}
+        scope = self._scope_sql(parameters)
+        rows = self._run(
+            f"SELECT {self._ESTIMATE_LIST_COLUMNS}, results_json "
+            f"FROM {self._table('estimator_estimates')} "
+            f"WHERE {scope} AND estimate_id = :estimate_id LIMIT 1",
+            parameters,
+        )
+        return dict(rows[0]) if rows else None
+
+    def find_similar_estimates(
+        self,
+        *,
+        pattern: str,
+        lo: int,
+        hi: int,
+        requirements_hash: str = "",
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Exact-hash matches plus same-pattern, same-order-of-magnitude rows."""
+
+        self.initialize()
+        parameters: dict[str, int | str] = {
+            "pattern": pattern,
+            "lo": int(lo),
+            "hi": int(hi),
+            "requirements_hash": requirements_hash or "",
+            "limit": max(1, min(limit, 20)),
+        }
+        scope = self._scope_sql(parameters)
+        return self._run(
+            f"SELECT {self._ESTIMATE_LIST_COLUMNS} "
+            f"FROM {self._table('estimator_estimates')} "
+            f"WHERE {scope} AND pattern = :pattern "
+            "AND (requirements_hash = :requirements_hash "
+            "OR (monthly_requests >= :lo AND monthly_requests < :hi)) "
+            "ORDER BY created_at DESC LIMIT :limit",
+            parameters,
+        )

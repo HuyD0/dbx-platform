@@ -201,3 +201,131 @@ def extract(body: ExtractRequest, request: Request):
             ),
         )
     return {"requirements": requirements, "warnings": warnings}
+
+
+# --- saved-estimate library ---------------------------------------------------
+
+
+class SaveEstimateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    requirements: dict
+    rigor_pct: int = Field(default=10, ge=0, le=100)
+
+
+def _computed_matrix(requirements, rigor_pct: int):
+    """Recompute an estimate server-side; returns (matrix, error_response)."""
+
+    try:
+        rows, _, _ = _snapshot_rows(requirements.currency)
+    except Exception as error:  # noqa: BLE001 - migration may be pending
+        log.info("estimator price snapshot unavailable", exc_info=error)
+        rows = []
+    if not rows:
+        return None, JSONResponse(
+            status_code=503,
+            content=payload(
+                "pricing_snapshot_missing",
+                "An estimate cannot be saved without a stored price snapshot.",
+                _SNAPSHOT_HINT,
+            ),
+        )
+    book = estimator.build_price_book(rows, estimator.load_rate_card())
+    return estimator.compute_matrix(requirements, rigor_pct=rigor_pct, price_book=book), None
+
+
+@router.post("/estimates/record", dependencies=[Depends(deps.require_operator)])
+def save_estimate(body: SaveEstimateRequest, request: Request):
+    """Persist a confirmed estimate — always recomputed server-side.
+
+    Client-sent totals are never stored: the saved results are the engine's
+    own output for the saved requirements, so the library can never contain a
+    number the engine would not reproduce.
+    """
+    import json as jsonlib
+    import uuid
+
+    actor = deps.require_verified_user(request)
+    try:
+        requirements = estimator.validate_requirements(body.requirements)
+    except ValueError as error:
+        return JSONResponse(
+            status_code=422, content=payload("invalid_requirements", str(error))
+        )
+    matrix, error_response = _computed_matrix(requirements, body.rigor_pct)
+    if error_response is not None:
+        return error_response
+    workspace_id, environment = deps.control_plane_scope()
+    record = {
+        "workspace_id": workspace_id,
+        "environment": environment,
+        "estimate_id": uuid.uuid4().hex,
+        "created_by": actor.actor_id,
+        "title": body.title.strip(),
+        "pattern": requirements.pattern,
+        "monthly_requests": requirements.monthly_requests,
+        "corpus_gb": requirements.corpus_gb,
+        "requirements_json": jsonlib.dumps(
+            matrix["requirements"], sort_keys=True, separators=(",", ":")
+        ),
+        "requirements_hash": matrix["requirements_hash"],
+        "engine_version": matrix["engine_version"],
+        "rate_card_version": matrix["rate_card_version"],
+        "snapshot_date": matrix["snapshot_date"],
+        "rigor_pct": matrix["rigor_pct"],
+        "results_json": jsonlib.dumps(matrix, default=str),
+    }
+    deps.get_user_control_plane_repository(request).record_estimate(record)
+    return {
+        "estimate_id": record["estimate_id"],
+        "requirements_hash": record["requirements_hash"],
+        "snapshot_date": record["snapshot_date"],
+    }
+
+
+@router.get("/estimates")
+def list_estimates(request: Request, limit: int = 100) -> dict:
+    from datetime import UTC, datetime
+
+    # Never cached: a just-saved estimate must appear immediately.
+    rows = deps.get_user_control_plane_repository(request).list_estimates(
+        limit=max(1, min(limit, 500))
+    )
+    return envelope(rows, datetime.now(UTC), False)
+
+
+@router.get("/estimates/similar")
+def similar_estimates(
+    request: Request,
+    pattern: str,
+    monthly_requests: int,
+    requirements_hash: str = "",
+):
+    """Exact + same-order-of-magnitude matches for the review screen.
+
+    Deterministic, structured matching only — never semantic: two
+    similar-sounding descriptions with different numbers must never share an
+    estimate.
+    """
+    if pattern not in estimator.load_patterns()["patterns"]:
+        return JSONResponse(
+            status_code=422,
+            content=payload("invalid_requirements", f"Unknown pattern '{pattern}'."),
+        )
+    lo, hi = estimator.similar_bracket_bounds(max(1, monthly_requests))
+    rows = deps.get_user_control_plane_repository(request).find_similar_estimates(
+        pattern=pattern,
+        lo=lo,
+        hi=hi,
+        requirements_hash=requirements_hash.strip().lower(),
+    )
+    exact = [
+        row
+        for row in rows
+        if requirements_hash
+        and row.get("requirements_hash") == requirements_hash.strip().lower()
+    ]
+    return {
+        "exact_match": exact[0] if exact else None,
+        "similar": [row for row in rows if row not in exact],
+        "bracket": {"lo": lo, "hi": hi},
+    }

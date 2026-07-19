@@ -165,6 +165,34 @@ def scale_bracket(value: float) -> int:
     return int(math.floor(math.log10(value))) if value >= 1 else 0
 
 
+def similar_bracket_bounds(monthly_requests: float) -> tuple[int, int]:
+    """[lo, hi) traffic bounds of the same order-of-magnitude bucket."""
+
+    bracket = scale_bracket(monthly_requests)
+    return (10**bracket if bracket > 0 else 1, 10 ** (bracket + 1))
+
+
+def create_estimates_table_sql(catalog: str, schema: str) -> str:
+    """DDL for the append-only saved-estimate library. Pure.
+
+    Dedicated filter columns (pattern, monthly_requests, corpus_gb,
+    requirements_hash) exist so exact and similar matching are plain indexed
+    predicates — no JSON parsing at read time. Rows are written only through
+    the ``cp_record_estimate`` security-definer procedure.
+    """
+    return (
+        f"CREATE TABLE IF NOT EXISTS {catalog}.{schema}.estimator_estimates ("
+        "workspace_id STRING, environment STRING, estimate_id STRING, "
+        "created_at TIMESTAMP, created_by STRING, title STRING, "
+        "pattern STRING, monthly_requests BIGINT, corpus_gb DOUBLE, "
+        "requirements_json STRING, requirements_hash STRING, "
+        "engine_version STRING, rate_card_version STRING, snapshot_date DATE, "
+        "rigor_pct INT, results_json STRING) "
+        "TBLPROPERTIES ('delta.appendOnly' = 'true') "
+        "COMMENT 'Append-only saved AI solution cost estimates (the reuse library)'"
+    )
+
+
 # --- price book ---------------------------------------------------------------
 
 

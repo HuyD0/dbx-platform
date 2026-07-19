@@ -1,8 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { BlueprintPanel } from "../components/estimator/BlueprintPanel";
+import {
+  EstimateLibrary,
+  SaveEstimateButton,
+} from "../components/estimator/EstimateLibrary";
 import { EvaluationTaxPanel } from "../components/estimator/EvaluationTaxPanel";
 import { LineItemTable } from "../components/estimator/LineItemTable";
+import { SimilarEstimates } from "../components/estimator/SimilarEstimates";
 import { PricingFreshness } from "../components/estimator/PricingFreshness";
 import { RequirementsWizard, type WizardDraft } from "../components/estimator/RequirementsWizard";
 import { ReviewRequirements } from "../components/estimator/ReviewRequirements";
@@ -17,6 +22,7 @@ import {
   type EstimateMatrix,
   type EstimatorPattern,
   type ExtractResponse,
+  type SavedEstimateSummary,
 } from "../lib/types";
 
 type Phase = "wizard" | "review" | "results";
@@ -77,6 +83,16 @@ export function CostPlanner() {
     setPhase("results");
   };
 
+  const reuseSaved = (estimate: SavedEstimateSummary) => {
+    try {
+      setRequirements(JSON.parse(estimate.requirements_json) as Record<string, unknown>);
+    } catch {
+      return; // a malformed stored document must not crash the wizard
+    }
+    setWarnings([`Started from the saved estimate “${estimate.title}”.`]);
+    setPhase("review");
+  };
+
   const matrix = estimate.data?.data;
   const activeTier = matrix?.tiers[tier];
   const activeEstimate = activeTier?.scenarios[scenario];
@@ -125,13 +141,20 @@ export function CostPlanner() {
         ))}
 
       {phase === "review" && (
-        <ReviewRequirements
-          requirements={requirements}
-          warnings={warnings}
-          patternLabel={patternLabel}
-          onConfirm={confirmReview}
-          onBack={() => setPhase("wizard")}
-        />
+        <>
+          <ReviewRequirements
+            requirements={requirements}
+            warnings={warnings}
+            patternLabel={patternLabel}
+            onConfirm={confirmReview}
+            onBack={() => setPhase("wizard")}
+          />
+          <SimilarEstimates
+            pattern={String(requirements.pattern ?? "")}
+            monthlyRequests={Number(requirements.monthly_requests ?? 0)}
+            onReuse={reuseSaved}
+          />
+        </>
       )}
 
       {phase === "results" && (
@@ -144,6 +167,17 @@ export function CostPlanner() {
                 <ScenarioToggle scenario={scenario} onChange={setScenario} />
                 <PricingFreshness snapshotDate={matrix.snapshot_date} />
               </div>
+              {confirmed && (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <SaveEstimateButton requirements={confirmed} rigorPct={rigorPct} />
+                  <SimilarEstimates
+                    pattern={String(confirmed.pattern ?? "")}
+                    monthlyRequests={Number(confirmed.monthly_requests ?? 0)}
+                    requirementsHash={matrix.requirements_hash}
+                    onReuse={reuseSaved}
+                  />
+                </div>
+              )}
               <TcoMatrix
                 matrix={matrix}
                 scenario={scenario}
@@ -166,6 +200,7 @@ export function CostPlanner() {
                 </div>
               )}
               {activeEstimate && <LineItemTable estimate={activeEstimate} />}
+              <EstimateLibrary onReuse={reuseSaved} />
             </div>
           )}
           {!matrix && !estimate.isPending && !estimate.isError && (
