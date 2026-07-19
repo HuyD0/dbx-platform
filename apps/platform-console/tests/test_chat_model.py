@@ -105,15 +105,25 @@ class DatabricksChatModelTests(unittest.TestCase):
             patch("mlflow.set_experiment") as set_experiment,
             patch("mlflow.langchain.autolog") as autolog,
         ):
-            _configure_mlflow_tracing("experiment-123")
+            enabled = _configure_mlflow_tracing("experiment-123")
 
+        self.assertTrue(enabled)
         set_tracking_uri.assert_called_once_with("databricks")
         set_experiment.assert_called_once_with(experiment_id="experiment-123")
         autolog.assert_called_once_with(log_traces=True, silent=True)
 
-    def test_trace_experiment_is_required(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "trace experiment"):
-            _configure_mlflow_tracing("")
+    def test_trace_experiment_is_optional_for_source_only_runs(self) -> None:
+        with (
+            patch("mlflow.set_tracking_uri") as set_tracking_uri,
+            patch("mlflow.set_experiment") as set_experiment,
+            patch("mlflow.langchain.autolog") as autolog,
+        ):
+            enabled = _configure_mlflow_tracing("")
+
+        self.assertFalse(enabled)
+        set_tracking_uri.assert_not_called()
+        set_experiment.assert_not_called()
+        autolog.assert_not_called()
 
 
 if __name__ == "__main__":

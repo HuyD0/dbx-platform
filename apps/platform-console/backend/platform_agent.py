@@ -125,19 +125,18 @@ class DatabricksChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
-def _configure_mlflow_tracing(experiment_id: str) -> None:
-    """Enable production LangGraph tracing against the App-bound experiment."""
+def _configure_mlflow_tracing(experiment_id: str) -> bool:
+    """Enable LangGraph tracing when the App-bound experiment is configured."""
 
     if not experiment_id:
-        raise RuntimeError(
-            "The App-bound MLflow trace experiment is not configured."
-        )
+        return False
     import mlflow
     import mlflow.langchain
 
     mlflow.set_tracking_uri("databricks")
     mlflow.set_experiment(experiment_id=experiment_id)
     mlflow.langchain.autolog(log_traces=True, silent=True)
+    return True
 
 
 class PlatformAgent:
