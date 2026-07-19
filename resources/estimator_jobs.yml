@@ -4,7 +4,76 @@
 # pull writes only from its periodic run or an exact executor-approved manual
 # run; estimates themselves are pure reads stamped with the snapshot date.
 resources:
+  experiments:
+    estimator_extraction_eval:
+      name: /Shared/dbx-platform-${bundle.target}-estimator-extraction-eval
+      lifecycle:
+        prevent_destroy: true
   jobs:
+    estimator_prompt_sync:
+      # Deployment-run (like schema_migrations): registers the wheel's
+      # extraction prompt texts in the UC prompt registry, tagged by content
+      # hash, so every trace/version/commit points at identical bytes. Skips
+      # unchanged hashes; never fetched at runtime.
+      name: "[dbx-platform] estimator-prompt-sync"
+      description: >
+        Syncs the wheel-shipped extraction prompts to the Unity Catalog
+        prompt registry with content-hash tags. Run by the deploy workflow
+        after schema_migrations; idempotent.
+      max_concurrent_runs: 1
+      timeout_seconds: 900
+      tags:
+        team: platform
+        project: dbx-platform
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+      tasks:
+        - task_key: prompts_sync
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters: ["estimator", "prompts-sync"]
+
+    estimator_extraction_eval:
+      # Manual quality gate for prompt changes: runs the wheel-shipped golden
+      # dataset through the real two-stage extraction against the chat
+      # endpoint and logs code-scorer metrics (pattern accuracy, field
+      # tolerance, validation pass rate) to the bundle experiment. Fails the
+      # run below the pattern-accuracy floor so a regressing prompt change is
+      # a red job, not a quiet drift.
+      name: "[dbx-platform] estimator-extraction-eval"
+      description: >
+        Golden-dataset extraction eval with pure code scorers, logged to the
+        estimator_extraction_eval MLflow experiment. Read-only against the
+        workspace apart from its own experiment runs.
+      max_concurrent_runs: 1
+      timeout_seconds: 1800
+      tags:
+        team: platform
+        project: dbx-platform
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+      tasks:
+        - task_key: eval_extraction
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "eval-extraction",
+               "--experiment", "${resources.experiments.estimator_extraction_eval.id}"]
+
     estimator_prices_pull:
       name: "[dbx-platform] estimator-prices-pull"
       description: >

@@ -54,6 +54,7 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/tiers.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/patterns.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/prompts/estimator_pattern_classify.md"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/extraction_eval.jsonl"
 
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
