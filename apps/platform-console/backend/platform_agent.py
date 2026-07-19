@@ -150,7 +150,8 @@ class PlatformAgent:
         from langgraph.prebuilt import create_react_agent
 
         experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "").strip()
-        configure_mlflow_tracing(experiment_id)
+        if experiment_id:
+            configure_mlflow_tracing(experiment_id)
 
         shared_tools.configure_runtime(
             client_factory=self.workspace_client_factory,
