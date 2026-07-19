@@ -88,7 +88,7 @@ def failed_run_waste(days: int = 30, limit: int = 20, refresh: bool = False) -> 
 
 
 @router.get("/azure")
-def azure(days: int = 30, refresh: bool = False) -> dict:
+def azure(days: int = 30, by: str = "service", refresh: bool = False) -> dict:
     days = deps.clamp_days(days)
 
     def load() -> list[dict]:
@@ -98,11 +98,11 @@ def azure(days: int = 30, refresh: bool = False) -> dict:
             deps.warehouse_id(),
             s.dashboard_catalog,
             s.dashboard_schema,
-            "service",
+            by,
             days,
         )
 
-    data, as_of, hit = cache.cached(f"cost/azure/{days}", load, refresh)
+    data, as_of, hit = cache.cached(f"cost/azure/{by}/{days}", load, refresh)
     return envelope(data, as_of, hit)
 
 

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
 import { DataTable } from "../components/DataTable";
@@ -26,33 +27,117 @@ const COST_TABS = [
   { id: "budgets", label: "Budgets & forecasts" },
 ];
 
+const AZURE_WINDOWS = [7, 30, 90];
+
+const AZURE_DIMENSIONS = [
+  { id: "service", label: "Service" },
+  { id: "bucket", label: "Bucket" },
+  { id: "resource-group", label: "Resource group" },
+];
+
+const AZURE_DIMENSION_SUBTITLES: Record<string, string> = {
+  service: "Billed actuals per Azure service — Azure OpenAI appears under Cognitive Services",
+  bucket:
+    "Billed actuals per allocation bucket — foundry_ai isolates Azure OpenAI, AI Foundry and Azure ML spend",
+  "resource-group": "Billed actuals per resource group for chargeback",
+};
+
+function ForecastBySeries({ rows }: { rows: Row[] }) {
+  const bySeries = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = String(row.series ?? "total");
+    bySeries.set(key, [...(bySeries.get(key) ?? []), row]);
+  }
+  const ordered = [...bySeries.keys()].sort((a, b) => {
+    if (a === "total") return -1;
+    if (b === "total") return 1;
+    return a.localeCompare(b);
+  });
+  return (
+    <div className="space-y-4">
+      {ordered.map((series) => (
+        <div key={series}>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-2">
+            {series}
+          </h3>
+          <DataTable
+            rows={(bySeries.get(series) ?? []).map(({ series: _series, ...rest }) => rest)}
+            caption={`Forecast for the ${series} series`}
+            exportName={`azure-forecast-${series}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AzureCost() {
+  const [days, setDays] = useState(30);
+  const [by, setBy] = useState("service");
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
         Azure amounts are billed actuals from Cost Management. They remain separate from
         Databricks list cost and expose their original currency.
       </div>
+      <div className="flex flex-wrap items-center gap-4 text-xs">
+        <div className="flex items-center gap-1" role="group" aria-label="Azure cost window">
+          <span className="mr-1 text-muted">Window:</span>
+          {AZURE_WINDOWS.map((w) => (
+            <button
+              key={w}
+              type="button"
+              onClick={() => setDays(w)}
+              aria-pressed={days === w}
+              className={`rounded-lg px-2.5 py-1 font-medium ${
+                days === w
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {w}d
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1" role="group" aria-label="Azure cost dimension">
+          <span className="mr-1 text-muted">Group by:</span>
+          {AZURE_DIMENSIONS.map((dimension) => (
+            <button
+              key={dimension.id}
+              type="button"
+              onClick={() => setBy(dimension.id)}
+              aria-pressed={by === dimension.id}
+              className={`rounded-lg px-2.5 py-1 font-medium ${
+                by === dimension.id
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {dimension.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <FindingsSection
         title="Azure actual cost"
-        subtitle="Daily spend by service, resource, meter and allocation tags"
+        subtitle={`${AZURE_DIMENSION_SUBTITLES[by]}, last ${days} days`}
         path="/api/cost/azure"
-        params={{ days: 30 }}
-        emptyMessage="No Azure billing rows in the last 30 days."
+        params={{ days, by }}
+        emptyMessage={`No Azure billing rows in the last ${days} days.`}
       />
       <FindingsSection
         title="Azure spend anomalies"
         subtitle="Material deviations from the trailing baseline"
         path="/api/cost/azure-anomalies"
-        params={{ days: 30 }}
+        params={{ days }}
         emptyMessage="No Azure cost anomaly needs attention."
       />
       <FindingsSection
         title="Azure cost forecast"
-        subtitle="P10, P50 and P90 by service bucket with model freshness"
+        subtitle="P10, P50 and P90 per series — foundry_ai is forecast separately from the total"
         path="/api/cost/azure-forecast"
-        params={{ days: 30 }}
         emptyMessage="No current Azure forecast is available."
+        render={(rows) => <ForecastBySeries rows={rows} />}
       />
     </div>
   );
@@ -132,9 +217,10 @@ function Budgets() {
       </Card>
       <FindingsSection
         title="Consolidated forecast"
-        subtitle="Month-end outlook with explicit currency and cost basis"
+        subtitle="Month-end outlook per series with explicit currency and cost basis"
         path="/api/cost/forecast"
         emptyMessage="No consolidated forecast is ready."
+        render={(rows) => <ForecastBySeries rows={rows} />}
       />
     </div>
   );
@@ -155,7 +241,7 @@ export function CostValue() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="FinOps"
-        title="Cost & Value"
+        title="Cost"
         description="Understand what was billed, why it changed, and what useful outcome each dollar produced."
       />
       <Tabs tabs={COST_TABS} active={active} onChange={setActive} label="Cost and value views" />

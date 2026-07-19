@@ -282,3 +282,71 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   await user.click(screen.getByRole("button", { name: "Close approval dialog" }));
   await waitFor(() => expect(review).toHaveFocus());
 });
+
+test("five-jobs navigation exposes governance homes and the workspace scope", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "prod",
+            actions_enabled: false,
+            workspace_id: "7405609799238491",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+  renderApp("/");
+
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  for (const label of [
+    "Cost",
+    "Data Governance",
+    "AI Governance",
+    "Risk",
+    "Operations",
+    "Learn",
+  ]) {
+    expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+  }
+  expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
+});
+
+test("legacy governance and security URLs land on the split governance pages", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const governance = renderApp("/governance");
+  expect(
+    await governance.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  governance.unmount();
+
+  const security = renderApp("/security?tab=governance");
+  expect(
+    await security.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  security.unmount();
+
+  const risk = renderApp("/security?tab=identity");
+  expect(await risk.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
+  risk.unmount();
+
+  const aiMl = renderApp("/ai-ml");
+  expect(await aiMl.findByRole("heading", { name: "AI Governance" })).toBeInTheDocument();
+});

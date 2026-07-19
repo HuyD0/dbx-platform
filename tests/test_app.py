@@ -684,3 +684,84 @@ def test_parse_evidence_citations_deduplicates_and_preserves_malformed_markers()
     assert len(citations) == 1
     assert citations[0]["tool"] == "security-audit"
     assert citations[0]["source"] == "platform_findings"
+
+
+# --- Phase 1 wiring: workspace scope, Azure by=, AI governance ----------------
+
+def test_health_reports_workspace_scope(client):
+    from backend.routers import meta as meta_router
+
+    meta_router._workspace_id_cache = None
+    body = client.get("/api/health").json()
+    assert body["workspace_id"] == "local"
+
+
+def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_report(w, warehouse, catalog, schema, by, days):
+        captured["by"] = by
+        return [{"service_bucket": "foundry_ai", "cost": 42.0}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report", fake_report)
+    body = client.get("/api/cost/azure?by=bucket").json()
+    assert captured["by"] == "bucket"
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_azure_cost_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/azure?by=meter")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_catalog_serves_persisted_inventory(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "azure:acct/gpt-4o",
+            "source": "azure_openai",
+            "entity_type": "DEPLOYMENT",
+            "key_auth_enabled": True,
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_catalog", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/catalog").json()
+    assert body["data"] == rows
+    assert body["count"] == 1
+
+
+def test_ai_governance_catalog_rejects_unknown_source(client):
+    response = client.get("/api/ai-governance/catalog?source=aws_bedrock")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_access_masks_principals_for_viewers(client, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "uc:models.prod.churn",
+            "principal_name": "alice@example.com",
+            "access_level": "INVOKE",
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_access", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/access").json()
+    assert body["data"][0]["principal_name"] == "[redacted]"
+    assert body["data"][0]["access_level"] == "INVOKE"
+
+
+def test_ai_governance_monitor_serves_per_app_rollup(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [{"app": "support-bot", "requests": 120, "errors": 3}]
+    monkeypatch.setattr(aig.ai_monitor, "report", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/monitor?days=7").json()
+    assert body["data"] == rows

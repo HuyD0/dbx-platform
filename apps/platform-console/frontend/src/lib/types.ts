@@ -128,6 +128,7 @@ export interface HealthResponse {
   build?: { sha: string; built_at: string } | null;
   actions_enabled: boolean;
   environment?: string;
+  workspace_id?: string | null;
 }
 
 export interface SourceHealth {
