@@ -19,6 +19,15 @@ from dbx_platform.config import Settings
 
 @lru_cache(maxsize=1)
 def get_ws():
+    if os.environ.get("DATABRICKS_APP_NAME"):
+        # Databricks Apps inject both a limited static token and the App
+        # service principal's OAuth client credentials. Unified auth prefers
+        # the static token, which can lack the SQL Statement Execution scope.
+        # Force M2M here so shared App operations use the resource-bound
+        # service principal with a refreshable all-APIs token.
+        from databricks.sdk import WorkspaceClient
+
+        return WorkspaceClient(auth_type="oauth-m2m", scopes=["all-apis"])
     return get_client(None)
 
 
