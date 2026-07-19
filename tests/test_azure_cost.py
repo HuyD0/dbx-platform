@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import pytest
 
@@ -8,6 +9,7 @@ from dbx_platform.azure_cost import (
     classify_azure_spend,
     create_detail_table_sql,
     create_table_sql,
+    inclusive_date_window,
     merge_costs_sql,
     merge_detail_costs_sql,
     parse_detail_query_result,
@@ -18,6 +20,19 @@ from dbx_platform.azure_cost import (
     store_detail_costs,
 )
 from dbx_platform.control_plane_schema import MIGRATION_COLUMNS
+
+
+def test_inclusive_date_window_has_exact_requested_days():
+    start, end = inclusive_date_window(date(2026, 7, 19), 365)
+    assert start == date(2025, 7, 20)
+    assert end == date(2026, 7, 19)
+    assert (end - start).days + 1 == 365
+
+
+def test_inclusive_date_window_rejects_nonpositive_days():
+    with pytest.raises(ValueError, match="at least 1"):
+        inclusive_date_window(date(2026, 7, 19), 0)
+
 
 # --- service_bucket -------------------------------------------------------------
 
