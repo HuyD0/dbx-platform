@@ -23,6 +23,7 @@ from backend.routers import (
     control_plane,
     cost,
     digest,
+    estimator,
     governance,
     housekeeping,
     jobs,
@@ -92,7 +93,8 @@ def create_app() -> FastAPI:
         )
 
     for module in (meta, overview, control_plane, cost, llm_cost, housekeeping, security,
-                   governance, ai_governance, ml, performance, digest, jobs, chat):
+                   governance, ai_governance, ml, performance, digest, jobs, chat,
+                   estimator):
         app.include_router(module.router)
 
     @app.api_route(

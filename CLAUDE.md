@@ -35,8 +35,9 @@ served agent remains read-only and can only cite evidence/draft proposals.
 
 | Path | Contents |
 |---|---|
-| `src/dbx_platform/` | CLI + one module per area (`cost`, `azure_cost`, `forecast_*`, `security`, `governance`, `housekeeping`, `ai_catalog`, `ai_monitor`, `dashboards`) |
+| `src/dbx_platform/` | CLI + one module per area (`cost`, `azure_cost`, `estimator`, `estimator_pricing`, `forecast_*`, `security`, `governance`, `housekeeping`, `ai_catalog`, `ai_monitor`, `dashboards`) |
 | `src/dbx_platform/queries/` | SQL against Databricks system tables |
+| `src/dbx_platform/estimator_data/` | AI Cost Planner rate card / tiers / patterns / prompts (wheel-shipped, CI-asserted) |
 | `resources/*.yml` | Bundle job definitions, included by `databricks.yml` |
 | `policies/*.json` | Cluster policies as code, reconciled by `governance policy-sync` |
 | `dashboards/templates/` | Dashboard sources; `dashboards/*.lvdash.json` are rendered outputs |

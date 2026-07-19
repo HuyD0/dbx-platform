@@ -42,7 +42,7 @@ jobs:
           uv sync --frozen --project apps/platform-console --no-install-project
           apps/platform-console/.venv/bin/python -m unittest discover \
             -s apps/platform-console/tests -v
-      - name: Verify packaged data (queries + policies ship in the wheel)
+      - name: Verify packaged data (queries + policies + estimator data ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/serving_cost.sql"
@@ -50,6 +50,10 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/ai_gateway_usage_daily.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/rate_card.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/tiers.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/patterns.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/prompts/estimator_pattern_classify.md"
 
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.

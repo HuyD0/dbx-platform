@@ -234,6 +234,30 @@ async function mockApi(page: Page, state: MissionState) {
       await json(route, actionDetail);
       return;
     }
+    if (url.pathname === "/api/estimator/patterns") {
+      await json(route, {
+        data: [
+          {
+            pattern: "doc_chat",
+            label: "Chat with your documents",
+            description: "Answers grounded in your own files.",
+            example_prompt: "What does our travel policy say?",
+            defaults: { needs_knowledge_base: true, needs_memory: false },
+          },
+          {
+            pattern: "summarize",
+            label: "Summarize long content",
+            description: "Short, consistent summaries of long material.",
+            example_prompt: "Summarize this report.",
+            defaults: { needs_knowledge_base: false, needs_memory: false },
+          },
+        ],
+        count: 2,
+        as_of: new Date(FIXED_NOW).toISOString(),
+        cached: false,
+      });
+      return;
+    }
     await json(
       route,
       { error: "not_found", message: `No e2e fixture for ${url.pathname}` },
@@ -371,6 +395,31 @@ test("responsive theme is reflow-safe and has no serious accessibility violation
   await openMission(page, testInfo);
   await assertNoPageOverflow(page);
   await assertControlTargets(page);
+
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .analyze();
+  const severe = results.violations
+    .filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))
+    .map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      help: violation.help,
+      targets: violation.nodes.map((node) => node.target),
+    }));
+  expect(severe).toEqual([]);
+});
+
+test("AI Cost Planner wizard renders and has no serious accessibility violations", async ({
+  page,
+}, testInfo) => {
+  await openMission(page, testInfo);
+  await page.goto("/cost-planner");
+  await expect(page.getByRole("heading", { name: "What should it do?" })).toBeVisible();
+  await expect(
+    page.getByRole("radio", { name: /Chat with your documents/ }),
+  ).toBeVisible();
+  await assertNoPageOverflow(page);
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
