@@ -94,6 +94,7 @@ export function RequirementsWizard({
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<WizardDraft>(EMPTY);
   const [freeText, setFreeText] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
 
   const selected = patterns.find((p) => p.pattern === draft.pattern);
   const needsKnowledge = Boolean(selected?.defaults.needs_knowledge_base);
@@ -107,7 +108,17 @@ export function RequirementsWizard({
     <Card>
       <SectionTitle
         title={steps[step]}
-        subtitle={`Step ${step + 1} of ${steps.length} — every answer can be edited on the review screen`}
+        subtitle="Answer a few plain-language questions. You can edit every number before the estimate runs."
+        right={
+          <button
+            type="button"
+            onClick={() => setShowDetails((value) => !value)}
+            className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink-2 hover:border-series-1/50"
+            aria-pressed={showDetails}
+          >
+            {showDetails ? "Simple view" : "Show examples"}
+          </button>
+        }
       />
       <ol aria-label="Wizard progress" className="mb-4 flex flex-wrap gap-1.5">
         {steps.map((name, index) => (
@@ -129,25 +140,31 @@ export function RequirementsWizard({
                 role="radio"
                 aria-checked={draft.pattern === pattern.pattern}
                 onClick={() => update({ pattern: pattern.pattern })}
-                className={`rounded-xl border p-3 text-left transition-colors ${
+                className={`min-h-24 rounded-xl border p-3 text-left transition-colors ${
                   draft.pattern === pattern.pattern
                     ? "border-series-1 bg-series-1/10"
                     : "border-hairline hover:border-series-1/50"
                 }`}
               >
-                <span className="block text-sm font-semibold text-ink">{pattern.label}</span>
-                <span className="mt-1 block text-xs text-muted">{pattern.description}</span>
-                <span className="mt-1.5 block text-xs italic text-ink-2">
-                  “{pattern.example_prompt}”
+                <span className="block break-words text-sm font-semibold leading-5 text-ink">
+                  {pattern.label}
                 </span>
+                <span className="mt-1 block break-words text-xs leading-5 text-muted">
+                  {pattern.description}
+                </span>
+                {showDetails && (
+                  <span className="mt-1.5 block break-words text-xs italic leading-5 text-ink-2">
+                    “{pattern.example_prompt}”
+                  </span>
+                )}
               </button>
             ))}
           </div>
           {onExtract && (
             <div className="rounded-xl border border-dashed border-hairline p-3">
               <Field
-                label="Or describe it in your own words"
-                hint="An AI model drafts the answers for you; you review and edit everything before any cost is computed."
+                label="Prefer not to choose? Describe it in your own words"
+                hint="Optional: an AI model drafts the answers, then you review and edit everything before costs are computed."
               >
                 <textarea
                   className={`${inputClass} min-h-20`}
