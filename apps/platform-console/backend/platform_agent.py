@@ -170,6 +170,8 @@ class PlatformAgent:
             shared_tools.get_failed_run_waste,
             shared_tools.get_llm_cost_and_efficiency,
             shared_tools.get_warehouse_utilization,
+            shared_tools.list_solution_patterns,
+            shared_tools.estimate_solution_cost,
             self._canonical_findings_tool(),
             self._proposal_tool(),
         ]
