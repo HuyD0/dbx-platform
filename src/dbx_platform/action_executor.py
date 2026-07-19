@@ -1496,9 +1496,10 @@ def _approver_is_current_member(
         or str(group.get("displayName") or "") != group_name
     ):
         return False
+    # SCIM member display is optional. The user lookup above already binds
+    # this immutable member ID to the exact active approval email.
     return any(
         str(member.get("value") or "") == approval.approver_id
-        and str(member.get("display") or "").lower() == approval.approver_email.lower()
         for member in (group.get("members") or [])
         if isinstance(member, Mapping)
     )

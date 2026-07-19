@@ -396,7 +396,7 @@ def test_workspace_approver_revalidation_uses_exact_account_group():
         "id": "group-1",
         "displayName": "dbx-platform-approvers",
         "members": [
-            {"value": "approver-1", "display": "approver@example.com"},
+            {"value": "approver-1"},
             {"value": "approver-2", "display": "other@example.com"},
         ],
     }
