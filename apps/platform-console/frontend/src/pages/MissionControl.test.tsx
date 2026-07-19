@@ -299,6 +299,13 @@ test("renders the approval queue first and opens an accessible evidence sheet", 
   await waitFor(() => expect(close).toHaveFocus());
   expect(within(sheet).getByText(dateTime(expiresAt))).toBeInTheDocument();
   expect(within(sheet).queryByText("just now")).not.toBeInTheDocument();
+  expect(within(sheet).getByText("Changed resource count")).toBeInTheDocument();
+  expect(
+    within(sheet).getByText(/Summary first; expand the raw JSON/i),
+  ).toBeInTheDocument();
+  expect(within(sheet).queryByText(/"changed_resource_count"/)).not.toBeInTheDocument();
+  await user.click(within(sheet).getByRole("button", { name: /Show JSON/ }));
+  expect(within(sheet).getByText(/"changed_resource_count"/)).toBeInTheDocument();
 
   await user.click(within(sheet).getByRole("tab", { name: /^Evidence/ }));
   expect(
