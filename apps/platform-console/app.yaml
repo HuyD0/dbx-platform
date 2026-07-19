@@ -9,6 +9,8 @@ env:
     valueFrom: power-controller
   - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
     valueFrom: action-executor
+  - name: DBX_PLATFORM_CHAT_ENDPOINT
+    valueFrom: chat-model
   # Bundle deployments inject the exact protected manual-Job IDs. A source-only
   # run intentionally has no governed stateful Job targets.
   # Bundle deployments inject the target-aware environment and approval gate
@@ -18,7 +20,5 @@ env:
   # docs/runbook.md; source-only local runs never authorize execution.
   # - name: DBX_PLATFORM_CONSOLE_ACTIONS
   #   value: "false"
-  # Override when the platform agent's serving endpoint name differs from the
-  # default agents_<catalog>-<schema>-platform_agent.
-  # - name: DBX_PLATFORM_AGENT_ENDPOINT
-  #   value: "agents_dbx_dev-dbx_platform-platform_agent"
+  # A bundle deployment binds chat-model with CAN_QUERY. Source-only local
+  # runs fall back to DBX_PLATFORM_DIGEST_MODEL (or the Settings default).

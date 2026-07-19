@@ -1,11 +1,8 @@
-"""Chat with the platform agent's model-serving endpoint.
+"""Chat with the LangGraph agent hosted by the Platform Console backend.
 
-The agent (agents/platform_agent) is read-only by construction; when asked to
-change something it emits proposal markers that this router parses into
-structured proposals. The UI renders them as cards whose plans are rebuilt by
-the durable approval service. The agent's output is never trusted as an
-executor payload. The backend is stateless: the conversation lives in the
-browser.
+The graph owns a small allowlist of read-only evidence and proposal tools.
+Proposal markers are parsed into cards whose plans are rebuilt by the durable
+approval service; model output is never an executor payload.
 """
 
 from __future__ import annotations
@@ -41,31 +38,15 @@ the evidence timestamp/as-of value, and the affected resource (masked where need
 If evidence lacks a source or timestamp, say that explicitly.
 """
 
-_DEPLOY_HINT = (
-    "Deploy the agent with `python agents/platform_agent/deploy_agent.py`, grant this "
-    "app's service principal CAN_QUERY on the endpoint, and set "
-    "DBX_PLATFORM_AGENT_ENDPOINT in app.yaml if the name differs. See docs/runbook.md."
+_AGENT_HINT = (
+    "Verify the App installed its LangGraph dependencies and that the bound "
+    "`chat-model` endpoint is READY with CAN_QUERY. See docs/runbook.md."
 )
-
-
-def _extract_text(response: dict) -> str:
-    """Pull assistant text out of a ResponsesAgent invocation response,
-    tolerating shape drift across mlflow versions."""
-    chunks: list[str] = []
-    for item in response.get("output") or []:
-        content = item.get("content")
-        if isinstance(content, str):
-            chunks.append(content)
-            continue
-        for part in content or []:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                chunks.append(part["text"])
-    return "\n".join(c for c in chunks if c).strip()
 
 
 @router.post("")
 def chat(body: ChatRequest):
-    endpoint = deps.agent_endpoint()
+    endpoint = deps.chat_endpoint()
     page_context = json.dumps(
         body.context.model_dump(mode="json"),
         sort_keys=True,
@@ -80,19 +61,14 @@ def chat(body: ChatRequest):
         *[{"role": message.role, "content": message.content} for message in body.messages],
     ]
     try:
-        response = deps.get_ws().api_client.do(
-            "POST",
-            f"/serving-endpoints/{endpoint}/invocations",
-            body={"input": prompt},
-        )
-    except Exception as exc:  # noqa: BLE001 — the agent is optional; degrade with guidance
-        log.info("agent endpoint unavailable", exc_info=exc)
+        text = deps.get_platform_agent().invoke(prompt)
+    except Exception as exc:  # noqa: BLE001 — agent is optional; degrade with guidance
+        log.info("backend LangGraph agent unavailable", exc_info=exc)
         return JSONResponse(status_code=503, content=payload(
             "agent_unavailable", "The contextual assistant is currently unavailable.",
-            _DEPLOY_HINT))
-    text = _extract_text(response if isinstance(response, dict) else {})
+            _AGENT_HINT))
     if not text:
         return JSONResponse(status_code=502, content=payload(
-            "agent_bad_response", f"Agent endpoint '{endpoint}' returned no text."))
+            "agent_bad_response", "The backend LangGraph agent returned no text."))
     message, proposals = parse_proposals(text)
     return {"message": message, "proposals": proposals, "endpoint": endpoint}

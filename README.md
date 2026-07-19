@@ -64,9 +64,12 @@ affected resources, evidence, freshness, first/last seen, blast radius, and
 lifecycle state. Ranking is deterministic: critical security/SLO impact,
 estimated financial impact, then age.
 
-The contextual assistant receives the current page/filter/resource context. It
-can explain evidence and draft structured proposals, but cannot call an
-executor. Responses must cite a source table/query, timestamp, or resource.
+The contextual assistant receives the current page/filter/resource context and
+runs as a LangGraph agent inside the FastAPI backend. Its allowlisted tools
+reuse the package's read-only checks and canonical findings; its LLM uses a
+least-privileged `CAN_QUERY` binding to a Databricks-hosted foundation model.
+The graph has no executor tool. Responses must cite a source table/query,
+timestamp, or resource.
 
 ## LLM Cost & Value
 
@@ -187,7 +190,8 @@ grants, and validate one complete scheduled reporting cycle. Full setup:
 
 ```text
 apps/platform-console/     React/FastAPI Mission Control
-agents/platform_agent/     read-only contextual assistant
+agents/platform_agent/     optional MLflow-serving compatibility wrapper
+src/dbx_platform/platform_agent/ shared read-only LangGraph tools and formatting
 src/dbx_platform/          evidence packs, ledger, migrations, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
 dashboards/                AI/BI templates and rendered definitions

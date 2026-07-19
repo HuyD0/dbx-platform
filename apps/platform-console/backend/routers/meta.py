@@ -47,7 +47,9 @@ def config() -> dict:
         "actions_enabled": deps.actions_enabled(),
         "findings_table": deps.findings_table(),
         "digest_model": s.digest_model,
-        "agent_endpoint": deps.agent_endpoint(),
+        # Retain the response key for UI/API compatibility; the value is now
+        # the App-hosted LangGraph agent's bound foundation-model endpoint.
+        "agent_endpoint": deps.chat_endpoint(),
         "lookback_days": s.lookback_days,
         "required_tags": s.required_tag_list(),
         "thresholds": {
