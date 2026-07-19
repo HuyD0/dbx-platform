@@ -36,7 +36,9 @@ jobs:
           wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
           mkdir -p apps/platform-console/wheels
           cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
-          uv lock --project apps/platform-console
+          # The local wheel keeps the same name/version while its contents change.
+          # Refresh it explicitly so uv records the newly built artifact hash.
+          uv lock --refresh-package dbx-platform --project apps/platform-console
           uv sync --frozen --project apps/platform-console --no-install-project
       - name: Verify packaged data (queries + policies ship in the wheel)
         run: |
@@ -50,6 +52,11 @@ jobs:
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
     runs-on: ubuntu-latest
+    # Visual baselines are generated in this exact image. Pinning its digest
+    # keeps Chromium, system fonts, and rasterization stable across runner updates.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --ipc=host
     permissions:
       contents: read
     steps:
@@ -62,9 +69,6 @@ jobs:
       - name: Install
         working-directory: apps/platform-console/frontend
         run: npm ci
-      - name: Install Chromium
-        working-directory: apps/platform-console/frontend
-        run: npx playwright install --with-deps chromium
       - name: Accessibility and interaction tests
         working-directory: apps/platform-console/frontend
         run: npm test
