@@ -255,6 +255,11 @@ def test_every_mutating_route_is_post_only(client):
         "/api/jobs/{job_id}/run_now",
         "/api/digest/generate",
         "/api/chat",
+        # Estimator routes POST a requirements/description body but never
+        # mutate workspace state: estimate is pure math over the stored price
+        # snapshot; extract only feeds the human review screen.
+        "/api/estimator/estimate",
+        "/api/estimator/extract",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"
