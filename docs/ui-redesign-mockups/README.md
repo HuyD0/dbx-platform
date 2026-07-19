@@ -81,3 +81,61 @@ next decision while keeping evidence, approval, execution, and verification visi
 
 Generated with the built-in image-generation workflow using the supplied screenshot as the visual
 and content reference.
+
+## OTPP brand-color mockups
+
+These ten additional mockups reinterpret the Mission Control concepts with the supplied OTPP slide
+palette. They are intended as implementable visual directions for the Platform Console rather than
+pixel-perfect production screens. The concepts keep primary red as the brand anchor, reserve deep
+maroon for immersive focus areas, and use warm tints to make dense operational content feel less
+clinical.
+
+### Palette application rules
+
+- Use **Primary red `#F00037`** for the main decision rail, priority indicators, active navigation,
+  and one primary action per view.
+- Use **Deep maroon `#240B15`** for dark-mode canvases, command headers, and high-focus approval
+  or incident states.
+- Use **Mid red `#8B001F`** for secondary emphasis, section dividers, and less urgent risk states.
+- Use **Light bg `#FBF7F8`**, **Pink tint `#F9EAED`**, and **Light gold `#FFF8E1`** for card surfaces,
+  empty states, and explanatory wells.
+- Use **Gold `#FFCD67`** for deadlines, business value, and review windows; **Teal `#00AAAD`** for
+  evidence freshness and data lineage; **Green `#72BF44`** for verified healthy states only.
+- Use **Muted rose-grey `#B79AA3`** and **Sand border `#E4D7DB`** for supporting text, borders,
+  separators, and disabled or historical content.
+
+### OTPP concepts
+
+11. **Command Ribbon** — a slide-inspired executive console with a bold maroon command band,
+    primary-red decision rail, and gold KPI strip.
+12. **Evidence Cards** — a lighter card system where evidence freshness, source health, and plan
+    confidence are scannable without overwhelming the decision queue.
+13. **Approval Stage** — a focused approval screen that visually separates evidence, immutable plan,
+    confirmation, executor handoff, and verification.
+14. **Portfolio Heatmap** — a governance committee view balancing red risk intensity against teal
+    control coverage and green verified health.
+15. **Agent Copilot** — a split-view investigation surface where the assistant remains visibly
+    read-only and every answer has a cited evidence card.
+16. **Morning Brief** — an editorial daily brief with large red numerals, warm backgrounds, and
+    gold business-impact highlights.
+17. **Incident Pulse** — a dark operational view that uses red for urgency while teal telemetry and
+    gold checkpoints prevent a monochrome alarm wall.
+18. **Cost Lens** — a finance-forward cost planner with light-gold analysis wells, red variance
+    callouts, and teal attribution paths.
+19. **Policy Map** — a policy-as-code navigation model using maroon structure, red exception lanes,
+    and gold review checkpoints.
+20. **Calm Zero State** — a warm healthy-state treatment that keeps red in the brand system without
+    implying a false alarm.
+
+### OTPP files
+
+- `11-otpp-command-ribbon.svg`
+- `12-otpp-evidence-cards.svg`
+- `13-otpp-approval-stage.svg`
+- `14-otpp-portfolio-heatmap.svg`
+- `15-otpp-agent-copilot.svg`
+- `16-otpp-morning-brief.svg`
+- `17-otpp-incident-pulse.svg`
+- `18-otpp-cost-lens.svg`
+- `19-otpp-policy-map.svg`
+- `20-otpp-calm-zero.svg`
