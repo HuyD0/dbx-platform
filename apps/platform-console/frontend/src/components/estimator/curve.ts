@@ -28,3 +28,17 @@ export function adjustedTotals(estimate: TierScenarioEstimate, requested: number
   }
   return byEnv;
 }
+
+/** All-environment monthly spend — the same DEV+UAT+PROD headline number the
+ * TCO matrix shows, exposed as one call so the budget bar and unit economics
+ * cannot drift from it. */
+export function allEnvTotal(estimate: TierScenarioEstimate, requested: number): number {
+  const byEnv = adjustedTotals(estimate, requested);
+  return Object.values(byEnv).reduce((sum, env) => sum + env.total, 0);
+}
+
+/** Production-only monthly spend — the denominator for per-session economics
+ * (dev/UAT are fixed testing overhead, not scaled by production traffic). */
+export function prodTotal(estimate: TierScenarioEstimate, requested: number): number {
+  return adjustedTotals(estimate, requested).prod?.total ?? 0;
+}

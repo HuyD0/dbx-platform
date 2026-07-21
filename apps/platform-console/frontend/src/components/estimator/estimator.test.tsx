@@ -12,7 +12,7 @@ import type {
 import { RequirementsWizard } from "./RequirementsWizard";
 import { RigorSlider } from "./RigorSlider";
 import { TcoMatrix } from "./TcoMatrix";
-import { adjustedTotals, applyRigor } from "./curve";
+import { adjustedTotals, allEnvTotal, applyRigor, prodTotal } from "./curve";
 
 expect.extend(toHaveNoViolations);
 
@@ -435,6 +435,91 @@ test("link deployment form reads projection server-side and posts the anchor", a
   });
   expect(posted[0]).not.toHaveProperty("monthly_projected_usd");
   vi.unstubAllGlobals();
+});
+
+// --- UnitEconomics / BudgetBar ------------------------------------------------
+
+import { BudgetBar } from "./BudgetBar";
+import { UnitEconomics } from "./UnitEconomics";
+
+test("allEnvTotal and prodTotal read the engine's own affine totals", () => {
+  // prod curve: 110 + 4×rigor; dev/uat flat at 20/30.
+  expect(prodTotal(estimateFixture(), 10)).toBe(150);
+  expect(allEnvTotal(estimateFixture(), 10)).toBe(200); // 20 + 30 + 150
+  expect(allEnvTotal(estimateFixture(), 0)).toBe(160); // 20 + 30 + 110
+});
+
+test("unit economics divides the production total over production sessions", () => {
+  render(
+    <UnitEconomics estimate={estimateFixture()} rigorPct={10} monthlySessions={1000} />,
+  );
+  // prod total 150 / 1,000 sessions.
+  expect(screen.getByText("$0.15")).toBeInTheDocument();
+  expect(screen.getByText("$150")).toBeInTheDocument();
+  // all-environment total 200 × 12.
+  expect(screen.getByText("$2,400")).toBeInTheDocument();
+});
+
+test("unit economics refuses to divide an incomplete total into a fake unit cost", () => {
+  render(
+    <UnitEconomics
+      estimate={estimateFixture({ missing_prices: ["state_store/prod: memory"] })}
+      rigorPct={10}
+      monthlySessions={1000}
+    />,
+  );
+  expect(screen.getByText(/1 price\(s\) unavailable/)).toBeInTheDocument();
+  expect(screen.queryByText("$0.15")).not.toBeInTheDocument();
+});
+
+function budgetMatrix(): EstimateMatrix {
+  const cheapEnv = { total_fixed: 0, total_slope_per_pct: 0, eval_fixed: 0, eval_slope_per_pct: 0 };
+  const cheap = estimateFixture({
+    totals_by_env: { dev: 5, uat: 5, prod: 10 },
+    rigor_curve: {
+      pinned: false,
+      by_env: {
+        dev: { ...cheapEnv, total_fixed: 5 },
+        uat: { ...cheapEnv, total_fixed: 5 },
+        prod: { ...cheapEnv, total_fixed: 10 },
+      },
+    },
+  });
+  return {
+    engine_version: "1",
+    rate_card_version: "2026.07.1",
+    snapshot_date: "2026-07-14",
+    requirements: { monthly_requests: 1_000 },
+    rigor_pct: 10,
+    requirements_hash: "x".repeat(64),
+    blueprint: [],
+    tiers: {
+      production: tierFixture({ scenarios: { azure: estimateFixture() } }),
+      prototype: tierFixture({
+        label: "Departmental prototype",
+        scenarios: { azure: cheap },
+      }),
+    },
+  };
+}
+
+test("budget bar flags over-budget spend and names the cheapest tier that fits", async () => {
+  window.localStorage.clear();
+  const user = userEvent.setup();
+  render(
+    <BudgetBar matrix={budgetMatrix()} scenario="azure" rigorPct={10} selectedTier="production" />,
+  );
+  // Default $5,000 budget comfortably covers the $200 total.
+  expect(screen.queryByText(/over budget/)).not.toBeInTheDocument();
+
+  const input = screen.getByRole("spinbutton");
+  await user.clear(input);
+  await user.type(input, "100");
+  // $200 total now exceeds the $100 target by $100; prototype ($20) fits.
+  expect(screen.getByText("$100 over budget")).toBeInTheDocument();
+  expect(
+    screen.getByText(/Departmental prototype tier fits at \$20\.00 \/ month/),
+  ).toBeInTheDocument();
 });
 
 test("deployments panel lists only active links", async () => {

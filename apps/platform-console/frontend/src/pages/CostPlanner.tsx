@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BlueprintPanel } from "../components/estimator/BlueprintPanel";
+import { BudgetBar } from "../components/estimator/BudgetBar";
 import { DeploymentsPanel } from "../components/estimator/DeploymentsPanel";
 import {
   EstimateLibrary,
@@ -16,6 +17,8 @@ import { ReviewRequirements } from "../components/estimator/ReviewRequirements";
 import { RigorSlider } from "../components/estimator/RigorSlider";
 import { ScenarioToggle } from "../components/estimator/ScenarioToggle";
 import { TcoMatrix } from "../components/estimator/TcoMatrix";
+import { UnitEconomics } from "../components/estimator/UnitEconomics";
+import { WhatIfPanel, type WhatIfValues } from "../components/estimator/WhatIfPanel";
 import { adjustedTotals } from "../components/estimator/curve";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "../components/ui";
 import { apiGet, apiPost, apiUpload } from "../lib/api";
@@ -34,6 +37,18 @@ import {
 type Phase = "wizard" | "review" | "results";
 const MONTHLY_BASELINE_HOURS = 2_000;
 
+/** Debounce a value so dragging the what-if sliders re-estimates once the drag
+ * settles instead of firing a request per pixel. The estimate itself is still
+ * the server's real recompute — this only paces the round-trip. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 /** AI Cost Planner: plain-English wizard → human review → deterministic
  * 3-tier TCO matrix. All math happens server-side in the tested engine; the
  * one AI step (free-text extraction) only pre-fills the review screen. */
@@ -42,9 +57,23 @@ export function CostPlanner() {
   const [requirements, setRequirements] = useState<Record<string, unknown>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState<Record<string, unknown> | null>(null);
+  const [whatIf, setWhatIf] = useState<Partial<WhatIfValues>>({});
   const [rigorPct, setRigorPct] = useState(10);
   const [scenario, setScenario] = useState("databricks");
   const [tier, setTier] = useState("production");
+
+  // The confirmed requirements are the baseline; the what-if sliders layer
+  // overrides on top. Only the slider overrides are debounced, so entering the
+  // results screen and switching tiers stay instant — just a drag is paced.
+  const effectiveRequirements = useMemo<Record<string, unknown> | null>(
+    () => (confirmed ? { ...confirmed, ...whatIf } : null),
+    [confirmed, whatIf],
+  );
+  const debouncedWhatIf = useDebouncedValue(whatIf, 250);
+  const debouncedRequirements = useMemo<Record<string, unknown> | null>(
+    () => (confirmed ? { ...confirmed, ...debouncedWhatIf } : null),
+    [confirmed, debouncedWhatIf],
+  );
 
   const patterns = useQuery({
     queryKey: ["estimator", "patterns"],
@@ -76,16 +105,22 @@ export function CostPlanner() {
   });
 
   const estimate = useQuery({
-    queryKey: ["estimator", "estimate", confirmed, rigorPct],
+    queryKey: ["estimator", "estimate", debouncedRequirements, rigorPct],
     queryFn: () =>
       apiPost<Envelope<EstimateMatrix>>("/api/estimator/estimate", {
-        requirements: confirmed,
+        requirements: debouncedRequirements,
         rigor_pct: rigorPct,
       }),
-    enabled: phase === "results" && confirmed !== null,
+    enabled: phase === "results" && debouncedRequirements !== null,
     placeholderData: (previous) => previous,
     staleTime: 5 * 60_000,
   });
+
+  // A drag is "recomputing" while the debounce is still pending or the query is
+  // in flight — the previous numbers stay on screen until the new ones land.
+  const recomputing =
+    estimate.isFetching ||
+    JSON.stringify(whatIf) !== JSON.stringify(debouncedWhatIf);
 
   const patternLabel = useMemo(() => {
     const key = String(requirements.pattern ?? "");
@@ -100,6 +135,7 @@ export function CostPlanner() {
 
   const confirmReview = (edited: Record<string, unknown>) => {
     setConfirmed(edited);
+    setWhatIf({}); // a fresh estimate starts from the confirmed sizing
     setPhase("results");
   };
 
@@ -109,6 +145,7 @@ export function CostPlanner() {
     } catch {
       return; // a malformed stored document must not crash the wizard
     }
+    setWhatIf({});
     setWarnings([`Started from the saved estimate “${estimate.title}”.`]);
     setPhase("review");
   };
@@ -177,6 +214,7 @@ export function CostPlanner() {
               onClick={() => {
                 setPhase("wizard");
                 setConfirmed(null);
+                setWhatIf({});
               }}
               className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink-2"
             >
@@ -250,12 +288,15 @@ export function CostPlanner() {
                   <PricingFreshness snapshotDate={matrix.snapshot_date} />
                 </div>
               </div>
-              {confirmed && (
+              {effectiveRequirements && (
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <SaveEstimateButton requirements={confirmed} rigorPct={rigorPct} />
+                  <SaveEstimateButton
+                    requirements={effectiveRequirements}
+                    rigorPct={rigorPct}
+                  />
                   <SimilarEstimates
-                    pattern={String(confirmed.pattern ?? "")}
-                    monthlyRequests={Number(confirmed.monthly_requests ?? 0)}
+                    pattern={String(effectiveRequirements.pattern ?? "")}
+                    monthlyRequests={Number(effectiveRequirements.monthly_requests ?? 0)}
                     requirementsHash={matrix.requirements_hash}
                     onReuse={reuseSaved}
                   />
@@ -269,6 +310,15 @@ export function CostPlanner() {
                 onSelectTier={setTier}
                 baselineHours={MONTHLY_BASELINE_HOURS}
               />
+              {effectiveRequirements && (
+                <WhatIfPanel
+                  values={effectiveRequirements}
+                  onChange={(patch) =>
+                    setWhatIf((previous) => ({ ...previous, ...patch }))
+                  }
+                  recomputing={recomputing}
+                />
+              )}
               {activeTier && (
                 <RigorSlider
                   tier={activeTier}
@@ -276,6 +326,21 @@ export function CostPlanner() {
                   rigorPct={rigorPct}
                   onChange={setRigorPct}
                 />
+              )}
+              {activeEstimate && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <UnitEconomics
+                    estimate={activeEstimate}
+                    rigorPct={rigorPct}
+                    monthlySessions={Number(matrix.requirements.monthly_requests ?? 0)}
+                  />
+                  <BudgetBar
+                    matrix={matrix}
+                    scenario={scenario}
+                    rigorPct={rigorPct}
+                    selectedTier={tier}
+                  />
+                </div>
               )}
               {activeEstimate && (
                 <div className="grid gap-4 lg:grid-cols-2">
