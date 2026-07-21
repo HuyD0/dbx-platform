@@ -3,9 +3,9 @@ import {
   BrainCircuit,
   Calculator,
   CircleDollarSign,
-  Gauge,
   GraduationCap,
   LayoutDashboard,
+  LayoutGrid,
   ListChecks,
   Menu,
   Moon,
@@ -13,6 +13,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Building2,
   Sparkles,
   Sun,
   Tags,
@@ -48,6 +49,7 @@ import { Operations } from "./pages/Operations";
 import { Overview } from "./pages/Overview";
 import { SecurityRisk } from "./pages/SecurityRisk";
 import { Settings as SettingsPage } from "./pages/Settings";
+import { Workspaces } from "./pages/Workspaces";
 
 interface NavItem {
   to: string;
@@ -58,7 +60,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, page: <MissionControl /> },
-  { to: "/overview", label: "Command Center", icon: Gauge, page: <Overview /> },
+  { to: "/overview", label: "Command Center", icon: LayoutGrid, page: <Overview /> },
   { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
   { to: "/cost", label: "Cost", icon: CircleDollarSign, page: <CostValue /> },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
@@ -67,6 +69,7 @@ const NAV: NavItem[] = [
   { to: "/risk", label: "Risk", icon: ShieldCheck, page: <SecurityRisk /> },
   { to: "/operations", label: "Operations", icon: ServerCog, page: <Operations /> },
   { to: "/automations", label: "Automations", icon: Workflow, page: <Automations /> },
+  { to: "/workspaces", label: "Workspaces", icon: Building2, page: <Workspaces /> },
   { to: "/learn", label: "Learn", icon: GraduationCap, page: <Learn /> },
 ];
 

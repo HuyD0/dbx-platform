@@ -51,6 +51,14 @@ resources:
           # remain protected/outside the Hibernate inventory.
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
             value_from: governed-forecast-training
+          # Cap interactive system-table queries below the Databricks Apps HTTP
+          # gateway request timeout. Without this the app blocks on a cold /
+          # stopped warehouse until the gateway aborts with an opaque 502; this
+          # lets the backend return its own typed 504 (rendered as a retryable
+          # "warehouse query timed out") instead. Scheduled jobs and the CLI do
+          # not set this var and keep the 300s batch budget.
+          - name: DBX_PLATFORM_STATEMENT_TIMEOUT_SECONDS
+            value: "45"
           - name: DBX_PLATFORM_ENVIRONMENT
             value: ${bundle.target}
           - name: DBX_PLATFORM_APPROVER_GROUP

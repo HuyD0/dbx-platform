@@ -128,6 +128,18 @@ export function LinkDeploymentForm({
       >
         Cancel
       </button>
+      {(link.isPending || link.isError) && (
+        <div
+          className={`progress-track mt-1 w-full ${
+            link.isError ? "progress-error" : "progress-active"
+          }`}
+          role="progressbar"
+          aria-busy={link.isPending}
+          aria-label={link.isError ? "Linking failed" : "Linking deployment"}
+        >
+          <div className="progress-fill" />
+        </div>
+      )}
       {link.isError && (
         <span role="alert" className="w-full text-xs text-danger">
           {(link.error as Error).message}

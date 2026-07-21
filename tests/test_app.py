@@ -280,6 +280,27 @@ def test_health_reports_actions_disabled_by_default(client, monkeypatch):
     assert body["actions_enabled"] is False
 
 
+def test_workspace_access_uses_verified_obo_actor(client, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "approver")
+    monkeypatch.setenv("DBX_PLATFORM_WORKSPACE_NAME", "enterprise-prod")
+    deps.get_identity_verifier.cache_clear()
+
+    response = client.get("/api/workspaces")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["actor"]["view"] == "platform_admin"
+    assert body["source_status"]["source"] == "databricks_app_obo"
+    assert "OBO passthrough" in body["source_status"]["notes"]
+    assert body["workspaces"][0]["name"] == "enterprise-prod"
+    assert body["workspaces"][0]["relationship"] == "platform_admin"
+    capabilities = {
+        item["id"]: item["enabled"] for item in body["workspaces"][0]["capabilities"]
+    }
+    assert capabilities["approve-actions"] is True
+    assert capabilities["admin-console"] is True
+
+
 def test_unknown_api_returns_stable_json_capability_error(client):
     response = client.get("/api/not-a-real-capability")
 

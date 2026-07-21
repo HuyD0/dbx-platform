@@ -14,6 +14,7 @@ model is injected as a plain callable — and unit-tested offline.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Callable
 from datetime import date, timedelta
 
@@ -69,6 +70,54 @@ def recursive_forecast(
                 }
             )
     return out
+
+
+def validate_forecast_alignment(
+    dense: dict[str, dict[date, float]], horizon: int, forecast_rows: list[dict]
+) -> list[dict]:
+    """Verify each forecastable series emits exactly one row per horizon day."""
+
+    if horizon < 1:
+        raise ValueError("forecast horizon must be positive")
+    histories = {name: daily for name, daily in dense.items() if daily}
+    if not histories:
+        return []
+    start = max(max(daily) for daily in histories.values())
+    expected: dict[str, set[str]] = {}
+    for name, daily in histories.items():
+        first_target = start + timedelta(days=1)
+        expected[name] = (
+            {
+                (start + timedelta(days=step)).isoformat()
+                for step in range(1, horizon + 1)
+            }
+            if forecast_features.features_for_date(daily, first_target) is not None
+            else set()
+        )
+    actual = Counter(
+        (str(row.get("series", "")), str(row.get("target_date", ""))[:10])
+        for row in forecast_rows
+    )
+    expected_keys = {(name, day) for name, days in expected.items() for day in days}
+    duplicate_keys = sorted(key for key, count in actual.items() if count != 1)
+    missing_keys = sorted(expected_keys - set(actual))
+    unexpected_keys = sorted(set(actual) - expected_keys)
+    if duplicate_keys or missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "Forecast alignment failed: "
+            f"missing={missing_keys[:3]}, unexpected={unexpected_keys[:3]}, "
+            f"duplicate={duplicate_keys[:3]}."
+        )
+    return [
+        {
+            "series": name,
+            "source_days": len(daily),
+            "expected_forecast_rows": len(expected[name]),
+            "forecast_rows": len(expected[name]),
+            "status": "forecasted" if expected[name] else "insufficient-history",
+        }
+        for name, daily in sorted(histories.items())
+    ]
 
 
 # --- storage ------------------------------------------------------------------
@@ -177,13 +226,25 @@ def run_inference(
         return list(zip(preds["p10"], preds["p50"], preds["p90"], strict=True))
 
     forecasts = recursive_forecast(dense, horizon, predict_fn)
+    alignment = validate_forecast_alignment(dense, horizon, forecasts)
     run_day = date.today().isoformat()
     for f in forecasts:
         f.update(run_date=run_day, model_version=str(version),
                  feature_set_version=FEATURE_SET_VERSION)
     stored = store_forecasts(w, warehouse_id, catalog, schema, forecasts)
-    series_count = len({f["series"] for f in forecasts})
+    forecasted = [row for row in alignment if row["status"] == "forecasted"]
+    skipped = [row for row in alignment if row["status"] != "forecasted"]
     return [
-        {"model": f"{uc_name}@champion (v{version})", "series": series_count,
-         "horizon_days": horizon, "rows_written": stored}
+        {
+            "model": f"{uc_name}@champion (v{version})",
+            "series": len(forecasted),
+            "horizon_days": horizon,
+            "rows_written": stored,
+            "expected_rows": sum(row["expected_forecast_rows"] for row in alignment),
+            "source_series": len(alignment),
+            "skipped_series": len(skipped),
+            "skipped_reasons": [
+                {"series": row["series"], "reason": row["status"]} for row in skipped
+            ],
+        }
     ]

@@ -2,35 +2,35 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brand system. The shell is deliberately neutral: red identifies the product
-   and primary actions, while operational states keep their own semantic
-   colors. Light is the first-visit theme and dark remains user-selectable. */
+/* Mission-control brand system. Red identifies the product and primary
+   actions, while operational states keep their own semantic colors. Light is
+   the first-visit theme and dark remains user-selectable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
   /* Canonical mission-control palette. Keep these literal aliases available to
      Tailwind (`bg-teal-accent`, `border-sand-border`, …) so charts and state
      affordances never depend on an incidental semantic color mapping. */
-  --color-primary-red: #f00037;
-  --color-deep-maroon: #240b15;
-  --color-mid-red: #8b001f;
-  --color-light-background: #fbf7f8;
-  --color-pink-tint: #f9eaed;
-  --color-light-gold: #fff8e1;
-  --color-gold-accent: #ffcd67;
-  --color-teal-accent: #00aaad;
-  --color-green-accent: #72bf44;
-  --color-muted-rose-grey: #b79aa3;
-  --color-sand-border: #e4d7db;
+  --color-primary-red: #F00037;
+  --color-deep-maroon: #240B15;
+  --color-mid-red: #8B001F;
+  --color-light-background: #FBF7F8;
+  --color-pink-tint: #F9EAED;
+  --color-light-gold: #FFF8E1;
+  --color-gold-accent: #FFCD67;
+  --color-teal-accent: #00AAAD;
+  --color-green-accent: #72BF44;
+  --color-muted-rose-grey: #B79AA3;
+  --color-sand-border: #E4D7DB;
 
-  --color-page: #fbf7f8;
+  --color-page: #FBF7F8;
   --color-surface: #ffffff;
   --color-raised: #ffffff;
-  --color-tint: #f9eaed;
-  --color-ink: #240b15;
+  --color-tint: #F9EAED;
+  --color-ink: #240B15;
   --color-ink-2: #4b3f43;
   --color-muted: #806a72;
-  --color-grid: #e4d7db;
+  --color-grid: #E4D7DB;
   --color-hairline: rgba(36, 11, 21, 0.08);
 
   --color-brand-primary: #f00037;
@@ -59,18 +59,21 @@
   --color-accent: #8b001f;
   --color-blueprint: #006f72;
   --color-process: #8b001f;
+
+  --color-health-accent: #72bf44;
+  --color-active-accent: #00aaad;
 }
 
 .dark {
-  --color-page: #171315;
-  --color-surface: #211a1d;
-  --color-raised: #2b2326;
-  --color-tint: #34252a;
-  --color-ink: #fbf7f8;
-  --color-ink-2: #d8ccd0;
-  --color-muted: #bfaeb4;
-  --color-grid: #493b40;
-  --color-hairline: rgba(251, 247, 248, 0.1);
+  --color-page: #161619;
+  --color-surface: #1e1e23;
+  --color-raised: #27272d;
+  --color-tint: #26262e;
+  --color-ink: #f4f4f6;
+  --color-ink-2: #c2c2cb;
+  --color-muted: #a7acb6;
+  --color-grid: #34343b;
+  --color-hairline: rgba(244, 244, 246, 0.09);
 
   --color-warning-surface: #382d17;
   --color-info-surface: #173537;
@@ -92,6 +95,11 @@
   --color-accent: #ff4c70;
   --color-blueprint: #5ed5d7;
   --color-process: #ff6a88;
+
+  /* Decorative accents keep their brand hue but lift slightly for the dark
+     canvas; still fills/bars/pulses only. */
+  --color-health-accent: #9ad878;
+  --color-active-accent: #5ed5d7;
 }
 
 html,
@@ -132,30 +140,58 @@ textarea:focus-visible,
   background: color-mix(in srgb, var(--color-brand-primary) 28%, transparent);
 }
 
+/* Graphite-smoke ambient wash: a low-saturation slate/steel field with only a
+   faint brand-red halo behind the top of the shell, so the frosted surfaces
+   have something restrained to refract. */
 body {
-  background-image: none;
+  background-image:
+    radial-gradient(48% 54% at 12% 2%, rgba(51, 65, 85, 0.1), transparent 60%),
+    radial-gradient(42% 48% at 92% 8%, rgba(100, 116, 139, 0.09), transparent 62%),
+    radial-gradient(40% 44% at 74% 98%, rgba(71, 85, 105, 0.08), transparent 62%),
+    radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 6%, transparent), transparent 60%);
+  background-attachment: fixed;
+}
+.dark body {
+  background-image:
+    radial-gradient(48% 54% at 12% 2%, rgba(71, 85, 105, 0.4), transparent 60%),
+    radial-gradient(42% 48% at 92% 8%, rgba(100, 116, 139, 0.28), transparent 62%),
+    radial-gradient(40% 44% at 74% 98%, rgba(51, 65, 85, 0.34), transparent 62%),
+    radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 12%, transparent), transparent 60%);
 }
 
-/* Existing class names remain stable for callers, but the surfaces are now
-   fully opaque and restrained. */
+/* Cards remain exact white/sand surfaces on the light canvas. Dark mode keeps
+   the upstream frosted treatment over its graphite-smoke wash. Forced-colors
+   mode resets both treatments below. */
 .glass {
   background: var(--color-surface);
   border: 1px solid var(--color-grid);
-  box-shadow: 0 1px 2px rgba(36, 11, 21, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(24, 24, 27, 0.06);
 }
 .dark .glass {
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-surface) 87%, transparent);
   border-color: var(--color-grid);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
-/* Raised dialogs and drawers remain visually distinct without transparency. */
+/* Raised dialogs and drawers are opaque in light mode so dense JSON/tables hold contrast. */
 .glass-strong {
   background: var(--color-raised);
   border: 1px solid var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 .dark .glass-strong {
-  background: var(--color-raised);
+  background: color-mix(in srgb, var(--color-raised) 93%, transparent);
   border-color: var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .dark .glass {
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    backdrop-filter: saturate(160%) blur(14px);
+  }
+  .dark .glass-strong {
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    backdrop-filter: saturate(180%) blur(22px);
+  }
 }
 
 /* Solid controls and readable light-theme accent text use the deeper red.
@@ -165,7 +201,7 @@ body {
 }
 
 nav a[aria-current="page"] {
-  box-shadow: inset 3px 0 var(--color-brand-primary);
+  box-shadow: inset 4px 0 var(--color-brand-primary);
 }
 
 .brand-diamond {
@@ -308,12 +344,8 @@ nav a[aria-current="page"] {
   border-color: var(--color-accent);
 }
 
-/* Remove ambient blur from legacy utility usage in modals and sticky tables. */
-.backdrop-blur-sm,
-.backdrop-blur-md {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
+/* Glass mode intentionally keeps ambient blur on modal scrims and sticky
+   surfaces, so the legacy backdrop-blur utilities are left to apply. */
 
 @media (forced-colors: active) {
   .glass,
@@ -372,6 +404,70 @@ nav a[aria-current="page"] {
 }
 .prose-console strong { font-weight: 600; }
 .prose-console a { color: var(--color-accent); text-decoration: underline; }
+
+/* Functional micro-interactions for deployment/approval execution. A calm
+   teal pulse maps to active, healthy processing; a hard snap to primary red
+   signals a failure. Both are decorative fills, so they use the bright accent
+   tokens rather than text colors. The reduced-motion block below neutralizes
+   the animation while keeping the static color state. */
+@keyframes pulse-active {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scaleY(0.72);
+  }
+}
+
+.progress-track {
+  position: relative;
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-hairline);
+}
+.progress-track > .progress-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left center;
+}
+.progress-active > .progress-fill {
+  background: var(--color-active-accent);
+  animation: pulse-active 1.15s ease-in-out infinite;
+}
+.progress-error > .progress-fill {
+  background: var(--color-brand-primary);
+  animation: none;
+}
+
+/* A small breathing dot for the same active-processing signal in tight rows. */
+.pulse-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-active-accent);
+  animation: pulse-active 1.15s ease-in-out infinite;
+}
+.pulse-dot[data-state="error"] {
+  background: var(--color-brand-primary);
+  animation: none;
+}
+
+@media (forced-colors: active) {
+  .progress-active > .progress-fill,
+  .pulse-dot {
+    background: Highlight;
+  }
+  .progress-error > .progress-fill,
+  .pulse-dot[data-state="error"] {
+    background: LinkText;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -8,8 +8,10 @@ import { GatewayTelemetry, LiveRatesIndicator } from "../components/GatewayTelem
 import { aggregateProductSpend } from "../components/ProductSpendBreakdown";
 import {
   AsOf,
-  Card,
+  Bento,
+  BentoCell,
   ErrorState,
+  HealthDot,
   PageHeader,
   SectionTitle,
   Skeleton,
@@ -52,6 +54,13 @@ export function Overview() {
   const productSpend = aggregateProductSpend(spendRows);
   const spendTotal = productSpend.reduce((acc, product) => acc + product.current, 0);
 
+  const findingState = !findings ? "idle" : findings.total === 0 ? "good" : "warning";
+  const findingStateLabel = !findings
+    ? "Finding evidence unavailable"
+    : findings.total === 0
+      ? "Platform clean"
+      : "Open findings";
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -73,22 +82,38 @@ export function Overview() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
-        <div className="xl:col-span-4 [&>*]:h-full">
+      {/* Bento grid: a wide hero health tile plus asymmetric supporting tiles,
+          governed gateway telemetry, and full-width analytical panels. */}
+      <Bento>
+        <BentoCell span="lg:col-span-6" bare>
           <StatTile
+            size="hero"
             label="Open findings"
+            indicator={
+              <HealthDot
+                state={findingState}
+                label={findingStateLabel}
+              />
+            }
             value={findings ? findings.total : "—"}
-            tone={findings && findings.total > 0 ? "warning" : "good"}
+            tone={!findings ? "default" : findings.total > 0 ? "warning" : "good"}
             hint={findings?.run_ts ? `last run ${timeAgo(findings.run_ts)}` : "no stored run yet"}
           />
-        </div>
-        <div className="xl:col-span-2 [&>*]:h-full">
+        </BentoCell>
+        <BentoCell span="lg:col-span-3" bare>
           <StatTile
             label="Areas affected"
             value={findings ? Object.keys(findings.by_area).length : "—"}
           />
-        </div>
-        <div className="xl:col-span-3 [&>*]:h-full">
+        </BentoCell>
+        <BentoCell span="lg:col-span-3" bare>
+          <StatTile
+            label="Latest AI digest"
+            value={d.digest.data?.latest_run_ts ? timeAgo(d.digest.data.latest_run_ts) : "none"}
+          />
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-4" bare>
           <StatTile
             label={`Workspace spend (${spendRows.length ? "30d" : "n/a"})`}
             value={
@@ -101,19 +126,9 @@ export function Overview() {
                 : "—"
             }
           />
-        </div>
-        <div className="xl:col-span-3 [&>*]:h-full">
-          <StatTile
-            label="Latest AI digest"
-            value={d.digest.data?.latest_run_ts ? timeAgo(d.digest.data.latest_run_ts) : "none"}
-          />
-        </div>
-      </div>
+        </BentoCell>
 
-      <GatewayTelemetry days={30} />
-
-      <div className="grid gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-5">
+        <BentoCell span="lg:col-span-8">
           <SectionTitle
             title="Findings by area"
             subtitle="Latest stored run of the platform checks"
@@ -133,8 +148,13 @@ export function Overview() {
           ) : (
             <p className="text-xs text-muted">{d.findings.error?.message}</p>
           )}
-        </Card>
-        <Card className="lg:col-span-7">
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-12" bare>
+          <GatewayTelemetry days={30} />
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-12">
           <SectionTitle title="Spend by product" subtitle="Workspace list cost, last 30 days" />
           {d.spend.data ? (
             <BarList
@@ -146,31 +166,31 @@ export function Overview() {
           ) : (
             <p className="text-xs text-muted">{d.spend.error?.message}</p>
           )}
-        </Card>
-      </div>
+        </BentoCell>
 
-      {dashboards.data && dashboards.data.data.length > 0 && (
-        <Card>
-          <SectionTitle
-            title="Lakeview dashboards"
-            subtitle="Deep-dive dashboards deployed by this bundle"
-          />
-          <div className="flex flex-wrap gap-2">
-            {dashboards.data.data.map((dash) => (
-              <a
-                key={dash.url}
-                href={dash.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-grid px-3 py-1.5 text-xs text-ink hover:bg-hairline"
-              >
-                {dash.name}
-                <ExternalLink className="h-3 w-3 text-muted" />
-              </a>
-            ))}
-          </div>
-        </Card>
-      )}
+        {dashboards.data && dashboards.data.data.length > 0 && (
+          <BentoCell span="lg:col-span-12">
+            <SectionTitle
+              title="Lakeview dashboards"
+              subtitle="Deep-dive dashboards deployed by this bundle"
+            />
+            <div className="flex flex-wrap gap-2">
+              {dashboards.data.data.map((dash) => (
+                <a
+                  key={dash.url}
+                  href={dash.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-grid px-3 py-1.5 text-xs text-ink hover:bg-hairline"
+                >
+                  {dash.name}
+                  <ExternalLink className="h-3 w-3 text-muted" />
+                </a>
+              ))}
+            </div>
+          </BentoCell>
+        )}
+      </Bento>
     </div>
   );
 }

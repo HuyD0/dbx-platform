@@ -49,7 +49,7 @@ function detailSummary(label: string, value: unknown): string {
   }
   if (label === "Rollback" && record?.description) return String(record.description);
   if (label === "Verification" && record?.strategy) return String(record.strategy);
-  return "See technical details below.";
+  return "See the exact payload for details.";
 }
 
 function DetailBlock({ label, value, help }: { label: string; value: unknown; help: string }) {
@@ -632,6 +632,20 @@ export function ActionPlanDialog({
                             {approve.isPending ? "Recording approval…" : "Accept Risk & Execute"}
                           </button>
                         </div>
+                        {(approve.isPending || approve.isError) && (
+                          <div
+                            className={`progress-track mt-3 ${
+                              approve.isError ? "progress-error" : "progress-active"
+                            }`}
+                            role="progressbar"
+                            aria-busy={approve.isPending}
+                            aria-label={
+                              approve.isError ? "Approval failed" : "Recording approval"
+                            }
+                          >
+                            <div className="progress-fill" />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

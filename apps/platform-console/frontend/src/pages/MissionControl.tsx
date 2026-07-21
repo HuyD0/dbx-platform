@@ -27,6 +27,7 @@ import {
   DataHealthList,
   EmptyState,
   ErrorState,
+  HealthDot,
   PageHeader,
   SectionTitle,
   Skeleton,
@@ -979,7 +980,10 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-ink">{label}</h3>
+                      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+                        <HealthDot state={openFindings === 0 ? "good" : "warning"} />
+                        {label}
+                      </h3>
                       <ArrowRight
                         className="h-3.5 w-3.5 text-muted transition-transform group-hover:translate-x-0.5"
                         aria-hidden="true"

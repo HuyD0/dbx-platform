@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Bot } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BlueprintPanel } from "../components/estimator/BlueprintPanel";
 import { DeploymentsPanel } from "../components/estimator/DeploymentsPanel";
@@ -15,8 +16,12 @@ import { ReviewRequirements } from "../components/estimator/ReviewRequirements";
 import { RigorSlider } from "../components/estimator/RigorSlider";
 import { ScenarioToggle } from "../components/estimator/ScenarioToggle";
 import { TcoMatrix } from "../components/estimator/TcoMatrix";
+import { adjustedTotals } from "../components/estimator/curve";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "../components/ui";
 import { apiGet, apiPost, apiUpload } from "../lib/api";
+import { useAssistantPanel } from "../lib/assistant-panel";
+import { useChat } from "../lib/chat";
+import { usd } from "../lib/format";
 import {
   ApiError,
   type Envelope,
@@ -112,6 +117,53 @@ export function CostPlanner() {
   const activeTier = matrix?.tiers[tier];
   const activeEstimate = activeTier?.scenarios[scenario];
 
+  const openAssistant = useAssistantPanel();
+  const { send: sendToAssistant, pending: assistantPending } = useChat();
+
+  /** Pre-contextualize the read-only assistant with the tier + scenario the
+   * user is currently evaluating, so it can explain the SKUs/cost drivers
+   * without the user re-typing any of these parameters. When the selected tier
+   * is the cheapest of the three, the seeded question leans into entry-level
+   * SKU comparison, matching what the user is actually weighing. */
+  const askAboutTier = () => {
+    if (!matrix || !activeTier || !activeEstimate || assistantPending) return;
+    const envTotals = adjustedTotals(activeEstimate, rigorPct);
+    const monthly = (["dev", "uat", "prod"] as const).reduce(
+      (sum, env) => sum + (envTotals[env]?.total ?? 0),
+      0,
+    );
+    const grandByTier = Object.entries(matrix.tiers).map(([key, t]) => {
+      const est = t.scenarios[scenario];
+      const byEnv = est ? adjustedTotals(est, rigorPct) : {};
+      const total = (["dev", "uat", "prod"] as const).reduce(
+        (sum, env) => sum + (byEnv[env]?.total ?? 0),
+        0,
+      );
+      return { key, total };
+    });
+    const cheapest = grandByTier.reduce(
+      (min, row) => (row.total < min.total ? row : min),
+      grandByTier[0],
+    );
+    const isEntryLevel = cheapest?.key === tier;
+
+    const focus = {
+      actionId: `estimate:${matrix.requirements_hash}:${tier}:${scenario}`,
+      label: `${activeTier.label} tier · ${scenario}`,
+    };
+    openAssistant(focus);
+    sendToAssistant(
+      `I'm evaluating the "${activeTier.label}" tier on ${scenario} at ${rigorPct}% review ` +
+        `coverage, roughly ${usd(monthly)} / month across all environments. ` +
+        (isEntryLevel
+          ? "This is the cheapest of the three tiers — compare the entry-level SKUs and explain " +
+            "what I'd give up versus the next tier up. "
+          : "Explain the main cost drivers and whether a cheaper tier would still fit. ") +
+        "Cite pricing evidence and stay read-only.",
+      focus,
+    );
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -185,7 +237,18 @@ export function CostPlanner() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <ScenarioToggle scenario={scenario} onChange={setScenario} />
-                <PricingFreshness snapshotDate={matrix.snapshot_date} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={askAboutTier}
+                    disabled={assistantPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-50"
+                  >
+                    <Bot className="h-3.5 w-3.5 text-accent" />
+                    Ask about the {activeTier?.label ?? "selected"} tier
+                  </button>
+                  <PricingFreshness snapshotDate={matrix.snapshot_date} />
+                </div>
               </div>
               {confirmed && (
                 <div className="flex flex-wrap items-center justify-between gap-3">

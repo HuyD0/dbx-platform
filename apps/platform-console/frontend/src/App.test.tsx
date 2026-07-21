@@ -271,7 +271,6 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   expect(
     within(planDialog).getByRole("button", { name: "Why does this approval expire?" }),
   ).toBeInTheDocument();
-  await user.click(within(planDialog).getByText("Technical details"));
   expect(within(planDialog).getByText("a".repeat(64))).toBeInTheDocument();
   expect(
     within(planDialog).getByText(
@@ -554,5 +553,75 @@ test("Cost Planner shows a friendly first-run pricing snapshot message", async (
   ).toBeInTheDocument();
   expect(
     screen.getByText(/Ask an approver to run the estimator-prices-pull job once/),
+  ).toBeInTheDocument();
+});
+
+test("workspace access page switches between user and platform admin views", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/health")) {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          version: "test",
+          environment: "prod",
+          actions_enabled: false,
+          workspace_id: "7405609799238491",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/workspaces")) {
+      return new Response(
+        JSON.stringify({
+          actor: {
+            actor_id: "user-1",
+            email: "admin@example.com",
+            roles: ["authenticated", "viewer", "operator", "proposer"],
+            view: "platform_admin",
+          },
+          workspaces: [
+            {
+              workspace_id: "7405609799238491",
+              name: "enterprise-prod",
+              environment: "prod",
+              relationship: "platform_admin",
+              roles: ["authenticated", "viewer", "operator", "proposer"],
+              management_mode: "governed_approval",
+              capabilities: [
+                {
+                  id: "admin-console",
+                  label: "Platform admin view",
+                  description: "Review all workspace evidence and pending governed actions.",
+                  enabled: true,
+                },
+              ],
+            },
+          ],
+          source_status: {
+            status: "partial",
+            source: "databricks_app_obo",
+            notes: "Uses the Databricks Apps forwarded user token as OBO passthrough.",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/workspaces");
+
+  expect(
+    await screen.findByRole("heading", { name: "Platform admin workspaces" }),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Platform admin").length).toBeGreaterThan(0);
+  expect(screen.getByText("enterprise-prod")).toBeInTheDocument();
+  expect(screen.getByText("Platform admin view")).toBeInTheDocument();
+  expect(
+    screen.getByText(/databricks_app_obo: Uses the Databricks Apps forwarded user token/),
   ).toBeInTheDocument();
 });

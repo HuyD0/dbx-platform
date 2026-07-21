@@ -47,6 +47,11 @@ export type CurrencySankey = {
   targetLinks: SankeyLink[];
 };
 
+/** Categorical fills for the composition bar and the matching ranked list. These
+ * are the non-red chart steps (teal / green / gold); series-3 is skipped because
+ * it resolves to the same red reserved for the product brand and primary actions. */
+const SERIES_FILLS = ["bg-series-1", "bg-series-2", "bg-series-4"];
+
 const PRODUCT_LABELS: Record<string, string> = {
   APPS: "Databricks Apps",
   DATABASE: "Lakebase",
@@ -95,8 +100,10 @@ export function aggregateProductSpend(rows: Row[]): ProductTotal[] {
       previous: 0,
     };
     const cost = Number(row.list_cost_usd ?? 0);
-    if (row.period === "previous") existing.previous += Number.isFinite(cost) ? cost : 0;
-    if (row.period === "current") existing.current += Number.isFinite(cost) ? cost : 0;
+    if (row.period === "previous")
+      existing.previous += Number.isFinite(cost) ? cost : 0;
+    if (row.period === "current")
+      existing.current += Number.isFinite(cost) ? cost : 0;
     totals.set(key, existing);
   }
   return [...totals.values()].sort((a, b) => b.current - a.current);
@@ -145,7 +152,11 @@ function meaningful(value: unknown): string | null {
   const text = String(value ?? "").trim();
   if (!text) return null;
   const normalized = text.toLowerCase().replace(/[\s_-]+/g, " ");
-  if (["unallocated", "unattributed", "unknown", "none", "n/a"].includes(normalized)) {
+  if (
+    ["unallocated", "unattributed", "unknown", "none", "n/a"].includes(
+      normalized,
+    )
+  ) {
     return null;
   }
   return text;
@@ -154,7 +165,10 @@ function meaningful(value: unknown): string | null {
 function initiativeEntity(value: string): string {
   if (/ms[-_ ]iva/i.test(value)) return "MS-IVA";
   if (/investment[-_ ]analytics/i.test(value)) return "Investment Analytics";
-  const cleaned = value.trim().replace(/^rg[-_ ]+/i, "").replace(/[_-]+/g, " ");
+  const cleaned = value
+    .trim()
+    .replace(/^rg[-_ ]+/i, "")
+    .replace(/[_-]+/g, " ");
   if (/^[A-Z0-9 -]+$/.test(value) && !/^RG[-_ ]/i.test(value)) return value;
   return cleaned.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
@@ -198,24 +212,27 @@ function resourceLeaf(value: unknown): string | null {
 }
 
 function firstTarget(row: Row): string | null {
-  return [
-    row.deployment_name,
-    row.deployment,
-    row.model_name,
-    row.index_name,
-    row.vector_index_name,
-    row.endpoint_name,
-    row.serving_endpoint_name,
-    row.resource_name,
-  ]
-    .map(meaningful)
-    .find((value): value is string => value !== null) ?? null;
+  return (
+    [
+      row.deployment_name,
+      row.deployment,
+      row.model_name,
+      row.index_name,
+      row.vector_index_name,
+      row.endpoint_name,
+      row.serving_endpoint_name,
+      row.resource_name,
+    ]
+      .map(meaningful)
+      .find((value): value is string => value !== null) ?? null
+  );
 }
 
 function databricksTargetLabel(row: Row): string {
   const product = productLabel(row.product);
   const target = firstTarget(row);
-  if (!target || target.toLowerCase() === product.toLowerCase()) return `Shared ${product}`;
+  if (!target || target.toLowerCase() === product.toLowerCase())
+    return `Shared ${product}`;
   return `${target} · ${product}`;
 }
 
@@ -223,9 +240,13 @@ function foundryTargetLabel(row: Row): string {
   const explicit = firstTarget(row);
   const account = resourceLeaf(row.resource_id);
   const meter = meaningful(row.meter_name);
-  const direction = meter?.search(/\b(input|output|cached|prompt|completion)\b/i) ?? -1;
+  const direction =
+    meter?.search(/\b(input|output|cached|prompt|completion)\b/i) ?? -1;
   const model = direction > 0 ? meaningful(meter?.slice(0, direction)) : null;
-  if (explicit) return account && explicit !== account ? `${explicit} · ${account}` : explicit;
+  if (explicit)
+    return account && explicit !== account
+      ? `${explicit} · ${account}`
+      : explicit;
   if (model) return account ? `${model} · ${account}` : model;
   return account ?? "Unallocated Foundry token resource";
 }
@@ -239,7 +260,8 @@ function addFlow(
   currency: string,
 ) {
   if (!Number.isFinite(cost) || cost <= 0) return;
-  const normalizedCurrency = meaningful(currency)?.toUpperCase() ?? "UNRESOLVED";
+  const normalizedCurrency =
+    meaningful(currency)?.toUpperCase() ?? "UNRESOLVED";
   const key = `${normalizedCurrency}\u0000${source}\u0000${initiative}\u0000${target}`;
   const existing = flows.get(key);
   if (existing) existing.cost += cost;
@@ -276,7 +298,12 @@ export function buildCostAttributionFlows(
     );
   }
   for (const row of foundryRows) {
-    if (!String(row.meter_name ?? "").toLowerCase().includes("token")) continue;
+    if (
+      !String(row.meter_name ?? "")
+        .toLowerCase()
+        .includes("token")
+    )
+      continue;
     addFlow(
       flows,
       "Microsoft Foundry API Tokens",
@@ -296,7 +323,8 @@ function aggregateNodes(
   field: "source" | "initiative" | "target",
 ): SankeyNode[] {
   const totals = new Map<string, number>();
-  for (const flow of flows) totals.set(flow[field], (totals.get(flow[field]) ?? 0) + flow.cost);
+  for (const flow of flows)
+    totals.set(flow[field], (totals.get(flow[field]) ?? 0) + flow.cost);
   return [...totals.entries()]
     .map(([label, cost]) => ({ key: label, label, cost }))
     .sort((a, b) => b.cost - a.cost || a.label.localeCompare(b.label));
@@ -312,15 +340,21 @@ function aggregateLinks(
     const key = `${flow[from]}\u0000${flow[to]}`;
     const existing = links.get(key);
     if (existing) existing.cost += flow.cost;
-    else links.set(key, { key, from: flow[from], to: flow[to], cost: flow.cost });
+    else
+      links.set(key, { key, from: flow[from], to: flow[to], cost: flow.cost });
   }
   return [...links.values()].sort(
-    (a, b) => b.cost - a.cost || a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
+    (a, b) =>
+      b.cost - a.cost ||
+      a.from.localeCompare(b.from) ||
+      a.to.localeCompare(b.to),
   );
 }
 
 /** Aggregate unique nodes and links inside strict currency partitions. */
-export function buildCurrencySankeys(flows: CostAttributionFlow[]): CurrencySankey[] {
+export function buildCurrencySankeys(
+  flows: CostAttributionFlow[],
+): CurrencySankey[] {
   const partitions = new Map<string, CostAttributionFlow[]>();
   for (const flow of flows) {
     const rows = partitions.get(flow.currency) ?? [];
@@ -405,7 +439,10 @@ function SourceCoverage({
       </div>
       <p className="mt-1 text-[11px] leading-4 text-muted">{message}</p>
       {amounts.length > 0 && (
-        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`${source} totals by currency`}>
+        <ul
+          className="mt-2 flex flex-wrap gap-1.5"
+          aria-label={`${source} totals by currency`}
+        >
           {amounts.map(([currency, cost]) => (
             <li
               key={currency}
@@ -452,14 +489,22 @@ function NodeColumn({
         {nodes.map((node) => {
           const share = total > 0 ? (node.cost / total) * 100 : 0;
           return (
-            <li key={node.key} className={`rounded-lg border p-2.5 ${styles[tone]}`}>
+            <li
+              key={node.key}
+              className={`rounded-lg border p-2.5 ${styles[tone]}`}
+            >
               <div className="flex items-start justify-between gap-2 text-xs">
-                <span className="min-w-0 break-words font-semibold text-ink">{node.label}</span>
+                <span className="min-w-0 break-words font-semibold text-ink">
+                  {node.label}
+                </span>
                 <span className="shrink-0 tabular-nums text-ink-2">
                   {formatCurrency(node.cost, currency)}
                 </span>
               </div>
-              <div className="mt-2 h-1.5 rounded-full bg-surface" aria-hidden="true">
+              <div
+                className="mt-2 h-1.5 rounded-full bg-surface"
+                aria-hidden="true"
+              >
                 <div
                   className={`h-1.5 rounded-full ${bars[tone]}`}
                   style={{ width: `${Math.max(share, 2)}%` }}
@@ -515,7 +560,10 @@ function LinkColumn({
                     className={`block rounded-full ${
                       tone === "gold" ? "bg-warning-accent" : "bg-series-1"
                     }`}
-                    style={{ width: `${Math.max(share, 2)}%`, height: `${thickness}px` }}
+                    style={{
+                      width: `${Math.max(share, 2)}%`,
+                      height: `${thickness}px`,
+                    }}
                   />
                 </span>
                 <span className="shrink-0 text-[10px] tabular-nums text-muted">
@@ -545,7 +593,10 @@ function CostAttributionChart({
   );
   const sankeys = useMemo(() => buildCurrencySankeys(flows), [flows]);
   const databricksAmounts = amountsForSource(flows, "Databricks DBUs");
-  const foundryAmounts = amountsForSource(flows, "Microsoft Foundry API Tokens");
+  const foundryAmounts = amountsForSource(
+    flows,
+    "Microsoft Foundry API Tokens",
+  );
   const foundryMessage =
     foundry.message ??
     (foundry.status === "loading"
@@ -564,13 +615,19 @@ function CostAttributionChart({
       data-testid="cost-attribution-flow"
       className="rounded-xl border border-grid bg-page/40 p-3 sm:p-4"
     >
-      <figcaption id={captionId} className="flex flex-wrap items-start justify-between gap-3">
+      <figcaption
+        id={captionId}
+        className="flex flex-wrap items-start justify-between gap-3"
+      >
         <div>
-          <h3 className="text-sm font-semibold text-brand-maroon">Cross-cloud cost attribution</h3>
+          <h3 className="text-sm font-semibold text-brand-maroon">
+            Cross-cloud cost attribution
+          </h3>
           <p className="mt-0.5 text-xs text-muted">
-            AI-serving spend only, aggregated from infrastructure through initiatives to model and
-            index targets. Foundry labels are resource/meter hints, not proof of exact deployment
-            allocation. Currency partitions never mix.
+            AI-serving spend only, aggregated from infrastructure through
+            initiatives to model and index targets. Foundry labels are
+            resource/meter hints, not proof of exact deployment allocation.
+            Currency partitions never mix.
           </p>
         </div>
         <span className="rounded-full border border-grid bg-surface px-2.5 py-1 text-[11px] text-muted">
@@ -578,7 +635,10 @@ function CostAttributionChart({
         </span>
       </figcaption>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Infrastructure source status">
+      <div
+        className="mt-3 grid gap-2 sm:grid-cols-2"
+        aria-label="Infrastructure source status"
+      >
         <SourceCoverage
           source="Databricks DBUs"
           status="ready"
@@ -600,7 +660,10 @@ function CostAttributionChart({
           No attributable AI-serving spend is available for the current period.
         </p>
       ) : (
-        <div className="mt-4 space-y-4" aria-label="Attributed cost Sankey partitions">
+        <div
+          className="mt-4 space-y-4"
+          aria-label="Attributed cost Sankey partitions"
+        >
           {sankeys.map((partition) => (
             <section
               key={partition.currency}
@@ -612,7 +675,8 @@ function CostAttributionChart({
                   {partition.currency} attribution flow
                 </h3>
                 <span className="text-xs tabular-nums text-ink-2">
-                  {formatCurrency(partition.total, partition.currency)} total in this currency
+                  {formatCurrency(partition.total, partition.currency)} total in
+                  this currency
                 </span>
               </div>
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(9rem,0.85fr)_minmax(0,1fr)_minmax(9rem,0.85fr)_minmax(0,1fr)]">
@@ -676,8 +740,14 @@ export function ProductSpendBreakdown({
 }) {
   const products = useMemo(() => aggregateProductSpend(rows), [rows]);
   const [chosen, setChosen] = useState<string | null>(null);
-  const currentTotal = products.reduce((sum, product) => sum + product.current, 0);
-  const previousTotal = products.reduce((sum, product) => sum + product.previous, 0);
+  const currentTotal = products.reduce(
+    (sum, product) => sum + product.current,
+    0,
+  );
+  const previousTotal = products.reduce(
+    (sum, product) => sum + product.previous,
+    0,
+  );
   const top = products.length > 8 ? products.slice(0, 7) : products;
   const remainder = products.length > 8 ? products.slice(7) : [];
   const groups = [
@@ -687,8 +757,14 @@ export function ProductSpendBreakdown({
           {
             key: "__OTHER__",
             label: `Other (${remainder.length})`,
-            current: remainder.reduce((sum, product) => sum + product.current, 0),
-            previous: remainder.reduce((sum, product) => sum + product.previous, 0),
+            current: remainder.reduce(
+              (sum, product) => sum + product.current,
+              0,
+            ),
+            previous: remainder.reduce(
+              (sum, product) => sum + product.previous,
+              0,
+            ),
             productKeys: remainder.map((product) => product.key),
           },
         ]
@@ -712,7 +788,10 @@ export function ProductSpendBreakdown({
       }
     >();
     for (const row of rows) {
-      if (row.period === "previous" || !selected.productKeys.includes(productKey(row.product))) {
+      if (
+        row.period === "previous" ||
+        !selected.productKeys.includes(productKey(row.product))
+      ) {
         continue;
       }
       const product = productLabel(row.product);
@@ -740,7 +819,8 @@ export function ProductSpendBreakdown({
   }, [rows, selected]);
 
   const hasUnpricedUsage = rows.some(
-    (row) => row.period !== "previous" && Number(row.unpriced_usage_quantity ?? 0) > 0,
+    (row) =>
+      row.period !== "previous" && Number(row.unpriced_usage_quantity ?? 0) > 0,
   );
 
   return (
@@ -748,7 +828,9 @@ export function ProductSpendBreakdown({
       <div className="flex flex-wrap items-end justify-between gap-2 border-b border-grid pb-3">
         <div>
           <p className="text-xs text-muted">Workspace list cost</p>
-          <p className="text-2xl font-semibold tabular-nums text-ink">{usd(currentTotal)}</p>
+          <p className="text-2xl font-semibold tabular-nums text-ink">
+            {usd(currentTotal)}
+          </p>
         </div>
         <p className="text-xs text-muted">
           {delta(currentTotal, previousTotal)} vs previous {days} days
@@ -762,47 +844,112 @@ export function ProductSpendBreakdown({
           No Databricks product list-cost rows are available in this window.
         </p>
       ) : (
-        <ul className="space-y-1" aria-label="List cost by Databricks product">
-          {groups.map((group) => {
-            const share = currentTotal > 0 ? (group.current / currentTotal) * 100 : 0;
-            const isSelected = selected?.key === group.key;
-            return (
-              <li key={group.key}>
-                <button
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => setChosen(group.key)}
-                  className={`w-full rounded-lg px-2 py-2 text-left transition ${
-                    isSelected ? "bg-tint" : "hover:bg-tint/60"
-                  }`}
-                >
-                  <span className="mb-1 flex items-baseline justify-between gap-3 text-xs">
-                    <span className="min-w-0 truncate font-medium text-ink-2">{group.label}</span>
-                    <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
-                      <span className="text-muted">{share.toFixed(1)}%</span>
-                      <span className="text-ink">{usd(group.current)}</span>
-                    </span>
-                  </span>
-                  <span className="block h-2 rounded-sm bg-hairline" aria-hidden="true">
+        <>
+          {currentTotal > 0 && groups.length > 1 && (
+            <div>
+              <span
+                className="flex h-3 w-full overflow-hidden rounded-md border border-grid"
+                role="img"
+                aria-label={`Spend composition: ${groups
+                  .filter((group) => group.current > 0)
+                  .map(
+                    (group) =>
+                      `${group.label} ${((group.current / currentTotal) * 100).toFixed(0)}%`,
+                  )
+                  .join(", ")}`}
+              >
+                {groups.map((group, index) =>
+                  group.current > 0 ? (
                     <span
-                      className="block h-2 rounded-sm bg-series-1"
-                      style={{ width: `${Math.max((group.current / max) * 100, 1)}%` }}
+                      key={group.key}
+                      className={SERIES_FILLS[index % SERIES_FILLS.length]}
+                      style={{
+                        width: `${(group.current / currentTotal) * 100}%`,
+                      }}
                     />
-                  </span>
-                  <span className="mt-1 block text-[11px] text-muted">
-                    {delta(group.current, group.previous)} vs prior period
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  ) : null,
+                )}
+              </span>
+              <div
+                className="mt-2 flex flex-wrap gap-x-4 gap-y-1"
+                aria-hidden="true"
+              >
+                {groups.map((group, index) =>
+                  (group.current / currentTotal) * 100 >= 1 ? (
+                    <span
+                      key={group.key}
+                      className="inline-flex items-center gap-1.5 text-[11px] text-muted"
+                    >
+                      <span
+                        className={`h-2 w-2 rounded-sm ${
+                          SERIES_FILLS[index % SERIES_FILLS.length]
+                        }`}
+                      />
+                      {group.label}
+                    </span>
+                  ) : null,
+                )}
+              </div>
+            </div>
+          )}
+
+          <ul
+            className="space-y-1"
+            aria-label="List cost by Databricks product"
+          >
+            {groups.map((group, index) => {
+              const share =
+                currentTotal > 0 ? (group.current / currentTotal) * 100 : 0;
+              const isSelected = selected?.key === group.key;
+              return (
+                <li key={group.key}>
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setChosen(group.key)}
+                    className={`w-full rounded-lg px-2 py-2 text-left transition ${
+                      isSelected ? "bg-tint" : "hover:bg-tint/60"
+                    }`}
+                  >
+                    <span className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate font-medium text-ink-2">
+                        {group.label}
+                      </span>
+                      <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
+                        <span className="text-muted">{share.toFixed(1)}%</span>
+                        <span className="text-ink">{usd(group.current)}</span>
+                      </span>
+                    </span>
+                    <span
+                      className="block h-2 rounded-sm bg-hairline"
+                      aria-hidden="true"
+                    >
+                      <span
+                        className={`block h-2 rounded-sm ${
+                          SERIES_FILLS[index % SERIES_FILLS.length]
+                        }`}
+                        style={{
+                          width: `${Math.max((group.current / max) * 100, 1)}%`,
+                        }}
+                      />
+                    </span>
+                    <span className="mt-1 block text-[11px] text-muted">
+                      {delta(group.current, group.previous)} vs prior period
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
 
       {selected && (
         <div>
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-xs font-semibold text-ink">{selected.label} cost drivers</h3>
+            <h3 className="text-xs font-semibold text-ink">
+              {selected.label} cost drivers
+            </h3>
             <span className="text-[11px] text-muted">
               Current {days}-day period · grouped by workload, SKU, and tags
             </span>
@@ -811,23 +958,36 @@ export function ProductSpendBreakdown({
             <table className="w-full text-left text-xs">
               <thead className="border-b border-grid bg-warning-surface text-brand-maroon">
                 <tr>
-                  {selected.key === "__OTHER__" && <th className="px-2 py-2 font-medium">Product</th>}
+                  {selected.key === "__OTHER__" && (
+                    <th className="px-2 py-2 font-medium">Product</th>
+                  )}
                   <th className="px-2 py-2 font-medium">Workload</th>
                   <th className="px-2 py-2 font-medium">SKU</th>
                   <th className="px-2 py-2 font-medium">Tags</th>
                   <th className="px-2 py-2 text-right font-medium">Usage</th>
-                  <th className="px-2 py-2 text-right font-medium">List cost</th>
+                  <th className="px-2 py-2 text-right font-medium">
+                    List cost
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-grid/60">
                 {detailRows.slice(0, 10).map((row) => (
-                  <tr key={`${row.product}-${row.workload}-${row.sku}-${row.unit}`} className="hover:bg-tint/50">
+                  <tr
+                    key={`${row.product}-${row.workload}-${row.sku}-${row.unit}`}
+                    className="hover:bg-tint/50"
+                  >
                     {selected.key === "__OTHER__" && (
                       <td className="px-2 py-2 text-ink-2">{row.product}</td>
                     )}
-                    <td className="max-w-52 truncate px-2 py-2 text-ink-2">{row.workload}</td>
-                    <td className="max-w-72 truncate px-2 py-2 text-muted">{row.sku}</td>
-                    <td className="max-w-64 truncate px-2 py-2 text-muted">{row.tags}</td>
+                    <td className="max-w-52 truncate px-2 py-2 text-ink-2">
+                      {row.workload}
+                    </td>
+                    <td className="max-w-72 truncate px-2 py-2 text-muted">
+                      {row.sku}
+                    </td>
+                    <td className="max-w-64 truncate px-2 py-2 text-muted">
+                      {row.tags}
+                    </td>
                     <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-muted">
                       {num(row.usage)} {row.unit}
                     </td>
@@ -849,7 +1009,8 @@ export function ProductSpendBreakdown({
 
       {hasUnpricedUsage && (
         <p className="text-[11px] text-status-warning">
-          Some usage had no matching list price and is excluded from cost totals.
+          Some usage had no matching list price and is excluded from cost
+          totals.
         </p>
       )}
     </div>

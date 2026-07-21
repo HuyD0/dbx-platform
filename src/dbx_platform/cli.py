@@ -613,6 +613,7 @@ def cmd_azure_cost_pull(args) -> int:
     rows: list[dict] = []
     detail_count = 0
     detail_failures: list[str] = []
+    validation_rows: list[dict] = []
     for window_start, window_end in azure_cost.split_date_windows(
         start.isoformat(), end.isoformat()
     ):
@@ -641,6 +642,21 @@ def cmd_azure_cost_pull(args) -> int:
             window_start=window_start,
             window_end=window_end,
         )
+        validation_rows.extend(
+            azure_cost.validate_cost_reconciliation(
+                w,
+                warehouse,
+                s.dashboard_catalog,
+                s.dashboard_schema,
+                window_rows,
+                workspace_id=workspace_id,
+                environment=environment,
+                subscription_id=sub,
+                scope_filter=scope_filter,
+                window_start=window_start,
+                window_end=window_end,
+            )
+        )
         rows.extend(window_rows)
         try:
             detail_pages = azure_cost.fetch_cost_query(
@@ -668,9 +684,24 @@ def cmd_azure_cost_pull(args) -> int:
                 window_start=window_start,
                 window_end=window_end,
             )
+            validation_rows.extend(
+                azure_cost.validate_detail_reconciliation(
+                    w,
+                    warehouse,
+                    s.dashboard_catalog,
+                    s.dashboard_schema,
+                    detail_rows,
+                    workspace_id=workspace_id,
+                    environment=environment,
+                    subscription_id=sub,
+                    scope_filter=scope_filter,
+                    window_start=window_start,
+                    window_end=window_end,
+                )
+            )
         except Exception as error:  # noqa: BLE001 - report partial storage precisely
             detail_failures.append(
-                f"{window_start}..{window_end}: {error.__class__.__name__}"
+                f"{window_start}..{window_end}: {error.__class__.__name__}: {error}"
             )
     n = len(rows)
     if detail_failures:
@@ -698,6 +729,7 @@ def cmd_azure_cost_pull(args) -> int:
             *detail_failures,
         ],
     )
+    emit(args, "Azure cost reconciliation integrity", validation_rows)
     if detail_failures:
         raise RuntimeError(
             "Azure coarse billed cost was stored, but detail allocation was incomplete: "
@@ -1079,21 +1111,21 @@ def cmd_forecast_build_features(args) -> int:
         workspace_id=str(w.get_workspace_id()),
         environment=getattr(args, "environment", s.environment),
     )
+    if not rows:
+        raise ValueError(
+            f"no rows in {s.dashboard_catalog}.{s.dashboard_schema}.azure_costs — run "
+            "'dbx-platform azure-cost pull' first."
+        )
     feats = forecast_features.build_features(rows)
+    alignment = forecast_features.validate_feature_alignment(rows, feats)
     n = forecast_features.store_features(
         w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, feats
     )
-    series = sorted({f["series"] for f in feats})
+    table = f"{s.dashboard_catalog}.{s.dashboard_schema}.cost_features"
     emit(
         args,
         f"Cost features built (set v{forecast_features.FEATURE_SET_VERSION})",
-        [
-            {
-                "series": ", ".join(series),
-                "rows": n,
-                "table": f"{s.dashboard_catalog}.{s.dashboard_schema}.cost_features",
-            }
-        ],
+        [{**row, "rows_written": n, "table": table} for row in alignment],
     )
     return 0
 
@@ -1169,7 +1201,7 @@ def cmd_forecast_monitor(args) -> int:
     from dbx_platform import forecast_monitor
 
     warehouse = _warehouse_id(args, s)
-    drift, errors, findings = forecast_monitor.run_monitoring(
+    drift, errors, coverage, findings = forecast_monitor.run_monitoring_with_coverage(
         w,
         warehouse,
         s.dashboard_catalog,
@@ -1178,6 +1210,7 @@ def cmd_forecast_monitor(args) -> int:
         environment=getattr(args, "environment", s.environment),
     )
     emit(args, "Feature drift (PSI vs reference window)", drift)
+    emit(args, "Forecast-to-actual alignment by series", coverage)
     emit(args, "Matured forecast accuracy by series", errors)
     emit(args, "Forecast monitor verdict", findings)
     if not args.no_store:
@@ -1190,8 +1223,13 @@ def cmd_forecast_monitor(args) -> int:
                 f"  note: findings not stored ({e}) — run the deployment "
                 "schema_migrations job first."
             )
-    if any(f["action"] == "retrain-recommended" for f in findings):
-        print("retrain recommended — failing so the job notification fires.", file=sys.stderr)
+    failure_actions = {"retrain-recommended", "source-data-missing"}
+    if any(f["action"] in failure_actions for f in findings):
+        print(
+            "forecast monitoring found a model or data integrity issue — "
+            "failing so the job notification fires.",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

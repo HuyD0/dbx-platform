@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FindingsSection } from "../components/FindingsSection";
 import { GatewayTelemetry, LiveRatesIndicator } from "../components/GatewayTelemetry";
-import { Card, SectionTitle } from "../components/ui";
+import { Bento, BentoCell, Card, SectionTitle } from "../components/ui";
 
 const WINDOWS = [7, 30, 90];
 
@@ -36,8 +36,10 @@ export function Performance() {
 
       <GatewayTelemetry days={days} />
 
-      <div className="grid gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-7 [&>*]:h-full">
+      {/* The governed gateway telemetry owns the wide asymmetric top row; the
+          operational regression views continue to use the shared Bento shell. */}
+      <Bento>
+        <BentoCell span="lg:col-span-7" bare className="[&>*]:h-full">
           <FindingsSection
             title="Job duration regressions"
             subtitle="p50/p95, queue time, retries and SLA exposure against the prior window"
@@ -45,8 +47,8 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No material job regression."
           />
-        </div>
-        <div className="xl:col-span-5 [&>*]:h-full">
+        </BentoCell>
+        <BentoCell span="lg:col-span-5" bare className="[&>*]:h-full">
           <FindingsSection
             title="SQL query regressions"
             subtitle="Latency, queueing, bytes scanned and cost-per-query shifts"
@@ -54,8 +56,9 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No material query regression."
           />
-        </div>
-        <div className="xl:col-span-4 [&>*]:h-full">
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="Under-utilized clusters"
             subtitle="Observed load does not justify size; recommendations preserve declared SLO headroom"
@@ -63,8 +66,8 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No under-utilized clusters."
           />
-        </div>
-        <div className="xl:col-span-4 [&>*]:h-full">
+        </BentoCell>
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="SQL warehouse pressure"
             subtitle="Idle spend, queueing and sustained capacity pressure"
@@ -72,8 +75,9 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No mis-sized SQL warehouse."
           />
-        </div>
-        <div className="xl:col-span-4 [&>*]:h-full">
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="Failed and retry waste"
             subtitle="Cost and elapsed time burned on failed, timed-out or retried runs"
@@ -81,8 +85,8 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No failed-run waste."
           />
-        </div>
-        <div className="xl:col-span-12 [&>*]:h-full">
+        </BentoCell>
+        <BentoCell span="lg:col-span-12" bare className="[&>*]:h-full">
           <FindingsSection
             title="Serving reliability"
             subtitle="p95 latency, error rate, retry amplification and cost per successful request"
@@ -90,8 +94,8 @@ export function Performance() {
             params={{ days }}
             emptyMessage="No model-serving SLO regression."
           />
-        </div>
-      </div>
+        </BentoCell>
+      </Bento>
     </div>
   );
 }

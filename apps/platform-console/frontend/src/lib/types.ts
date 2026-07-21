@@ -184,6 +184,34 @@ export interface DashboardInfo {
   embed_url: string;
 }
 
+export interface WorkspaceCapability {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface WorkspaceAccess {
+  workspace_id: string | null;
+  name: string;
+  environment: string;
+  relationship: "platform_admin" | "workspace_user" | string;
+  roles: string[];
+  capabilities: WorkspaceCapability[];
+  management_mode: "governed_approval" | "viewer_safe" | string;
+}
+
+export interface WorkspaceAccessResponse {
+  actor: {
+    actor_id: string;
+    email: string | null;
+    roles: string[];
+    view: "platform_admin" | "workspace_user" | string;
+  };
+  workspaces: WorkspaceAccess[];
+  source_status: SourceHealth;
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
