@@ -282,3 +282,143 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   await user.click(screen.getByRole("button", { name: "Close approval dialog" }));
   await waitFor(() => expect(review).toHaveFocus());
 });
+
+test("five-jobs navigation exposes governance homes and the workspace scope", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "prod",
+            actions_enabled: false,
+            workspace_id: "7405609799238491",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+  renderApp("/");
+
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  for (const label of [
+    "Cost",
+    "Data Governance",
+    "AI Governance",
+    "Risk",
+    "Operations",
+    "Learn",
+  ]) {
+    expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+  }
+  expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
+});
+
+test("legacy governance and security URLs land on the split governance pages", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const governance = renderApp("/governance");
+  expect(
+    await governance.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  governance.unmount();
+
+  const security = renderApp("/security?tab=governance");
+  expect(
+    await security.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  security.unmount();
+
+  const risk = renderApp("/security?tab=identity");
+  expect(await risk.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
+  risk.unmount();
+
+  const aiMl = renderApp("/ai-ml");
+  expect(await aiMl.findByRole("heading", { name: "AI Governance" })).toBeInTheDocument();
+});
+
+test("Cost Planner shows a friendly first-run pricing snapshot message", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "production",
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/estimator/patterns")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                pattern: "doc_chat",
+                label: "Chat with your documents",
+                description: "Answers grounded in your own files.",
+                example_prompt: "What does our travel policy say?",
+                defaults: { needs_knowledge_base: true, needs_memory: false },
+              },
+            ],
+            count: 1,
+            as_of: "2026-07-18T12:00:00Z",
+            cached: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/estimator/estimate")) {
+        return new Response(
+          JSON.stringify({
+            error: "pricing_snapshot_missing",
+            message: "No stored price snapshot exists for USD.",
+            hint:
+              "Run the '[dbx-platform] estimator-prices-pull' job once (schedule or an approved manual run) to store a price snapshot, then retry.",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ data: [], count: 0, as_of: null, cached: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+
+  renderApp("/cost-planner");
+  await user.click(await screen.findByRole("radio", { name: /Chat with your documents/ }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Review my answers" }));
+  await user.click(
+    screen.getByRole("button", { name: "These numbers are right — show the costs" }),
+  );
+
+  expect(
+    await screen.findByText("Cost Planner needs its first price snapshot."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Ask an approver to run the estimator-prices-pull job once/),
+  ).toBeInTheDocument();
+});

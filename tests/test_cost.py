@@ -214,3 +214,60 @@ def test_large_fixed_shared_job_cluster_flagged():
     j = _job(job_clusters=[{"key": "shared", "fixed_workers": 16}])
     findings = find_jobs_on_all_purpose([j], fixed_workers_max=10)
     assert [f["action"] for f in findings] == ["enable-autoscale"]
+
+
+# --- attribution --------------------------------------------------------------
+
+def test_attribution_sql_groups_spend_by_enforced_tag():
+    sql = cost.attribution_sql("team")
+    assert "u.custom_tags['team']" in sql
+    assert "'unallocated'" in sql
+    assert "AS x_team" in sql
+    assert "AS sub_account_id" in sql
+    assert "AS list_cost" in sql
+    assert "u.workspace_id = :workspace_id" in sql
+
+
+def test_attribution_sql_workspace_dimension_has_no_tag_column():
+    sql = cost.attribution_sql("workspace")
+    assert "custom_tags" not in sql
+    assert "AS sub_account_id" in sql
+
+
+def test_attribution_sql_rejects_unknown_dimension():
+    import pytest
+
+    with pytest.raises(ValueError):
+        cost.attribution_sql("cost_center'; DROP TABLE x --")
+
+
+def test_attribution_scopes_to_current_workspace(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 555
+    captured = {}
+
+    def read(_workspace, sql, warehouse_id, parameters):
+        captured.update(sql=sql, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.attribution(workspace, "wh", "project", 30) == []
+    assert captured["parameters"] == {"days": 30, "workspace_id": "555"}
+    assert "x_project" in captured["sql"]
+
+
+def test_core_cost_reports_expose_team_and_project_dimensions():
+    for query_name in ("usage_last_30d", "product_spend", "job_run_cost"):
+        sql = cost.load_query(query_name)
+        assert "custom_tags['team']" in sql
+        assert "custom_tags['project']" in sql
+        assert "AS team" in sql
+        assert "AS project" in sql
+
+
+def test_tag_coverage_reports_each_required_dimension():
+    sql = cost.load_query("untagged_usage")
+    assert "missing_team_list_cost_usd" in sql
+    assert "missing_team_pct" in sql
+    assert "missing_project_list_cost_usd" in sql
+    assert "missing_project_pct" in sql

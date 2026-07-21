@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -11,6 +11,7 @@ from dbx_platform.llm_cost import (
     create_ledger_table_statements,
     efficiency,
     evaluate_budgets,
+    mark_source_stale,
     mask_identity,
     merge_cost_rows_sql,
     merge_source_health_sql,
@@ -89,7 +90,7 @@ def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
     assert len(calls) == 4
     assert all(warehouse == "warehouse-1" for _, warehouse, _ in calls)
     assert all(
-        parameters == {"days": 30, "workspace_id": "12345"}
+        parameters == {"days": 29, "workspace_id": "12345"}
         for _, _, parameters in calls
     )
     assert all(":workspace_id" in sql for sql, _, _ in calls)
@@ -98,6 +99,8 @@ def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
         for sql, _, _ in calls
     )
     assert "eu.workspace_id = se.workspace_id" in calls[3][0]
+    assert "billing_origin_product = 'GENIE'" in calls[0][0]
+    assert "billing_origin_product = 'GENIE'" in calls[1][0]
     assert "'current'" not in calls[3][0]
 
 
@@ -123,7 +126,7 @@ def test_live_llm_sources_honor_an_explicit_workspace_scope(monkeypatch):
     )
 
     assert seen_parameters == [
-        {"days": 7, "workspace_id": "workspace-current"}
+        {"days": 6, "workspace_id": "workspace-current"}
     ]
 
 
@@ -168,7 +171,36 @@ def test_azure_actual_cost_labels_coarse_fallback_as_partial(monkeypatch):
 
     assert result.rows == [_cost()]
     assert result.status == "partial"
+    assert result.source == "azure_costs"
     assert "resource/meter/use-case attribution is unavailable" in result.notes
+
+
+def test_azure_actual_cost_falls_back_when_detail_table_is_empty(monkeypatch):
+    calls = []
+
+    def query(_w, sql, _warehouse, params):
+        calls.append((sql, params))
+        return [] if len(calls) == 1 else [_cost()]
+
+    monkeypatch.setattr("dbx_platform.llm_cost.run_query", query)
+
+    result = azure_actual_cost(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        3,
+        workspace_id="w1",
+        environment="prod",
+    )
+
+    assert len(calls) == 2
+    assert all(params["days"] == 2 for _, params in calls)
+    assert all("COALESCE(scope_filter, '') <> ''" in sql for sql, _ in calls)
+    assert result.rows == [_cost()]
+    assert result.status == "partial"
+    assert result.source == "azure_costs"
+    assert "no scoped detail rows" in result.notes
 
 
 def test_normalize_cost_rejects_unknown_basis():
@@ -384,6 +416,33 @@ def test_coverage_record_keeps_financial_basis_explicit():
     )
     assert record["cost_basis"] == "AZURE_ACTUAL"
     assert record["retention_days"] == 400
+
+
+def test_old_source_success_is_marked_stale_at_read_time():
+    now = datetime(2026, 7, 19, 12, tzinfo=UTC)
+    source = {
+        "source_key": "azure-cost-management",
+        "status": "available",
+        "last_success_at": now - timedelta(hours=51),
+        "notes": "late adjustments possible",
+    }
+
+    stale = mark_source_stale(source, now=now)
+
+    assert stale["status"] == "stale"
+    assert "51.0 hours old" in stale["notes"]
+    assert source["status"] == "available"
+
+
+def test_recent_source_success_remains_available():
+    now = datetime(2026, 7, 19, 12, tzinfo=UTC)
+    source = {
+        "source_key": "databricks-hosted-billing",
+        "status": "available",
+        "last_success_at": now - timedelta(hours=25),
+    }
+
+    assert mark_source_stale(source, now=now)["status"] == "available"
 
 
 def test_ledger_ddl_creates_cost_usage_budget_and_source_health_tables():
@@ -709,3 +768,60 @@ def test_budget_evaluation_excludes_other_calendar_months():
     )[0]
     assert result["spend"] == 25
     assert result["consumed_pct"] == 25
+
+
+# --- budget-breach findings ---------------------------------------------------
+
+def test_classify_budget_findings_emits_only_breaches():
+    from dbx_platform.llm_cost import classify_budget_findings
+
+    evaluated = [
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "AZURE_ACTUAL", "currency": "EUR",
+            "month": "2026-07-01", "amount": 1000.0, "spend": 990.0,
+            "consumed_pct": 99.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "WARNING",
+        },
+        {
+            "scope_type": "team", "scope_value": "search",
+            "cost_basis": "DATABRICKS_LIST", "currency": "USD",
+            "month": "2026-07-01", "amount": 500.0, "spend": 650.0,
+            "consumed_pct": 130.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "CRITICAL",
+        },
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "PROVIDER_ESTIMATE", "currency": "USD",
+            "month": "2026-07-01", "amount": 100.0, "spend": 10.0,
+            "consumed_pct": 10.0, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "OK",
+        },
+    ]
+    findings = classify_budget_findings(evaluated)
+    assert len(findings) == 2
+    warning, critical = findings[0], findings[1]
+    assert warning["severity"] == "MEDIUM"
+    assert warning["action"] == "review-budget-breach"
+    # Overage past the breached threshold: 990 - 1000*0.8 = 190
+    assert warning["cost"] == 190.0
+    assert critical["severity"] == "HIGH"
+    assert critical["team"] == "search"
+    # 650 - 500*1.0 = 150 past the critical threshold
+    assert critical["cost"] == 150.0
+    assert "budget:team:search:DATABRICKS_LIST:USD:2026-07" in critical["resource_id"]
+
+
+def test_classify_budget_findings_never_reports_negative_overage():
+    from dbx_platform.llm_cost import classify_budget_findings
+
+    findings = classify_budget_findings([
+        {
+            "scope_type": "workspace", "scope_value": "all",
+            "cost_basis": "AZURE_ACTUAL", "currency": "USD",
+            "month": "2026-07-01", "amount": 0.0, "spend": 0.0,
+            "consumed_pct": None, "warning_pct": 80, "critical_pct": 100,
+            "threshold_state": "INVALID",
+        },
+    ])
+    assert findings == []

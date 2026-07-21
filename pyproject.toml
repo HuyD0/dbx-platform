@@ -26,6 +26,9 @@ dev = [
     # Offline TestClient tests for the Platform Console backend (tests/test_app.py)
     "fastapi>=0.110",
     "httpx>=0.27",
+    # Offline tests for the estimator's document-upload path
+    "python-multipart>=0.0.9",
+    "pypdf>=5.0",
 ]
 # The Azure cost forecaster's training/inference deps — kept out of the core
 # wheel; the forecast jobs' serverless environment installs them alongside

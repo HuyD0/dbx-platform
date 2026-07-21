@@ -128,6 +128,7 @@ export interface HealthResponse {
   build?: { sha: string; built_at: string } | null;
   actions_enabled: boolean;
   environment?: string;
+  workspace_id?: string | null;
 }
 
 export interface SourceHealth {
@@ -402,4 +403,124 @@ export interface LlmEfficiency {
   metrics?: Row;
   recommendations?: Row[];
   [key: string]: unknown;
+}
+
+// --- AI Cost Planner (estimator) ---
+
+export interface EstimatorPattern {
+  pattern: string;
+  label: string;
+  description: string;
+  example_prompt: string;
+  defaults: Record<string, unknown>;
+}
+
+export interface EstimateLineItem {
+  component: string;
+  env: string;
+  tier: string;
+  scenario: string;
+  label: string;
+  quantity: number;
+  unit: string;
+  unit_price: number | null;
+  currency: string | null;
+  price_source: string | null;
+  meter_name: string | null;
+  snapshot_date: string | null;
+  provenance: string | null;
+  monthly_cost: number | null;
+  formula: string;
+  assumptions: string[];
+  is_eval_tax: boolean;
+  eval_group: string | null;
+}
+
+export interface RigorCurveEnv {
+  total_fixed: number;
+  total_slope_per_pct: number;
+  eval_fixed: number;
+  eval_slope_per_pct: number;
+}
+
+export interface TierScenarioEstimate {
+  tier: string;
+  scenario: string;
+  rigor_pct: number;
+  line_items: EstimateLineItem[];
+  totals_by_env: Record<string, number>;
+  run_cost_by_env: Record<string, number>;
+  eval_tax_by_env: Record<string, number>;
+  improvement_pipeline_by_env: Record<string, number>;
+  missing_prices: string[];
+  rigor_curve: { pinned: boolean; by_env: Record<string, RigorCurveEnv> };
+}
+
+export interface EstimateTier {
+  label: string;
+  description: string;
+  rigor_locked: boolean;
+  rigor_locked_reason: string;
+  default_rigor_pct: number;
+  scenarios: Record<string, TierScenarioEstimate>;
+}
+
+export interface EstimateMatrix {
+  engine_version: string;
+  rate_card_version: string;
+  snapshot_date: string;
+  requirements: Record<string, unknown>;
+  rigor_pct: number;
+  requirements_hash: string;
+  blueprint: { title: string; body: string }[];
+  tiers: Record<string, EstimateTier>;
+}
+
+export interface ExtractResponse {
+  requirements: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface PricingStatus {
+  sources: Row[];
+  snapshot_date?: string | null;
+  coverage_findings: Row[];
+  notes: string[];
+  health: SourceHealth;
+}
+
+export interface SavedEstimateSummary {
+  estimate_id: string;
+  created_at: string;
+  created_by?: string;
+  title: string;
+  pattern: string;
+  monthly_requests: number;
+  corpus_gb: number;
+  requirements_json: string;
+  requirements_hash: string;
+  engine_version?: string;
+  rate_card_version?: string;
+  snapshot_date?: string;
+  rigor_pct: number;
+}
+
+export interface SimilarEstimatesResponse {
+  exact_match: SavedEstimateSummary | null;
+  similar: SavedEstimateSummary[];
+  bracket: { lo: number; hi: number };
+}
+
+export interface DeploymentLink {
+  deployment_id: string;
+  estimate_id: string;
+  created_at: string;
+  created_by?: string;
+  tier: string;
+  scenario: string;
+  anchor_kind: string;
+  anchor_value: string;
+  monthly_projected_usd: number;
+  currency: string;
+  active: boolean;
 }

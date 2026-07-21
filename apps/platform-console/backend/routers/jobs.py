@@ -24,10 +24,10 @@ def _as_bool(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes"}
 
 
-def _job_ids_from_env(name: str) -> set[int]:
-    """Parse an exact, deployment-bound set of Job IDs."""
+def _governed_manual_job_ids() -> set[int]:
+    """Return exact bundle-bound Jobs that are runnable but never hibernated."""
 
-    raw = os.getenv(name, "")
+    raw = os.getenv("DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS", "")
     ids: set[int] = set()
     for value in raw.split(","):
         value = value.strip()
@@ -37,24 +37,15 @@ def _job_ids_from_env(name: str) -> set[int]:
             job_id = int(value)
         except ValueError as exc:
             raise RuntimeError(
-                f"{name} must contain exact comma-separated numeric Job IDs"
+                "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS must contain exact "
+                "comma-separated numeric Job IDs"
             ) from exc
         if job_id <= 0:
-            raise RuntimeError(f"{name} contains an invalid Job ID")
+            raise RuntimeError(
+                "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS contains an invalid Job ID"
+            )
         ids.add(job_id)
     return ids
-
-
-def _governed_manual_job_ids() -> set[int]:
-    """Return exact bundle-bound Jobs that are runnable but never hibernated."""
-
-    return _job_ids_from_env("DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS")
-
-
-def is_low_risk_manual_job(job_id: int) -> bool:
-    """Return whether a bundle-bound report Job may use click confirmation."""
-
-    return job_id in _job_ids_from_env("DBX_PLATFORM_LOW_RISK_JOB_IDS")
 
 
 def _platform_jobs() -> list[dict]:

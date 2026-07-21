@@ -1,13 +1,24 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      recover_stale_lock:
+        description: "Take over a confirmed stale Databricks bundle deployment lock"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: bundle-deploy
   cancel-in-progress: false
+
+# Deploys run only after the main-branch CI workflow succeeds (or by manual
+# dispatch). This prevents CD from racing ahead of a failing push build.
 
 # Auth: keyless — azure/login OIDC (subject
 # repo:HuyD0/dbx-platform:environment:production) + the Databricks CLI's
@@ -31,6 +42,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -46,8 +58,11 @@ jobs:
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
       BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
+      SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -83,23 +98,18 @@ jobs:
       - name: Verify executor identity policy
         run: bash scripts/verify_executor_identity.sh
       - name: Stage the wheel for the Platform Console app
-        # Use a commit-specific direct wheel path. Databricks Apps caches its
-        # virtualenv when requirements.txt is unchanged; a stable
-        # dbx-platform==0.2.0 requirement can therefore serve an old wheel even
-        # after bundle sync uploads new code with the same package version.
-        # build_info.json surfaces the deployed commit in /api/health so a
-        # stale-wheel deployment is diagnosable from the UI footer.
+        # Refresh the uv lock after staging the current wheel. Its wheel hash
+        # changes on every build, invalidating the Databricks Apps environment
+        # cache without making the package version commit-specific.
+        # build_info.json surfaces the deployed commit in /api/health.
         run: |
           uv run python -m build --wheel
           wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
-          build_dir="apps/platform-console/wheels/${GITHUB_SHA::7}"
-          mkdir -p "$build_dir"
-          cp "dist/$wheel" "$build_dir/$wheel"
-          sed -i \
-            "s|^dbx-platform$|wheels/${GITHUB_SHA::7}/$wheel|" \
-            apps/platform-console/requirements.txt
+          mkdir -p apps/platform-console/wheels
+          cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
+          uv lock --refresh-package dbx-platform --project apps/platform-console
           printf '{"sha": "%s", "built_at": "%s"}\n' \
-            "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${SOURCE_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             > apps/platform-console/build_info.json
       - uses: actions/setup-node@v4
         with:
@@ -124,9 +134,17 @@ jobs:
         # Keep this allowlist explicit: production deploys may create/update
         # the app, owned jobs, and the dedicated warehouse, but must never use
         # --auto-approve to cross a destructive plan.
+        env:
+          RECOVER_STALE_LOCK: ${{ github.event_name == 'workflow_dispatch' && inputs.recover_stale_lock || false }}
         run: |
+          lock_args=()
+          if [[ "$RECOVER_STALE_LOCK" == "true" ]]; then
+            lock_args+=(--force-lock)
+          fi
           databricks bundle deploy -t prod \
+            "${lock_args[@]}" \
             --select apps.platform_console \
+            --select experiments.platform_console_traces \
             --select sql_warehouses.platform_console_warehouse \
             --select jobs.action_executor \
             --select jobs.ai_catalog_sync \
@@ -136,6 +154,11 @@ jobs:
             --select jobs.cost_forecast_train \
             --select jobs.cost_usage_report \
             --select jobs.dashboards_setup \
+            --select experiments.estimator_extraction_eval_experiment \
+            --select jobs.estimator_drift_check \
+            --select jobs.estimator_extraction_eval \
+            --select jobs.estimator_prices_pull \
+            --select jobs.estimator_prompt_sync \
             --select jobs.governance_check \
             --select jobs.housekeeping_report \
             --select jobs.llm_cost_rollup \
@@ -149,6 +172,11 @@ jobs:
         # Runs on serverless Spark as the deployment identity. It never starts
         # the managed SQL warehouse, so deploy-while-sleeping stays asleep.
         run: databricks bundle run schema_migrations -t prod
+      - name: Sync estimator prompts to the UC prompt registry
+        # Idempotent lineage step: registers the wheel's extraction prompt
+        # texts tagged by content hash, skipping unchanged versions, so
+        # traces, registry versions and git commits reference the same bytes.
+        run: databricks bundle run estimator_prompt_sync -t prod
       - name: Reconcile the durable runtime intent (proposal only)
         # Deploy leaves schedules paused and the warehouse asleep; the app
         # declares started: true, so deploy does start it directly.

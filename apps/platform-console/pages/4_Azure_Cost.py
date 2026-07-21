@@ -18,13 +18,14 @@ from console_common import (
 from dbx_platform import azure_cost
 
 st.title("Azure Cost")
-st.caption("Whole-subscription bill (Cost Management Query API) next to the "
-           "Databricks-side cost checks, plus the ML forecast from the "
+st.caption("Resource-group-scoped Azure bill (Cost Management Query API) next "
+           "to Databricks-side cost checks, plus the ML forecast from the "
            "@champion model.")
 safety_note()
 
 s = settings()
 fq = f"{s.dashboard_catalog}.{s.dashboard_schema}"
+workspace_id = str(client().get_workspace_id())
 
 tab_bill, tab_forecast, tab_health = st.tabs(
     ["Azure bill", "Forecast", "Forecast health"]
@@ -34,7 +35,13 @@ with tab_bill:
     days = st.slider("Window (days)", 7, 180, 30)
     try:
         daily = azure_cost.fetch_daily_buckets(
-            client(), warehouse_id(), s.dashboard_catalog, s.dashboard_schema, days
+            client(),
+            warehouse_id(),
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            days,
+            workspace_id=workspace_id,
+            environment=s.environment,
         )
     except Exception as e:  # table missing until the pull job has run
         daily = []
@@ -50,13 +57,29 @@ with tab_bill:
                                   values="cost", aggfunc="sum").fillna(0)
         st.bar_chart(pivot)
         by = st.selectbox("Break down by", ["bucket", "service", "resource-group"])
-        show_rows(azure_cost.report(client(), warehouse_id(), s.dashboard_catalog,
-                                    s.dashboard_schema, by, days))
+        show_rows(
+            azure_cost.report(
+                client(),
+                warehouse_id(),
+                s.dashboard_catalog,
+                s.dashboard_schema,
+                by,
+                days,
+                workspace_id=workspace_id,
+                environment=s.environment,
+            )
+        )
     st.subheader("Spend spikes (fresh check)")
     if st.button("Run spike check now"):
         with st.spinner("Classifying per-bucket spend…"):
             rows = azure_cost.fetch_daily_buckets(
-                client(), warehouse_id(), s.dashboard_catalog, s.dashboard_schema, 14
+                client(),
+                warehouse_id(),
+                s.dashboard_catalog,
+                s.dashboard_schema,
+                14,
+                workspace_id=workspace_id,
+                environment=s.environment,
             )
             findings = azure_cost.classify_azure_spend(
                 rows, s.azure_spike_pct, s.azure_spike_min_cost

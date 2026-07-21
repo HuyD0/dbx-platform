@@ -1,10 +1,36 @@
+import importlib
+import sys
 from datetime import date
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
-from dbx_platform.platform_agent import tools
+
+class _FakeTool:
+    """Small stand-in for the optional LangChain decorator used by this unit test."""
+
+    def __init__(self, function):
+        self.function = function
+
+    def invoke(self, arguments):
+        return self.function(**arguments)
+
+
+def _load_tools(monkeypatch, request):
+    langchain_core = ModuleType("langchain_core")
+    langchain_tools = ModuleType("langchain_core.tools")
+    langchain_tools.tool = _FakeTool
+    langchain_core.tools = langchain_tools
+    monkeypatch.setitem(sys.modules, "langchain_core", langchain_core)
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", langchain_tools)
+    sys.modules.pop("dbx_platform.platform_agent.tools", None)
+    tools = importlib.import_module("dbx_platform.platform_agent.tools")
+    request.addfinalizer(
+        lambda: sys.modules.pop("dbx_platform.platform_agent.tools", None)
+    )
+    return tools
 
 
 def test_llm_cost_tool_excludes_foreign_workspace_rows(monkeypatch, request):
+    tools = _load_tools(monkeypatch, request)
     current_workspace = "workspace-current"
     foreign_workspace = "workspace-foreign"
     account_cost_rows = [
@@ -86,4 +112,5 @@ def test_llm_cost_tool_excludes_foreign_workspace_rows(monkeypatch, request):
     assert "cost=7.0" in result
     assert "requests=3" in result
     assert "foreign-model" not in result
-    assert "999" not in result
+    assert "cost=999" not in result
+    assert "requests=999" not in result

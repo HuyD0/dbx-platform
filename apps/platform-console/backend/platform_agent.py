@@ -8,11 +8,13 @@ a separate model-serving endpoint.
 from __future__ import annotations
 
 import json
+import os
 from functools import cached_property
 from typing import Any
 
 from langchain_core.tools import tool
 
+from backend.agent_runtime import DatabricksChatModel, configure_mlflow_tracing
 from dbx_platform.platform_agent import tools as shared_tools
 from dbx_platform.platform_agent.formatting import SYSTEM_PROMPT, rows_to_text
 
@@ -145,14 +147,17 @@ class PlatformAgent:
 
     @cached_property
     def graph(self):
-        from databricks_langchain import ChatDatabricks
         from langgraph.prebuilt import create_react_agent
+
+        experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "").strip()
+        if experiment_id:
+            configure_mlflow_tracing(experiment_id)
 
         shared_tools.configure_runtime(
             client_factory=self.workspace_client_factory,
             settings_factory=self.settings_factory,
         )
-        llm = ChatDatabricks(
+        llm = DatabricksChatModel(
             endpoint=self.endpoint,
             workspace_client=self.workspace_client_factory(),
             temperature=0.1,
@@ -165,6 +170,8 @@ class PlatformAgent:
             shared_tools.get_failed_run_waste,
             shared_tools.get_llm_cost_and_efficiency,
             shared_tools.get_warehouse_utilization,
+            shared_tools.list_solution_patterns,
+            shared_tools.estimate_solution_cost,
             self._canonical_findings_tool(),
             self._proposal_tool(),
         ]

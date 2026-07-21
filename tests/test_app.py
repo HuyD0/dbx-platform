@@ -23,7 +23,11 @@ import pytest
 import yaml
 
 APP_DIR = Path(__file__).resolve().parent.parent / "apps" / "platform-console"
-APP_FILES = sorted(p for p in APP_DIR.rglob("*.py") if "frontend" not in p.parts)
+APP_FILES = sorted(
+    p
+    for p in APP_DIR.rglob("*.py")
+    if "frontend" not in p.parts and ".venv" not in p.parts
+)
 
 sys.path.insert(0, str(APP_DIR))
 
@@ -63,7 +67,9 @@ def _top_level_calls(tree: ast.Module) -> set[str]:
 
 def test_app_source_exists():
     assert (APP_DIR / "app.yaml").exists()
-    assert (APP_DIR / "requirements.txt").exists()
+    assert (APP_DIR / "pyproject.toml").exists()
+    assert (APP_DIR / "uv.lock").exists()
+    assert not (APP_DIR / "requirements.txt").exists()
     assert len(APP_FILES) >= 4
 
 
@@ -102,9 +108,32 @@ def test_app_yaml_launches_the_backend():
     assert bundle_config["resources"]["apps"]["platform_console"][
         "user_api_scopes"
     ] == ["sql"]
-    requirements = (APP_DIR / "requirements.txt").read_text()
-    assert "--find-links wheels" in requirements
-    assert "fastapi" in requirements
+    project = (APP_DIR / "pyproject.toml").read_text()
+    assert '"fastapi==0.139.2"' in project
+    assert '"langgraph==1.2.9"' in project
+    assert '"mlflow-tracing==3.14.0"' in project
+    assert "databricks-langchain" not in project
+    assert '"mlflow==' not in project
+    assert 'dbx-platform = { path = "wheels/' in project
+
+    experiment = bundle_config["resources"]["experiments"][
+        "platform_console_traces"
+    ]
+    assert experiment["name"] == (
+        "/Shared/dbx-platform-${bundle.target}-platform-console-traces"
+    )
+    assert experiment["lifecycle"]["prevent_destroy"] is True
+    app = bundle_config["resources"]["apps"]["platform_console"]
+    trace_resource = next(
+        resource
+        for resource in app["resources"]
+        if resource["name"] == "agent-traces"
+    )
+    assert trace_resource["experiment"]["permission"] == "CAN_EDIT"
+    assert {
+        item["name"]: item.get("value_from")
+        for item in app["config"]["env"]
+    }["MLFLOW_EXPERIMENT_ID"] == "agent-traces"
 
 
 def test_bundle_artifact_build_uses_managed_environment():
@@ -226,6 +255,18 @@ def test_every_mutating_route_is_post_only(client):
         "/api/jobs/{job_id}/run_now",
         "/api/digest/generate",
         "/api/chat",
+        # Estimator routes POST a requirements/description body but never
+        # mutate workspace state: estimate is pure math over the stored price
+        # snapshot; extract only feeds the human review screen.
+        "/api/estimator/estimate",
+        # Saving an estimate is telemetry append through the cp_record_estimate
+        # security-definer procedure — no target mutation, no approval flow.
+        "/api/estimator/estimates/record",
+        "/api/estimator/extract",
+        "/api/estimator/extract-document",
+        # Linking a deployment is telemetry append through the
+        # cp_link_deployment security-definer procedure — no target mutation.
+        "/api/estimator/deployments/link",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"
@@ -655,3 +696,201 @@ def test_parse_evidence_citations_deduplicates_and_preserves_malformed_markers()
     assert len(citations) == 1
     assert citations[0]["tool"] == "security-audit"
     assert citations[0]["source"] == "platform_findings"
+
+
+# --- Phase 1 wiring: workspace scope, Azure by=, AI governance ----------------
+
+def test_health_reports_workspace_scope(client):
+    from backend.routers import meta as meta_router
+
+    meta_router._workspace_id_cache = None
+    body = client.get("/api/health").json()
+    assert body["workspace_id"] == "local"
+
+
+def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_report(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(by=by, workspace_id=workspace_id, environment=environment)
+        return [{"service_bucket": "foundry_ai", "cost": 42.0}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report", fake_report)
+    body = client.get("/api/cost/azure?by=bucket").json()
+    assert captured["by"] == "bucket"
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_cost_reconciliation_is_workspace_scoped(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_reconciliation(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            days=days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return [{"comparison_status": "CURRENCY_MISMATCH", "variance": None}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(
+        cost_router.azure_cost,
+        "reconciliation",
+        fake_reconciliation,
+    )
+    body = client.get("/api/cost/reconciliation?days=30").json()
+
+    assert captured["days"] == 30
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["variance"] is None
+
+
+def test_azure_cost_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/azure?by=meter")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_catalog_serves_persisted_inventory(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "azure:acct/gpt-4o",
+            "source": "azure_openai",
+            "entity_type": "DEPLOYMENT",
+            "key_auth_enabled": True,
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_catalog", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/catalog").json()
+    assert body["data"] == rows
+    assert body["count"] == 1
+
+
+def test_ai_governance_catalog_rejects_unknown_source(client):
+    response = client.get("/api/ai-governance/catalog?source=aws_bedrock")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_access_masks_principals_for_viewers(client, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "uc:models.prod.churn",
+            "principal_name": "alice@example.com",
+            "access_level": "INVOKE",
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_access", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/access").json()
+    assert body["data"][0]["principal_name"] == "[redacted]"
+    assert body["data"][0]["access_level"] == "INVOKE"
+
+
+def test_ai_governance_monitor_serves_per_app_rollup(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [{"app": "support-bot", "requests": 120, "errors": 3}]
+    monkeypatch.setattr(aig.ai_monitor, "report", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/monitor?days=7").json()
+    assert body["data"] == rows
+
+
+# --- Phase 2 wiring: attribution + Azure detail -------------------------------
+
+def test_cost_attribution_serves_tag_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_attribution(w, warehouse, dimension, days):
+        captured.update(dimension=dimension, days=days)
+        return [
+            {
+                "sub_account_id": "local",
+                "x_team": "search",
+                "x_dbus": 120.5,
+                "list_cost": 88.25,
+                "currency": "USD",
+            }
+        ]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.cost, "attribution", fake_attribution)
+    body = client.get("/api/cost/attribution?dimension=team&days=30").json()
+    assert captured["dimension"] == "team"
+    assert body["data"][0]["x_team"] == "search"
+
+
+def test_cost_attribution_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/attribution?dimension=cost_center")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_azure_detail_passes_validated_bucket(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_detail(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        bucket=None,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            by=by,
+            bucket=bucket,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return [{"meter_name": "gpt-4o input", "service_bucket": "foundry_ai", "cost": 12.5}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report_detail", fake_detail)
+    body = client.get("/api/cost/azure-detail?by=meter&bucket=foundry_ai").json()
+    assert captured["by"] == "meter"
+    assert captured["bucket"] == "foundry_ai"
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_azure_detail_rejects_unknown_dimension_or_bucket(client):
+    assert client.get("/api/cost/azure-detail?by=owner").status_code == 400
+    assert client.get("/api/cost/azure-detail?bucket=aws").status_code == 400

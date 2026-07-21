@@ -20,7 +20,16 @@ from importlib import resources
 
 from langchain_core.tools import tool
 
-from dbx_platform import cost, governance, housekeeping, llm_cost, ml, security
+from dbx_platform import (
+    cost,
+    estimator,
+    estimator_pricing,
+    governance,
+    housekeeping,
+    llm_cost,
+    ml,
+    security,
+)
 from dbx_platform.client import get_client
 from dbx_platform.config import Settings
 
@@ -474,8 +483,88 @@ def propose_job_run(job_name: str) -> str:
     return f"Ready to run {matches[0]['name']}.\nJOB_PROPOSAL:{marker}"
 
 
+@tool
+def list_solution_patterns() -> str:
+    """List the plain-English AI solution patterns the cost planner can price.
+
+    Each row is a solution shape (e.g. chat with your documents, summarize
+    long content) a non-technical stakeholder can pick from. Pure — reads the
+    packaged catalog, touches no workspace.
+    """
+    patterns = estimator.load_patterns()["patterns"]
+    rows = [
+        {"pattern": key, "label": p["label"], "description": p["description"]}
+        for key, p in sorted(patterns.items())
+    ]
+    return _render(rows, "list_solution_patterns", "estimator_data/patterns.json")
+
+
+@tool
+def estimate_solution_cost(requirements_json: str, rigor_pct: int = 10) -> str:
+    """Estimate the monthly cost of an AI solution from a requirements JSON.
+
+    ``requirements_json`` is a JSON object with at least ``pattern`` (from
+    list_solution_patterns) and ``monthly_requests``; optional keys include
+    ``corpus_gb``, ``monthly_active_users``, ``needs_memory``, ``region`` and
+    ``currency``. ``rigor_pct`` (0-100) is the share of production answers
+    given an AI-graded review. Returns the production monthly total per tier
+    and deployment scenario, computed by the deterministic estimator engine
+    over the latest stored price snapshot — never a guessed number.
+    """
+    try:
+        payload = json.loads(requirements_json)
+    except (TypeError, ValueError):
+        return (
+            "The requirements must be a JSON object with at least a 'pattern' "
+            "and 'monthly_requests'. Call list_solution_patterns for the "
+            "available patterns."
+        )
+    try:
+        req = estimator.validate_requirements(payload)
+    except ValueError as error:
+        return f"Those requirements are not valid: {error}"
+    s = _settings()
+    rows = estimator_pricing.read_latest_snapshot(
+        _client(),
+        s.warehouse_id,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        environment=s.environment,
+        currency=req.currency,
+    )
+    if not rows:
+        return (
+            "No price snapshot is stored yet, so a cost cannot be computed. "
+            "Run the estimator-prices-pull job first."
+        )
+    book = estimator.build_price_book(rows, estimator.load_rate_card())
+    matrix = estimator.compute_matrix(
+        req, rigor_pct=max(0, min(100, int(rigor_pct))), price_book=book
+    )
+    summary = []
+    for tier, tier_data in matrix["tiers"].items():
+        for scenario, est in tier_data["scenarios"].items():
+            summary.append(
+                {
+                    "tier": tier,
+                    "scenario": scenario,
+                    "prod_monthly_usd": est["totals_by_env"]["prod"],
+                    "eval_tax_prod_usd": est["eval_tax_by_env"]["prod"],
+                    "missing_prices": len(est["missing_prices"]),
+                }
+            )
+    return _render(
+        summary,
+        "estimate_solution_cost",
+        f"estimator engine v{matrix['engine_version']} over "
+        f"estimator_price_snapshots snapshot_date={matrix['snapshot_date']}",
+    )
+
+
 ALL_TOOLS = [
     get_cost_report,
+    list_solution_patterns,
+    estimate_solution_cost,
     get_top_jobs,
     get_cluster_utilization,
     get_failed_run_waste,

@@ -58,6 +58,7 @@ class AzureActualCostResult:
     rows: list[dict]
     status: str
     notes: str
+    source: str = "azure_costs"
 
 
 SOURCE_HEALTH_ROW_SCHEMA = (
@@ -81,6 +82,13 @@ def _current_workspace_id(
     return resolved
 
 
+def _inclusive_lookback(days: int) -> int:
+    value = int(days)
+    if value < 1:
+        raise ValueError("days must be positive")
+    return value - 1
+
+
 def databricks_cost(
     w: WorkspaceClient,
     warehouse_id: str,
@@ -102,7 +110,7 @@ def databricks_cost(
         load_query(name),
         warehouse_id,
         {
-            "days": days,
+            "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
     )
@@ -122,7 +130,7 @@ def gateway_usage(
         load_query("llm_gateway_usage"),
         warehouse_id,
         {
-            "days": days,
+            "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
     )
@@ -142,7 +150,7 @@ def endpoint_usage(
         load_query("llm_endpoint_usage_daily"),
         warehouse_id,
         {
-            "days": days,
+            "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
     )
@@ -151,7 +159,12 @@ def endpoint_usage(
 def external_model_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
     """Hourly external-provider estimates aggregated to daily cost."""
 
-    return run_query(w, load_query("llm_external_model_spend"), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        load_query("llm_external_model_spend"),
+        warehouse_id,
+        {"days": _inclusive_lookback(days)},
+    )
 
 
 def azure_actual_cost(
@@ -167,34 +180,44 @@ def azure_actual_cost(
     """Actual Azure AI cost from the ingested Cost Management ledger."""
 
     params = {
-        "days": days,
+        "days": _inclusive_lookback(days),
         "workspace_id": workspace_id,
         "environment": environment,
     }
     detail_table = f"{catalog}.{schema}.azure_cost_details"
-    detail_sql = load_query("llm_azure_actual_cost_detail").replace(
-        "__AZURE_COST_DETAIL_TABLE__", detail_table
+    coarse_table = f"{catalog}.{schema}.azure_costs"
+    detail_sql = (
+        load_query("llm_azure_actual_cost_detail")
+        .replace("__AZURE_COST_DETAIL_TABLE__", detail_table)
+        .replace("__AZURE_COST_TABLE__", coarse_table)
     )
     try:
-        rows = run_query(w, detail_sql, warehouse_id, params)
-        return AzureActualCostResult(
-            rows=rows,
-            status="available",
-            notes="Actual billing with resource and meter attribution",
-        )
+        detail_rows = run_query(w, detail_sql, warehouse_id, params)
     except Exception as detail_error:  # noqa: BLE001 - compatibility source
-        table = f"{catalog}.{schema}.azure_costs"
-        sql = load_query("llm_azure_actual_cost").replace("__AZURE_COST_TABLE__", table)
-        rows = run_query(w, sql, warehouse_id, params)
-        return AzureActualCostResult(
-            rows=rows,
-            status="partial",
-            notes=(
-                "Actual billing is available, but resource/meter/use-case "
-                "attribution is unavailable "
-                f"({detail_error.__class__.__name__})"
-            ),
-        )
+        detail_note = detail_error.__class__.__name__
+    else:
+        if detail_rows:
+            return AzureActualCostResult(
+                rows=detail_rows,
+                status="available",
+                notes="Billed cost with resource and meter attribution",
+                source="azure_cost_details",
+            )
+        detail_note = "no scoped detail rows"
+
+    sql = load_query("llm_azure_actual_cost").replace(
+        "__AZURE_COST_TABLE__", coarse_table
+    )
+    rows = run_query(w, sql, warehouse_id, params)
+    return AzureActualCostResult(
+        rows=rows,
+        status="partial",
+        notes=(
+            "Billed cost is available, but resource/meter/use-case "
+            f"attribution is unavailable ({detail_note})"
+        ),
+        source="azure_costs",
+    )
 
 
 def create_ledger_table_statements(catalog: str, schema: str) -> list[tuple[str, str]]:
@@ -330,6 +353,50 @@ def evaluate_budgets(
             }
         )
     return results
+
+
+def classify_budget_findings(evaluated: list[dict]) -> list[dict]:
+    """WARNING/CRITICAL budget threshold breaches as finding rows. Pure.
+
+    Input is ``evaluate_budgets`` output. Each breach becomes one canonical
+    finding so the scheduled rollup can persist it to platform_findings and
+    Mission Control ranks it instead of the state living only on page load.
+    """
+    findings = []
+    for row in evaluated:
+        state = str(row.get("threshold_state") or "").upper()
+        if state not in {"WARNING", "CRITICAL"}:
+            continue
+        scope_type = str(row.get("scope_type") or "workspace")
+        scope_value = str(row.get("scope_value") or "all")
+        basis = str(row.get("cost_basis") or "")
+        currency = str(row.get("currency") or "").upper()
+        month = _date_text(row.get("month"))[:7] or "current"
+        amount = _number(row.get("amount"))
+        spend = _number(row.get("spend"))
+        consumed = row.get("consumed_pct")
+        threshold = _integer(
+            row.get("critical_pct") if state == "CRITICAL" else row.get("warning_pct")
+        )
+        findings.append(
+            {
+                "resource_id": f"budget:{scope_type}:{scope_value}:{basis}:{currency}:{month}",
+                "name": f"{month} {scope_type} '{scope_value}' {basis} budget",
+                "reason": (
+                    f"{consumed}% of the {currency} {amount:,.2f} budget consumed "
+                    f"(spend {currency} {spend:,.2f}, {state.lower()} threshold {threshold}%)"
+                ),
+                "action": "review-budget-breach",
+                "severity": "HIGH" if state == "CRITICAL" else "MEDIUM",
+                "threshold_state": state,
+                # cost feeds financial-impact inference: overage past the
+                # breached threshold, never negative.
+                "cost": round(max(spend - amount * threshold / 100, 0.0), 2),
+                "resource_type": "BUDGET",
+                "team": scope_value if scope_type == "team" else "",
+            }
+        )
+    return findings
 
 
 def setup_ledger_tables(
@@ -1395,8 +1462,52 @@ def read_llm_source_health(
             item["available_metrics"] = json.loads(str(raw_metrics)) if raw_metrics else []
         except (TypeError, json.JSONDecodeError):
             item["available_metrics"] = None
-        result.append(item)
+        result.append(mark_source_stale(item))
     return result
+
+
+_SOURCE_MAX_AGE_HOURS = {
+    "databricks-hosted-billing": 26,
+    "ai-gateway-external-model-spend": 26,
+    "model-request-usage": 26,
+    "azure-cost-management": 50,
+}
+
+
+def mark_source_stale(
+    source: dict,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """Turn an old persisted success into an explicit read-time stale state."""
+
+    item = dict(source)
+    max_age = _SOURCE_MAX_AGE_HOURS.get(str(item.get("source_key") or ""))
+    observed = item.get("last_success_at") or item.get("checked_at")
+    if max_age is None or not observed:
+        return item
+    if isinstance(observed, datetime):
+        timestamp = observed
+    else:
+        try:
+            timestamp = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+        except ValueError:
+            return item
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    current = now or datetime.now(UTC)
+    age_hours = (current - timestamp.astimezone(UTC)).total_seconds() / 3600
+    if age_hours <= max_age:
+        return item
+    item["status"] = "stale"
+    stale_note = (
+        f"Last successful collection is {age_hours:.1f} hours old; "
+        f"expected within {max_age} hours."
+    )
+    item["notes"] = "; ".join(
+        value for value in (str(item.get("notes") or "").strip(), stale_note) if value
+    )
+    return item
 
 
 def merge_source_health_sql(catalog: str, schema: str) -> str:

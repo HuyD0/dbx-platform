@@ -77,6 +77,7 @@ def test_exact_executor_launched_job_run_is_accepted():
 
     event_call = query.call_args_list[2]
     assert event_call.kwargs["parameters"]["run_id"] == "9001"
+    assert "event_type = 'STATUS_VERIFYING'" in event_call.args[1]
     assert "$.result.run_id" in event_call.args[1]
 
 
@@ -311,8 +312,6 @@ def test_app_binds_manual_job_without_adding_it_to_hibernate_inventory():
     runtime_resource = (root / "resources" / "runtime_control.yml").read_text()
     assert "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS" in app_resource
     assert "${resources.jobs.cost_forecast_train.id}" in app_resource
-    assert "DBX_PLATFORM_LOW_RISK_JOB_IDS" in app_resource
-    assert "${resources.jobs.platform_digest.id}" in app_resource
     assert "cost_forecast_train=${resources.jobs.cost_forecast_train.id}" not in (
         runtime_resource
     )
@@ -342,4 +341,4 @@ def test_every_scheduled_job_grants_only_exact_runtime_and_run_permissions():
                 "${var.action_executor_service_principal_name}",
                 "CAN_MANAGE_RUN",
             ) in grants
-    assert len(scheduled) == 13
+    assert len(scheduled) == 15

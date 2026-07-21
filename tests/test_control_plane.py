@@ -999,32 +999,6 @@ def test_manual_job_run_is_planned_not_executed(control_plane_client):
     assert plan["status"] == "AWAITING_APPROVAL"
 
 
-def test_exact_low_risk_report_job_uses_click_confirmation(
-    control_plane_client,
-    monkeypatch,
-):
-    monkeypatch.setenv("DBX_PLATFORM_LOW_RISK_JOB_IDS", "7")
-    planned = control_plane_client.post(
-        "/api/action-requests/plan",
-        json={
-            "action": "run-job",
-            "parameters": {
-                "job_id": 7,
-                "job_name": "[dbx-platform] cost-usage-report",
-            },
-        },
-    ).json()
-
-    assert planned["risk"] == "low"
-    response = control_plane_client.post(
-        f"/api/action-requests/{planned['action_id']}/approve",
-        json={"plan_hash": planned["plan_hash"]},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "APPROVED"
-
-
 def _seed_decision_action(
     repository,
     *,

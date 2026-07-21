@@ -1,6 +1,6 @@
 -- Workspace-scoped product cost with a like-for-like previous-period comparison.
--- Product/resource dimensions come from system.billing.usage; list cost is
--- computed from the price effective when each usage record started.
+-- Product/resource and team/project dimensions come from system.billing.usage;
+-- list cost is computed from the price effective when each usage record started.
 WITH attributed AS (
   SELECT
     CASE
@@ -8,6 +8,8 @@ WITH attributed AS (
       ELSE 'previous'
     END AS period,
     COALESCE(NULLIF(u.billing_origin_product, ''), 'UNATTRIBUTED') AS product,
+    COALESCE(NULLIF(u.custom_tags['team'], ''), 'unallocated') AS team,
+    COALESCE(NULLIF(u.custom_tags['project'], ''), 'unallocated') AS project,
     CASE
       WHEN u.billing_origin_product = 'APPS' THEN 'app'
       WHEN u.billing_origin_product IN ('DATABASE', 'LAKEBASE') THEN 'database'
@@ -79,6 +81,8 @@ WITH attributed AS (
 SELECT
   period,
   product,
+  team,
+  project,
   resource_type,
   resource_id,
   resource_name,
@@ -93,6 +97,8 @@ FROM attributed
 GROUP BY
   period,
   product,
+  team,
+  project,
   resource_type,
   resource_id,
   resource_name,

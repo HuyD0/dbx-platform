@@ -227,6 +227,8 @@ const errorGuidance: Record<string, string> = {
   control_plane_unavailable: "Mission Control storage is temporarily unavailable.",
   agent_unavailable: "The backend LangGraph agent is not reachable.",
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
+  pricing_snapshot_missing: "Cost Planner needs its first price snapshot.",
+  pricing_snapshot_unavailable: "Cost Planner pricing is not ready yet.",
 };
 
 export function ErrorState({ error }: { error: unknown }) {
@@ -262,7 +264,9 @@ export function ErrorState({ error }: { error: unknown }) {
       <p className="mt-1 text-xs text-muted">
         {unavailable
           ? "The interface is ready and will populate when its backend endpoint is enabled."
-          : "Check data access and source health, then try refreshing."}
+          : apiErr?.code.startsWith("pricing_snapshot")
+            ? "Ask an approver to run the estimator-prices-pull job once. Your answers are saved on this screen, so you can retry after pricing is ready."
+            : "Check data access and source health, then try refreshing."}
       </p>
       {apiErr?.hint && <p className="mt-1 text-xs text-muted">{apiErr.hint}</p>}
       {!unavailable && detail && (

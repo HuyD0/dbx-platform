@@ -2,13 +2,11 @@ import { KeyRound, Network, ScanSearch, ShieldCheck, UserRoundCog } from "lucide
 import { Link, useSearchParams } from "react-router-dom";
 import { FindingsSection } from "../components/FindingsSection";
 import { Card, PageHeader, Tabs } from "../components/ui";
-import { Governance } from "./Governance";
 import { Security } from "./Security";
 
 const SECURITY_TABS = [
   { id: "overview", label: "Overview" },
   { id: "identity", label: "Identity & credentials" },
-  { id: "governance", label: "Governance" },
   { id: "risk", label: "Risk signals" },
 ];
 
@@ -17,25 +15,25 @@ const DOMAINS = [
     icon: KeyRound,
     title: "Identity & credentials",
     description: "PAT age, inactive users and over-scoped service principals",
-    tab: "identity",
+    to: "/risk?tab=identity",
   },
   {
     icon: UserRoundCog,
     title: "Access governance",
-    description: "Privileged grants, ownership gaps and policy drift",
-    tab: "governance",
+    description: "Privileged grants, ownership gaps and policy drift — now under Data Governance",
+    to: "/data-governance",
   },
   {
     icon: Network,
     title: "Network & egress",
     description: "Public exposure, unrestricted egress and destination drift",
-    tab: "risk",
+    to: "/risk?tab=risk",
   },
   {
     icon: ScanSearch,
     title: "Audit intelligence",
     description: "Unusual administrative and data-access activity",
-    tab: "risk",
+    to: "/risk?tab=risk",
   },
 ];
 
@@ -85,19 +83,15 @@ export function SecurityRisk() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="Trust"
-        title="Security & Risk"
-        description="Connect identity, access, policy, network and audit evidence without allowing AI to mutate controls."
+        title="Risk"
+        description="Connect identity, access, network and audit evidence without allowing AI to mutate controls."
       />
-      <Tabs tabs={SECURITY_TABS} active={active} onChange={setActive} label="Security and risk views" />
+      <Tabs tabs={SECURITY_TABS} active={active} onChange={setActive} label="Risk views" />
       <div role="tabpanel">
         {active === "overview" && (
           <div className="grid gap-3 md:grid-cols-2">
-            {DOMAINS.map(({ icon: Icon, title, description, tab }) => (
-              <Link
-                key={title}
-                to={`/security?tab=${tab}`}
-                className="group rounded-2xl focus:outline-none"
-              >
+            {DOMAINS.map(({ icon: Icon, title, description, to }) => (
+              <Link key={title} to={to} className="group rounded-2xl focus:outline-none">
                 <Card className="h-full transition-transform group-hover:-translate-y-0.5 group-focus-visible:ring-2 group-focus-visible:ring-accent">
                   <div className="flex items-start gap-3">
                     <span className="rounded-xl bg-accent/10 p-2 text-accent">
@@ -126,7 +120,6 @@ export function SecurityRisk() {
           </div>
         )}
         {active === "identity" && <Security />}
-        {active === "governance" && <Governance />}
         {active === "risk" && <RiskSignals />}
       </div>
     </div>

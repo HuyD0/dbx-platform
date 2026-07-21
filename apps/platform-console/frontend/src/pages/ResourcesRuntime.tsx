@@ -9,7 +9,6 @@ import {
   CapabilityNotice,
   EmptyState,
   ErrorState,
-  PageHeader,
   SectionTitle,
   Skeleton,
   statusTone,
@@ -57,28 +56,27 @@ export function ResourcesRuntime() {
   const sleeping = runtime?.desired_state === "SLEEPING" || runtime?.current_state === "SLEEPING";
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow="Lifecycle"
-        title="Resources & Runtime"
-        description="See exactly what this toolkit owns, protect everything else, and hibernate it through a reversible human-approved plan."
-        actions={
-          sleeping ? (
-            <PlanActionButton
-              action="wake"
-              label="Plan wake"
-              allowLegacy={false}
-              tone="primary"
-            />
-          ) : (
-            <PlanActionButton
-              action="hibernate"
-              label="Plan hibernate"
-              allowLegacy={false}
-              tone="danger"
-            />
-          )
-        }
-      />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-xs leading-5 text-muted">
+          See exactly what this toolkit owns, protect everything else, and hibernate it
+          through a reversible human-approved plan.
+        </p>
+        {sleeping ? (
+          <PlanActionButton
+            action="wake"
+            label="Plan wake"
+            allowLegacy={false}
+            tone="primary"
+          />
+        ) : (
+          <PlanActionButton
+            action="hibernate"
+            label="Plan hibernate"
+            allowLegacy={false}
+            tone="danger"
+          />
+        )}
+      </div>
 
       {unavailable && (
         <CapabilityNotice

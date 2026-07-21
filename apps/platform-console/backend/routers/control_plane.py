@@ -439,16 +439,10 @@ def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
             job_id,
             str(claimed_name) if claimed_name is not None else None,
         )
-        risk = (
-            RiskLevel.LOW
-            if jobs.is_low_risk_manual_job(job_id)
-            else RiskLevel.MEDIUM
-        )
     else:
         items, execution_payload, summary = actions.build_action_plan(
             action_type, parameters
         )
-        risk = _ACTION_RISK.get(action_type, RiskLevel.HIGH)
     state_hash = sha256_json(
         {
             "targets": items,
@@ -486,7 +480,7 @@ def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
         verification={
             "strategy": "Re-read each target after execution and record its resulting state."
         },
-        risk=risk,
+        risk=_ACTION_RISK.get(action_type, RiskLevel.HIGH),
     )
 
 

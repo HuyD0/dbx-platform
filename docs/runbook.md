@@ -176,6 +176,7 @@ The graph receives the current page context and browser-held conversation. Its
 allowlisted tools reuse package checks for SQL-backed operational evidence and
 the canonical `platform_findings` repository for privileged scheduled
 evidence. It has no executor or target-mutation tool.
+
 If chat returns `agent_unavailable`, verify that the endpoint is `READY`, the
 App deployment includes the `chat-model` resource, and the active deployment
 contains `DBX_PLATFORM_CHAT_ENDPOINT`. Also verify the App environment
@@ -255,7 +256,10 @@ and agent deployment are not general executor actions in v1.
 
 `agents/platform_agent/deploy_agent.py` intentionally exits without logging,
 registering, or deploying. Add a narrowly scoped, tested model-deploy action
-before enabling it.
+before enabling it. The Platform Console assistant does not need that action:
+its LangGraph runtime is hosted inside the read-only App and queries the
+`chat-model` foundation endpoint through an App resource binding with only
+`CAN_QUERY`.
 
 ### AI catalog & monitoring
 
@@ -285,6 +289,18 @@ Interpret labels literally:
 - `Databricks list`: usage joined to list prices, not an invoice;
 - `provider estimate`: AI Gateway/provider estimate, never silently combined
   with actual billed cost.
+
+Azure billed cost is ingested only after Cost Management applies the configured
+resource-group allowlist. The Databricks/Azure reconciliation view is a daily
+SKU-family bridge, not invoice-line equivalence; it withholds variance when the
+Azure billing currency is not USD. Compute, storage, networking, commitments,
+credits, and tax lines can remain unmatched by design.
+
+Paid Genie usage is included from `billing_origin_product = 'GENIE'` in the
+Databricks list-cost basis. SQL warehouse compute used by Genie remains a
+separate Databricks product cost. Use native Databricks Genie budgets for
+near-real-time alerts or blocking; Mission Control budgets are analytical,
+approval-gated guardrails and do not replace native enforcement.
 
 Do not add currencies without a documented conversion source/rate/time.
 Request telemetry allocates billed totals to workloads but does not claim

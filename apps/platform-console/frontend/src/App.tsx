@@ -1,23 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
+  BrainCircuit,
+  Calculator,
   CircleDollarSign,
-  Gauge,
+  GraduationCap,
   LayoutDashboard,
   ListChecks,
   Menu,
   Moon,
-  Power,
   ScrollText,
+  ServerCog,
   Settings,
   ShieldCheck,
   Sparkles,
   Sun,
+  Tags,
   Workflow,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import {
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useSearchParams,
+} from "react-router-dom";
 import { AssistantLauncher, AssistantPanel } from "./components/AssistantPanel";
 import { Badge } from "./components/ui";
 import { apiGet } from "./lib/api";
@@ -25,13 +34,16 @@ import { AssistantPanelProvider } from "./lib/assistant-panel";
 import { ChatProvider } from "./lib/chat";
 import type { HealthResponse } from "./lib/types";
 import { ActionCenter } from "./pages/ActionCenter";
+import { AiGovernance } from "./pages/AiGovernance";
 import { Audit } from "./pages/Audit";
 import { Automations } from "./pages/Automations";
 import { Chat } from "./pages/Chat";
+import { CostPlanner } from "./pages/CostPlanner";
 import { CostValue } from "./pages/CostValue";
+import { DataGovernance } from "./pages/DataGovernance";
+import { Learn } from "./pages/Learn";
 import { MissionControl } from "./pages/MissionControl";
-import { Performance } from "./pages/Performance";
-import { ResourcesRuntime } from "./pages/ResourcesRuntime";
+import { Operations } from "./pages/Operations";
 import { SecurityRisk } from "./pages/SecurityRisk";
 import { Settings as SettingsPage } from "./pages/Settings";
 
@@ -45,18 +57,29 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, page: <MissionControl /> },
   { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
-  { to: "/cost", label: "Cost & Value", icon: CircleDollarSign, page: <CostValue /> },
-  { to: "/security", label: "Security & Risk", icon: ShieldCheck, page: <SecurityRisk /> },
-  { to: "/performance", label: "Performance", icon: Gauge, page: <Performance /> },
-  { to: "/runtime", label: "Resources & Runtime", icon: Power, page: <ResourcesRuntime /> },
+  { to: "/cost", label: "Cost", icon: CircleDollarSign, page: <CostValue /> },
+  { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
+  { to: "/data-governance", label: "Data Governance", icon: Tags, page: <DataGovernance /> },
+  { to: "/ai-governance", label: "AI Governance", icon: BrainCircuit, page: <AiGovernance /> },
+  { to: "/risk", label: "Risk", icon: ShieldCheck, page: <SecurityRisk /> },
+  { to: "/operations", label: "Operations", icon: ServerCog, page: <Operations /> },
   { to: "/automations", label: "Automations", icon: Workflow, page: <Automations /> },
-  { to: "/assistant", label: "Assistant", icon: Bot, page: <Chat /> },
+  { to: "/learn", label: "Learn", icon: GraduationCap, page: <Learn /> },
 ];
 
 const UTILITY_NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: Settings, page: <SettingsPage /> },
   { to: "/audit", label: "Audit", icon: ScrollText, page: <Audit /> },
 ];
+
+/** /security carried the governance tab before the IA split; send that tab to
+ * Data Governance and every other view to the renamed Risk page. */
+function LegacySecurityRedirect() {
+  const [params] = useSearchParams();
+  const tab = params.get("tab");
+  if (tab === "governance") return <Navigate to="/data-governance" replace />;
+  return <Navigate to={tab ? `/risk?tab=${tab}` : "/risk"} replace />;
+}
 
 function useTheme() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
@@ -130,7 +153,13 @@ function Navigation({
           <span className="truncate text-[11px] font-medium text-ink">Current workspace</span>
           <Badge tone="info">{health?.environment ?? "unknown"}</Badge>
         </div>
-        <p className="mt-1 truncate text-[10px] text-muted">Single-workspace control plane</p>
+        <p
+          className="mt-1 truncate font-mono text-[10px] text-ink-2"
+          title={health?.workspace_id ?? undefined}
+        >
+          {health?.workspace_id ?? "workspace ID unavailable"}
+        </p>
+        <p className="mt-0.5 truncate text-[10px] text-muted">Single-workspace control plane</p>
       </div>
       <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto" aria-label="Primary">
         {links(NAV)}
@@ -181,7 +210,9 @@ export default function App() {
     const item = [...NAV, ...UTILITY_NAV].find(
       ({ to }) => location.pathname === to || (to !== "/" && location.pathname.startsWith(`${to}/`)),
     );
-    document.title = `${item?.label ?? "Mission Control"} · dbx-platform`;
+    const label =
+      item?.label ?? (location.pathname === "/assistant" ? "Assistant" : "Mission Control");
+    document.title = `${label} · dbx-platform`;
   }, [location.pathname]);
 
   useEffect(() => {
@@ -246,9 +277,8 @@ export default function App() {
 
           <header
             aria-hidden={mobileNavOpen || assistantOpen || undefined}
-            className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center justify-between px-4 lg:hidden"
+            className="glass glass-edge-b fixed inset-x-0 top-0 z-30 flex h-15 items-center gap-1 px-2 lg:hidden"
           >
-            <Brand />
             <button
               ref={mobileTriggerRef}
               type="button"
@@ -259,6 +289,7 @@ export default function App() {
             >
               <Menu className="h-5 w-5" />
             </button>
+            <Brand />
           </header>
 
           {mobileNavOpen && (
@@ -305,11 +336,15 @@ export default function App() {
                 {[...NAV, ...UTILITY_NAV].map(({ to, page }) => (
                   <Route key={to} path={to} element={page} />
                 ))}
+                <Route path="/assistant" element={<Chat />} />
                 <Route path="/overview" element={<Navigate to="/" replace />} />
                 <Route path="/chat" element={<Navigate to="/assistant" replace />} />
-                <Route path="/housekeeping" element={<Navigate to="/actions" replace />} />
-                <Route path="/governance" element={<Navigate to="/security?tab=governance" replace />} />
-                <Route path="/ai-ml" element={<Navigate to="/cost?tab=llm" replace />} />
+                <Route path="/security" element={<LegacySecurityRedirect />} />
+                <Route path="/performance" element={<Navigate to="/operations?tab=performance" replace />} />
+                <Route path="/runtime" element={<Navigate to="/operations" replace />} />
+                <Route path="/housekeeping" element={<Navigate to="/operations?tab=hygiene" replace />} />
+                <Route path="/governance" element={<Navigate to="/data-governance" replace />} />
+                <Route path="/ai-ml" element={<Navigate to="/ai-governance" replace />} />
                 <Route path="/digest" element={<Navigate to="/automations?tab=briefings" replace />} />
                 <Route path="/jobs" element={<Navigate to="/automations" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

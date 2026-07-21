@@ -398,3 +398,226 @@ END
             )
         )
     return statements
+
+
+def estimate_procedure_statements(
+    catalog: str,
+    schema: str,
+    *,
+    app_service_principal: str,
+) -> list[tuple[str, str]]:
+    """Security-definer append broker for the saved-estimate library.
+
+    Saving an estimate is telemetry append (no target mutation, no approval
+    flow) — the same trust shape as a proposer creating an action request:
+    the App verifies the forwarded user's role at the request boundary and
+    passes the verified identity as ``p_created_by``. Unlike the action
+    procedures, the grant here is NOT gated on ``actions_enabled``; the
+    library must work in proposal-only deployments too.
+    """
+
+    catalog = _identifier(catalog)
+    schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
+    fq = f"`{catalog}`.`{schema}`"
+
+    record_estimate = f"""
+CREATE OR REPLACE PROCEDURE {fq}.`cp_record_estimate`(
+  IN p_workspace_id STRING,
+  IN p_environment STRING,
+  IN p_estimate_id STRING,
+  IN p_created_by STRING,
+  IN p_title STRING,
+  IN p_pattern STRING,
+  IN p_monthly_requests STRING,
+  IN p_corpus_gb STRING,
+  IN p_requirements_json STRING,
+  IN p_requirements_hash STRING,
+  IN p_engine_version STRING,
+  IN p_rate_card_version STRING,
+  IN p_snapshot_date STRING,
+  IN p_rigor_pct STRING,
+  IN p_results_json STRING
+)
+LANGUAGE SQL
+SQL SECURITY DEFINER
+MODIFIES SQL DATA
+AS BEGIN ATOMIC
+  IF p_created_by IS NULL OR p_created_by = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified creator identity is required';
+  END IF;
+  IF p_workspace_id IS NULL OR p_workspace_id = ''
+     OR p_environment IS NULL OR p_environment = ''
+     OR p_estimate_id IS NULL OR p_estimate_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate scope and identifier are required';
+  END IF;
+  IF p_requirements_hash NOT RLIKE '^[0-9a-f]{{64}}$' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The requirements hash is not a canonical digest';
+  END IF;
+  IF p_requirements_json IS NULL OR p_requirements_json = ''
+     OR get_json_object(p_requirements_json, '$.pattern') <> p_pattern
+     OR p_results_json IS NULL OR p_results_json = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate document is inconsistent';
+  END IF;
+  IF CAST(p_rigor_pct AS INT) IS NULL
+     OR CAST(p_rigor_pct AS INT) < 0 OR CAST(p_rigor_pct AS INT) > 100
+     OR CAST(p_monthly_requests AS BIGINT) IS NULL
+     OR CAST(p_monthly_requests AS BIGINT) < 1 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate sizing values are out of bounds';
+  END IF;
+  IF p_title IS NULL OR p_title = '' OR length(p_title) > 200 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'A title of at most 200 characters is required';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM {fq}.`estimator_estimates`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND estimate_id = p_estimate_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate ID already exists';
+  END IF;
+  INSERT INTO {fq}.`estimator_estimates` (
+    workspace_id, environment, estimate_id, created_at, created_by, title,
+    pattern, monthly_requests, corpus_gb, requirements_json,
+    requirements_hash, engine_version, rate_card_version, snapshot_date,
+    rigor_pct, results_json
+  ) VALUES (
+    p_workspace_id, p_environment, p_estimate_id, current_timestamp(),
+    p_created_by, p_title, p_pattern, CAST(p_monthly_requests AS BIGINT),
+    CAST(p_corpus_gb AS DOUBLE), p_requirements_json, p_requirements_hash,
+    p_engine_version, p_rate_card_version, CAST(p_snapshot_date AS DATE),
+    CAST(p_rigor_pct AS INT), p_results_json
+  );
+END
+""".strip()
+
+    return [
+        (f"procedure {catalog}.{schema}.cp_record_estimate", record_estimate),
+        (
+            f"grant {app_service_principal} execute on cp_record_estimate",
+            f"GRANT EXECUTE ON PROCEDURE {fq}.`cp_record_estimate` "
+            f"TO `{app_service_principal}`",
+        ),
+    ]
+
+
+def deployment_procedure_statements(
+    catalog: str,
+    schema: str,
+    *,
+    app_service_principal: str,
+) -> list[tuple[str, str]]:
+    """Security-definer append broker for estimate→deployment links.
+
+    Linking a saved estimate to a deployed cost anchor is telemetry append
+    (no target mutation, no approval flow) — the same trust shape as
+    ``cp_record_estimate``. The App verifies the operator at the request
+    boundary and passes the verified identity as ``p_created_by`` plus the
+    projected monthly total it read from the estimate's stored results. The
+    grant is NOT gated on ``actions_enabled``.
+    """
+
+    catalog = _identifier(catalog)
+    schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
+    fq = f"`{catalog}`.`{schema}`"
+
+    link_deployment = f"""
+CREATE OR REPLACE PROCEDURE {fq}.`cp_link_deployment`(
+  IN p_workspace_id STRING,
+  IN p_environment STRING,
+  IN p_deployment_id STRING,
+  IN p_estimate_id STRING,
+  IN p_created_by STRING,
+  IN p_tier STRING,
+  IN p_scenario STRING,
+  IN p_anchor_kind STRING,
+  IN p_anchor_value STRING,
+  IN p_monthly_projected_usd STRING,
+  IN p_currency STRING,
+  IN p_active STRING
+)
+LANGUAGE SQL
+SQL SECURITY DEFINER
+MODIFIES SQL DATA
+AS BEGIN ATOMIC
+  IF p_created_by IS NULL OR p_created_by = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified creator identity is required';
+  END IF;
+  IF p_workspace_id IS NULL OR p_workspace_id = ''
+     OR p_environment IS NULL OR p_environment = ''
+     OR p_deployment_id IS NULL OR p_deployment_id = ''
+     OR p_estimate_id IS NULL OR p_estimate_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The deployment scope and identifiers are required';
+  END IF;
+  IF p_tier NOT IN ('prototype', 'production', 'fiduciary') THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The tier is not one of the estimator tiers';
+  END IF;
+  IF p_scenario NOT IN ('databricks', 'azure') THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The scenario is not one of the estimator scenarios';
+  END IF;
+  IF p_anchor_kind NOT IN (
+       'azure_resource_group', 'databricks_project_tag', 'databricks_team_tag'
+     ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The cost anchor kind is not allowlisted';
+  END IF;
+  IF p_anchor_value IS NULL OR p_anchor_value = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'A cost anchor value is required';
+  END IF;
+  IF CAST(p_monthly_projected_usd AS DOUBLE) IS NULL
+     OR CAST(p_monthly_projected_usd AS DOUBLE) < 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The projected monthly cost is invalid';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM {fq}.`estimator_estimates`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND estimate_id = p_estimate_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The referenced estimate does not exist';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM {fq}.`estimator_deployments`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND deployment_id = p_deployment_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The deployment ID already exists';
+  END IF;
+  INSERT INTO {fq}.`estimator_deployments` (
+    workspace_id, environment, deployment_id, estimate_id, created_at,
+    created_by, tier, scenario, anchor_kind, anchor_value,
+    monthly_projected_usd, currency, active
+  ) VALUES (
+    p_workspace_id, p_environment, p_deployment_id, p_estimate_id,
+    current_timestamp(), p_created_by, p_tier, p_scenario, p_anchor_kind,
+    p_anchor_value, CAST(p_monthly_projected_usd AS DOUBLE), p_currency,
+    CAST(p_active AS BOOLEAN)
+  );
+END
+""".strip()
+
+    return [
+        (f"procedure {catalog}.{schema}.cp_link_deployment", link_deployment),
+        (
+            f"grant {app_service_principal} execute on cp_link_deployment",
+            f"GRANT EXECUTE ON PROCEDURE {fq}.`cp_link_deployment` "
+            f"TO `{app_service_principal}`",
+        ),
+    ]

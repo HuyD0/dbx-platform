@@ -252,7 +252,14 @@ def store_findings(
 
 
 def run_monitoring(
-    w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str, days: int = 45
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    days: int = 45,
+    *,
+    workspace_id: str,
+    environment: str,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Fetch windows, run the pure checks. Returns (drift, errors, findings)."""
     feature_rows = forecast_train.coerce_feature_rows(
@@ -261,7 +268,15 @@ def run_monitoring(
     reference, recent = split_windows(feature_rows)
     drift = classify_feature_drift(reference, recent)
     forecasts = fetch_forecast_rows(w, warehouse_id, catalog, schema, days)
-    actuals = azure_cost.fetch_daily_buckets(w, warehouse_id, catalog, schema, days)
+    actuals = azure_cost.fetch_daily_buckets(
+        w,
+        warehouse_id,
+        catalog,
+        schema,
+        days,
+        workspace_id=workspace_id,
+        environment=environment,
+    )
     errors = forecast_error_report(forecasts, actuals)
     findings = classify_retrain(drift, errors)
     return drift, errors, findings

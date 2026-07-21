@@ -87,9 +87,60 @@ def failed_run_waste(days: int = 30, limit: int = 20, refresh: bool = False) -> 
     return envelope(data, as_of, hit)
 
 
-@router.get("/azure")
-def azure(days: int = 30, refresh: bool = False) -> dict:
+@router.get("/attribution")
+def attribution(dimension: str = "team", days: int = 30, refresh: bool = False) -> dict:
+    """Spend by enforced tag (team/project) or whole workspace.
+
+    The dimension allowlist lives in cost.ATTRIBUTION_DIMENSIONS; an unknown
+    value raises ValueError inside the loader and maps to a 400.
+    """
     days = deps.clamp_days(days)
+    workspace_id, _ = deps.control_plane_scope()
+    data, as_of, hit = cache.cached(
+        f"cost/attribution/{workspace_id}/{dimension}/{days}",
+        lambda: cost.attribution(deps.get_ws(), deps.warehouse_id(), dimension, days),
+        refresh,
+    )
+    return envelope(data, as_of, hit)
+
+
+@router.get("/azure-detail")
+def azure_detail(
+    by: str = "meter",
+    days: int = 30,
+    bucket: str | None = None,
+    refresh: bool = False,
+) -> dict:
+    """Detail-grain Azure spend (resource/meter) — per-Foundry-deployment drill."""
+    days = deps.clamp_days(days)
+    workspace_id, environment = deps.control_plane_scope()
+
+    def load() -> list[dict]:
+        s = deps.get_settings()
+        return azure_cost.report_detail(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            by,
+            days,
+            bucket,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+
+    data, as_of, hit = cache.cached(
+        f"cost/azure-detail/{workspace_id}/{environment}/{by}/{bucket or 'all'}/{days}",
+        load,
+        refresh,
+    )
+    return envelope(data, as_of, hit)
+
+
+@router.get("/azure")
+def azure(days: int = 30, by: str = "service", refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    workspace_id, environment = deps.control_plane_scope()
 
     def load() -> list[dict]:
         s = deps.get_settings()
@@ -98,17 +149,47 @@ def azure(days: int = 30, refresh: bool = False) -> dict:
             deps.warehouse_id(),
             s.dashboard_catalog,
             s.dashboard_schema,
-            "service",
+            by,
             days,
+            workspace_id=workspace_id,
+            environment=environment,
         )
 
-    data, as_of, hit = cache.cached(f"cost/azure/{days}", load, refresh)
+    data, as_of, hit = cache.cached(
+        f"cost/azure/{workspace_id}/{environment}/{by}/{days}", load, refresh
+    )
+    return envelope(data, as_of, hit)
+
+
+@router.get("/reconciliation")
+def reconciliation(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    workspace_id, environment = deps.control_plane_scope()
+
+    def load() -> list[dict]:
+        s = deps.get_settings()
+        return azure_cost.reconciliation(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+
+    data, as_of, hit = cache.cached(
+        f"cost/reconciliation/{workspace_id}/{environment}/{days}",
+        load,
+        refresh,
+    )
     return envelope(data, as_of, hit)
 
 
 @router.get("/azure-anomalies")
 def azure_anomalies(days: int = 30, refresh: bool = False) -> dict:
     days = deps.clamp_days(days)
+    workspace_id, environment = deps.control_plane_scope()
 
     def load() -> list[dict]:
         s = deps.get_settings()
@@ -118,6 +199,8 @@ def azure_anomalies(days: int = 30, refresh: bool = False) -> dict:
             s.dashboard_catalog,
             s.dashboard_schema,
             days,
+            workspace_id=workspace_id,
+            environment=environment,
         )
         return azure_cost.classify_azure_spend(
             rows,
@@ -126,7 +209,7 @@ def azure_anomalies(days: int = 30, refresh: bool = False) -> dict:
         )
 
     data, as_of, hit = cache.cached(
-        f"cost/azure-anomalies/{days}",
+        f"cost/azure-anomalies/{workspace_id}/{environment}/{days}",
         load,
         refresh,
     )
@@ -135,6 +218,7 @@ def azure_anomalies(days: int = 30, refresh: bool = False) -> dict:
 
 def _forecast_rows() -> list[dict]:
     s = deps.get_settings()
+    workspace_id, environment = deps.control_plane_scope()
     fq = f"{s.dashboard_catalog}.{s.dashboard_schema}"
     return run_query(
         deps.get_ws(),
@@ -143,14 +227,28 @@ def _forecast_rows() -> list[dict]:
           SELECT MAX(run_date) AS run_date
           FROM {fq}.cost_forecasts
         ),
-        series_currency AS (
-          SELECT service_bucket AS series,
-                 CASE WHEN COUNT(DISTINCT currency) = 1 THEN MAX(currency)
-                      ELSE 'UNRESOLVED' END AS currency,
-                 COUNT(DISTINCT currency) AS currency_count
+        current_scope AS (
+          SELECT subscription_id, scope_filter
           FROM {fq}.azure_costs
-          WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 90)
-          GROUP BY service_bucket
+          WHERE workspace_id = :workspace_id
+            AND environment = :environment
+            AND COALESCE(scope_filter, '') <> ''
+          ORDER BY ingested_at DESC
+          LIMIT 1
+        ),
+        series_currency AS (
+          SELECT c.service_bucket AS series,
+                 CASE WHEN COUNT(DISTINCT c.currency) = 1 THEN MAX(c.currency)
+                      ELSE 'UNRESOLVED' END AS currency,
+                 COUNT(DISTINCT c.currency) AS currency_count
+          FROM {fq}.azure_costs c
+          INNER JOIN current_scope s
+            ON c.subscription_id = s.subscription_id
+            AND c.scope_filter = s.scope_filter
+          WHERE c.usage_date >= DATE_SUB(CURRENT_DATE(), 90)
+            AND c.workspace_id = :workspace_id
+            AND c.environment = :environment
+          GROUP BY c.service_bucket
         )
         SELECT f.run_date, f.target_date, f.series, f.p10, f.p50, f.p90,
                f.model_version, f.feature_set_version,
@@ -163,13 +261,15 @@ def _forecast_rows() -> list[dict]:
         ORDER BY f.target_date, f.series
         """,
         deps.warehouse_id(),
+        {"workspace_id": workspace_id, "environment": environment},
     )
 
 
 @router.get("/azure-forecast")
 def azure_forecast(refresh: bool = False) -> dict:
+    workspace_id, environment = deps.control_plane_scope()
     data, as_of, hit = cache.cached(
-        "cost/azure-forecast",
+        f"cost/azure-forecast/{workspace_id}/{environment}",
         _forecast_rows,
         refresh,
     )
@@ -179,8 +279,9 @@ def azure_forecast(refresh: bool = False) -> dict:
 @router.get("/forecast")
 def consolidated_forecast(refresh: bool = False) -> dict:
     """Forecast rows stay separate by series and resolved source currency."""
+    workspace_id, environment = deps.control_plane_scope()
     data, as_of, hit = cache.cached(
-        "cost/consolidated-forecast",
+        f"cost/consolidated-forecast/{workspace_id}/{environment}",
         _forecast_rows,
         refresh,
     )

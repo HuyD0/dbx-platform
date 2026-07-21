@@ -1,0 +1,16 @@
+[project]
+name = "dbx-platform-console"
+version = "0.2.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "dbx-platform==0.2.0",
+    "fastapi==0.139.2",
+    "langgraph==1.2.9",
+    "mlflow-tracing==3.14.0",
+    "pypdf==6.6.2",
+    "python-multipart==0.0.20",
+    "uvicorn==0.51.0",
+]
+
+[tool.uv.sources]
+dbx-platform = { path = "wheels/dbx_platform-0.2.0-py3-none-any.whl" }

@@ -31,7 +31,18 @@ jobs:
         run: uv run pytest
       - name: Build wheel
         run: uv run python -m build --wheel
-      - name: Verify packaged data (queries + policies ship in the wheel)
+      - name: Resolve the locked Platform Console environment
+        run: |
+          wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          mkdir -p apps/platform-console/wheels
+          cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
+          # The local wheel keeps the same name/version while its contents change.
+          # Refresh it explicitly so uv records the newly built artifact hash.
+          uv lock --refresh-package dbx-platform --project apps/platform-console
+          uv sync --frozen --project apps/platform-console --no-install-project
+          apps/platform-console/.venv/bin/python -m unittest discover \
+            -s apps/platform-console/tests -v
+      - name: Verify packaged data (queries + policies + estimator data ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/serving_cost.sql"
@@ -39,10 +50,20 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/ai_gateway_usage_daily.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/rate_card.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/tiers.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/patterns.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/prompts/estimator_pattern_classify.md"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/extraction_eval.jsonl"
 
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
     runs-on: ubuntu-latest
+    # Visual baselines are generated in this exact image. Pinning its digest
+    # keeps Chromium, system fonts, and rasterization stable across runner updates.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --ipc=host
     permissions:
       contents: read
     steps:
