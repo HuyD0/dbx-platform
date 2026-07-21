@@ -354,6 +354,20 @@ export function ActionPlanDialog({
                             : "Confirm approval"}
                       </button>
                     </div>
+                    {(approve.isPending || approve.isError) && (
+                      <div
+                        className={`progress-track mt-3 ${
+                          approve.isError ? "progress-error" : "progress-active"
+                        }`}
+                        role="progressbar"
+                        aria-busy={approve.isPending}
+                        aria-label={
+                          approve.isError ? "Approval failed" : "Recording approval"
+                        }
+                      >
+                        <div className="progress-fill" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
