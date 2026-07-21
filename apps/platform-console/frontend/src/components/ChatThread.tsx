@@ -193,7 +193,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
             {turns.map((turn, i) =>
               turn.role === "user" ? (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-tint bg-tint px-4 py-2.5 text-sm text-ink">
+                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-accent/20 bg-tint px-4 py-2.5 text-sm text-ink">
                     {turn.content}
                   </div>
                 </div>

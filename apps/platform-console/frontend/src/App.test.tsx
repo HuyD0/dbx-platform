@@ -271,7 +271,6 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   expect(
     within(planDialog).getByRole("button", { name: "Why does this approval expire?" }),
   ).toBeInTheDocument();
-  await user.click(within(planDialog).getByText("Technical details"));
   expect(within(planDialog).getByText("a".repeat(64))).toBeInTheDocument();
   expect(
     within(planDialog).getByText(
