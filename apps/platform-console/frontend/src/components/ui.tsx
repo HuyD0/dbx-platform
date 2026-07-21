@@ -95,11 +95,17 @@ export function StatTile({
   value,
   tone = "default",
   hint,
+  size = "default",
+  indicator,
 }: {
   label: string;
   value: ReactNode;
   tone?: "default" | "good" | "warning" | "serious" | "critical";
   hint?: string;
+  /** "hero" renders an oversized primary number for top-level health tiles. */
+  size?: "default" | "hero";
+  /** Optional status affordance (e.g. HealthDot) shown beside the label. */
+  indicator?: ReactNode;
 }) {
   const tones: Record<string, string> = {
     default: "text-ink",
@@ -108,12 +114,94 @@ export function StatTile({
     serious: "text-status-serious",
     critical: "text-status-critical",
   };
+  const valueSize =
+    size === "hero"
+      ? "text-4xl sm:text-5xl font-bold tracking-tight"
+      : "text-2xl font-semibold";
   return (
-    <Card>
-      <div className="text-xs font-medium text-muted">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${tones[tone]}`}>{value}</div>
+    <Card className="h-full">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
+        {indicator}
+        {label}
+      </div>
+      <div className={`mt-1 tabular-nums ${valueSize} ${tones[tone]}`}>{value}</div>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </Card>
+  );
+}
+
+/** Bento layout: a modular, asymmetric grid on the page canvas. Individual
+ * cells rest in white `Card` containers (1px sand border) via `BentoCell`.
+ * The default 12-column track lets cells claim asymmetric widths on wide
+ * external monitors while collapsing to a single column on small screens. */
+export function Bento({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`grid grid-cols-1 gap-4 lg:grid-cols-12 ${className}`}>{children}</div>
+  );
+}
+
+/** One bento tile. `span`/`rowSpan` are Tailwind column/row-span utility
+ * strings so callers control the asymmetry; content either supplies its own
+ * `Card` or opts into the built-in one via `bare={false}` (default). */
+export function BentoCell({
+  children,
+  span = "lg:col-span-6",
+  rowSpan = "",
+  bare = false,
+  className = "",
+}: {
+  children: ReactNode;
+  span?: string;
+  rowSpan?: string;
+  /** When true, render only the grid cell — the child brings its own surface. */
+  bare?: boolean;
+  className?: string;
+}) {
+  const cell = `${span} ${rowSpan}`.trim();
+  if (bare) {
+    return <div className={`${cell} min-w-0 ${className}`}>{children}</div>;
+  }
+  return (
+    <div className={`${cell} min-w-0`}>
+      <Card className={`h-full ${className}`}>{children}</Card>
+    </div>
+  );
+}
+
+/** Compact operational-health indicator. `live`/`good` use the bright decorative
+ * health accent as a FILL only; any adjacent text stays on status tokens. */
+export function HealthDot({
+  state = "good",
+  label,
+}: {
+  state?: "live" | "good" | "warning" | "critical" | "idle";
+  label?: string;
+}) {
+  const fills: Record<string, string> = {
+    good: "bg-health-accent",
+    warning: "bg-warning-accent",
+    critical: "bg-brand-primary",
+    idle: "bg-muted",
+  };
+  // When no label is given the dot is purely decorative — hide it from the
+  // accessibility tree so it never leaks into a parent heading's name.
+  const semantics = label
+    ? ({ role: "img", "aria-label": label, title: label } as const)
+    : ({ "aria-hidden": true } as const);
+  if (state === "live") {
+    return <span className="pulse-dot" {...semantics} />;
+  }
+  return (
+    <span
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${fills[state]}`}
+      {...semantics}
+    />
   );
 }
 

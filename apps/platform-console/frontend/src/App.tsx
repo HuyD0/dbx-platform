@@ -5,6 +5,7 @@ import {
   CircleDollarSign,
   GraduationCap,
   LayoutDashboard,
+  LayoutGrid,
   ListChecks,
   Menu,
   Moon,
@@ -44,6 +45,7 @@ import { DataGovernance } from "./pages/DataGovernance";
 import { Learn } from "./pages/Learn";
 import { MissionControl } from "./pages/MissionControl";
 import { Operations } from "./pages/Operations";
+import { Overview } from "./pages/Overview";
 import { SecurityRisk } from "./pages/SecurityRisk";
 import { Settings as SettingsPage } from "./pages/Settings";
 
@@ -56,6 +58,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, page: <MissionControl /> },
+  { to: "/overview", label: "Overview", icon: LayoutGrid, page: <Overview /> },
   { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
   { to: "/cost", label: "Cost", icon: CircleDollarSign, page: <CostValue /> },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
@@ -337,7 +340,6 @@ export default function App() {
                   <Route key={to} path={to} element={page} />
                 ))}
                 <Route path="/assistant" element={<Chat />} />
-                <Route path="/overview" element={<Navigate to="/" replace />} />
                 <Route path="/chat" element={<Navigate to="/assistant" replace />} />
                 <Route path="/security" element={<LegacySecurityRedirect />} />
                 <Route path="/performance" element={<Navigate to="/operations?tab=performance" replace />} />
