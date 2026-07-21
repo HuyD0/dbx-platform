@@ -3,10 +3,15 @@ from datetime import date, timedelta
 
 import pytest
 
-from dbx_platform.forecast_infer import recursive_forecast, store_forecasts
+from dbx_platform.forecast_infer import (
+    recursive_forecast,
+    store_forecasts,
+    validate_forecast_alignment,
+)
 from dbx_platform.forecast_monitor import (
     classify_feature_drift,
     classify_retrain,
+    forecast_coverage_report,
     forecast_error_report,
     psi,
     split_windows,
@@ -106,6 +111,33 @@ def test_error_report_coverage_counts_band_misses():
     assert forecast_error_report(forecasts, actuals)[0]["coverage_p10_p90"] == 0.5
 
 
+def test_forecast_coverage_distinguishes_missing_and_not_yet_mature_actuals():
+    actuals = _actuals([100.0] * 5)
+    forecasts = [
+        {
+            "run_date": "2026-06-30",
+            "target_date": "2026-07-02",
+            "series": "databricks",
+        },
+        {
+            "run_date": "2026-06-20",
+            "target_date": "2026-06-29",
+            "series": "search",
+        },
+        {
+            "run_date": "2026-07-01",
+            "target_date": "2026-07-10",
+            "series": "databricks",
+        },
+    ]
+    report = {row["series"]: row for row in forecast_coverage_report(forecasts, actuals)}
+    assert report["databricks"]["matured_points"] == 1
+    assert report["databricks"]["not_yet_mature"] == 1
+    assert report["databricks"]["missing_actuals"] == 0
+    assert report["search"]["missing_actuals"] == 1
+    assert report["search"]["not_yet_mature"] == 0
+
+
 # --- classify_retrain -----------------------------------------------------------
 
 def test_clean_state_is_ok():
@@ -146,6 +178,22 @@ def test_few_matured_points_not_judged():
     assert classify_retrain([], errors)[0]["action"] == "ok"
 
 
+def test_missing_matured_actual_is_a_source_data_finding():
+    coverage = [
+        {
+            "series": "search",
+            "forecast_points": 1,
+            "matured_points": 0,
+            "not_yet_mature": 0,
+            "missing_actuals": 1,
+            "invalid_forecasts": 0,
+        }
+    ]
+    finding = classify_retrain([], [], coverage_rows=coverage)[0]
+    assert finding["signal"] == "forecast-actual-alignment"
+    assert finding["action"] == "source-data-missing"
+
+
 # --- split_windows --------------------------------------------------------------
 
 def test_split_windows_partitions_by_age():
@@ -181,6 +229,44 @@ def test_recursive_forecast_feeds_predictions_forward():
 def test_recursive_forecast_short_history_skipped():
     dense = {"total": {date(2026, 7, 1): 1.0}}
     assert recursive_forecast(dense, 3, lambda rows: [(0, 0, 0)] * len(rows)) == []
+
+
+def test_forecast_alignment_reports_forecasted_and_short_history_series():
+    start = date(2026, 6, 1)
+    dense = {
+        "ready": {start + timedelta(days=i): 100.0 for i in range(40)},
+        "short": {start + timedelta(days=i): 10.0 for i in range(10)},
+    }
+    forecasts = recursive_forecast(
+        dense, horizon=3, predict_fn=lambda rows: [(50, 70, 90)] * len(rows)
+    )
+    alignment = validate_forecast_alignment(dense, 3, forecasts)
+    assert alignment == [
+        {
+            "series": "ready",
+            "source_days": 40,
+            "expected_forecast_rows": 3,
+            "forecast_rows": 3,
+            "status": "forecasted",
+        },
+        {
+            "series": "short",
+            "source_days": 10,
+            "expected_forecast_rows": 0,
+            "forecast_rows": 0,
+            "status": "insufficient-history",
+        },
+    ]
+
+
+def test_forecast_alignment_fails_when_horizon_row_is_missing():
+    start = date(2026, 6, 1)
+    dense = {"total": {start + timedelta(days=i): 100.0 for i in range(40)}}
+    forecasts = recursive_forecast(
+        dense, horizon=3, predict_fn=lambda rows: [(50, 70, 90)] * len(rows)
+    )
+    with pytest.raises(RuntimeError, match="Forecast alignment failed"):
+        validate_forecast_alignment(dense, 3, forecasts[:-1])
 
 
 def test_store_forecasts_missing_storage_has_migration_guidance(monkeypatch):

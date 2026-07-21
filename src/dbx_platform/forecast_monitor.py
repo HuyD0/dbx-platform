@@ -103,6 +103,15 @@ def forecast_error_report(
     (run_date < target_date).
     """
     dense = forecast_features.daily_series(actual_rows)
+    actual_dates = []
+    for row in actual_rows:
+        try:
+            actual_dates.append(date.fromisoformat(str(row.get("usage_date", ""))[:10]))
+        except ValueError:
+            continue
+    if not actual_dates:
+        return []
+    earliest_actual, latest_actual = min(actual_dates), max(actual_dates)
     per_series: dict[str, dict[str, list[float]]] = {}
     for f in forecast_rows:
         series = str(f.get("series", ""))
@@ -111,9 +120,12 @@ def forecast_error_report(
             target = date.fromisoformat(str(f.get("target_date", ""))[:10])
         except ValueError:
             continue
-        if run_d >= target or series not in dense or target not in dense[series]:
+        if run_d >= target or not earliest_actual <= target <= latest_actual:
             continue
-        actual = dense[series][target]
+        # Azure omits zero-cost bucket rows. Inside the source's observed date
+        # coverage, an absent bucket is therefore a real zero rather than a
+        # missing actual.
+        actual = dense.get(series, {}).get(target, 0.0)
         p10 = forecast_train._num(f.get("p10"))
         p50 = forecast_train._num(f.get("p50"))
         p90 = forecast_train._num(f.get("p90"))
@@ -134,11 +146,56 @@ def forecast_error_report(
     return report
 
 
+def forecast_coverage_report(
+    forecast_rows: list[dict], actual_rows: list[dict]
+) -> list[dict]:
+    """Classify forecast points as matured, not yet mature, or missing actuals."""
+
+    actual_dates = []
+    for row in actual_rows:
+        try:
+            actual_dates.append(date.fromisoformat(str(row.get("usage_date", ""))[:10]))
+        except ValueError:
+            continue
+    earliest_actual = min(actual_dates) if actual_dates else None
+    latest_actual = max(actual_dates) if actual_dates else None
+    counts: dict[str, dict[str, int]] = {}
+    for forecast in forecast_rows:
+        series = str(forecast.get("series", "") or "(unknown)")
+        row = counts.setdefault(
+            series,
+            {
+                "forecast_points": 0,
+                "matured_points": 0,
+                "not_yet_mature": 0,
+                "missing_actuals": 0,
+                "invalid_forecasts": 0,
+            },
+        )
+        row["forecast_points"] += 1
+        try:
+            run_day = date.fromisoformat(str(forecast.get("run_date", ""))[:10])
+            target = date.fromisoformat(str(forecast.get("target_date", ""))[:10])
+        except ValueError:
+            row["invalid_forecasts"] += 1
+            continue
+        if run_day >= target:
+            row["invalid_forecasts"] += 1
+        elif latest_actual is not None and target > latest_actual:
+            row["not_yet_mature"] += 1
+        elif earliest_actual is not None and target >= earliest_actual:
+            row["matured_points"] += 1
+        else:
+            row["missing_actuals"] += 1
+    return [{"series": series, **row} for series, row in sorted(counts.items())]
+
+
 def classify_retrain(
     drift_findings: list[dict],
     error_rows: list[dict],
     wape_alert: float = WAPE_ALERT,
     coverage_floor: float = COVERAGE_FLOOR,
+    coverage_rows: list[dict] | None = None,
 ) -> list[dict]:
     """Fold drift + accuracy into ok/warn/retrain findings. Pure."""
     findings = []
@@ -185,6 +242,17 @@ def classify_retrain(
                     "reason": f"P10-P90 coverage {row['coverage_p10_p90']} "
                               f"below floor {coverage_floor}",
                     "action": "retrain-recommended",
+                }
+            )
+    for row in coverage_rows or []:
+        if row["missing_actuals"]:
+            findings.append(
+                {
+                    "signal": "forecast-actual-alignment",
+                    "resource": row["series"],
+                    "reason": f"{row['missing_actuals']} matured forecast point(s) "
+                    "have no aligned actual",
+                    "action": "source-data-missing",
                 }
             )
     if not findings:
@@ -261,7 +329,31 @@ def run_monitoring(
     workspace_id: str,
     environment: str,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Fetch windows, run the pure checks. Returns (drift, errors, findings)."""
+    """Fetch windows and return the backward-compatible monitoring result."""
+
+    drift, errors, _coverage, findings = run_monitoring_with_coverage(
+        w,
+        warehouse_id,
+        catalog,
+        schema,
+        days,
+        workspace_id=workspace_id,
+        environment=environment,
+    )
+    return drift, errors, findings
+
+
+def run_monitoring_with_coverage(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    days: int = 45,
+    *,
+    workspace_id: str,
+    environment: str,
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Return feature drift, forecast errors, data coverage, and findings."""
     feature_rows = forecast_train.coerce_feature_rows(
         forecast_features.fetch_features(w, warehouse_id, catalog, schema)
     )
@@ -278,5 +370,6 @@ def run_monitoring(
         environment=environment,
     )
     errors = forecast_error_report(forecasts, actuals)
-    findings = classify_retrain(drift, errors)
-    return drift, errors, findings
+    coverage = forecast_coverage_report(forecasts, actuals)
+    findings = classify_retrain(drift, errors, coverage_rows=coverage)
+    return drift, errors, coverage, findings

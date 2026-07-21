@@ -447,6 +447,30 @@ def merge_detail_costs_sql(catalog: str, schema: str) -> str:
     )
 
 
+def count_costs_sql(catalog: str, schema: str) -> str:
+    """Daily target counts for one exact coarse-cost reconciliation window."""
+
+    return _count_reconciled_rows_sql(f"{catalog}.{schema}.azure_costs")
+
+
+def count_detail_costs_sql(catalog: str, schema: str) -> str:
+    """Daily target counts for one exact detail-cost reconciliation window."""
+
+    return _count_reconciled_rows_sql(f"{catalog}.{schema}.azure_cost_details")
+
+
+def _count_reconciled_rows_sql(table: str) -> str:
+    return (
+        "SELECT usage_date, COUNT(*) AS row_count, "
+        "SUM(CASE WHEN scope_filter = :scope_filter THEN 1 ELSE 0 END) "
+        f"AS scope_row_count FROM {table} "
+        "WHERE workspace_id = :workspace_id AND environment = :environment "
+        "AND subscription_id = :subscription_id "
+        "AND usage_date BETWEEN CAST(:window_start AS DATE) "
+        "AND CAST(:window_end AS DATE) GROUP BY usage_date ORDER BY usage_date"
+    )
+
+
 def store_costs(
     w: WorkspaceClient,
     warehouse_id: str,
@@ -619,6 +643,210 @@ def _reconciliation_params(
         "window_start": start.isoformat(),
         "window_end": end.isoformat(),
     }
+
+
+def expected_daily_counts(
+    rows: list[dict], window_start: str, window_end: str
+) -> dict[str, int]:
+    """Count source rows for every day in an exact inclusive window."""
+
+    try:
+        start = date.fromisoformat(str(window_start)[:10])
+        end = date.fromisoformat(str(window_end)[:10])
+    except ValueError as exc:
+        raise ValueError("window_start and window_end must be ISO dates") from exc
+    if start > end:
+        raise ValueError("window_start must be on or before window_end")
+    counts = {
+        (start + timedelta(days=offset)).isoformat(): 0
+        for offset in range((end - start).days + 1)
+    }
+    outside = []
+    for row in rows:
+        raw_day = str(row.get("usage_date", ""))[:10]
+        try:
+            day = date.fromisoformat(raw_day)
+        except ValueError as exc:
+            raise ValueError(f"cost row has invalid usage_date: {raw_day!r}") from exc
+        if day < start or day > end:
+            outside.append(raw_day)
+            continue
+        counts[day.isoformat()] += 1
+    if outside:
+        raise ValueError(f"cost rows fall outside the reconciliation window: {outside[:3]}")
+    return counts
+
+
+def validate_cost_reconciliation(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    rows: list[dict],
+    *,
+    workspace_id: str,
+    environment: str,
+    subscription_id: str,
+    scope_filter: str,
+    window_start: str,
+    window_end: str,
+) -> list[dict]:
+    """Fail unless coarse target counts match the exact source window by day."""
+
+    return _validate_reconciled_rows(
+        w,
+        warehouse_id,
+        count_costs_sql(catalog, schema),
+        f"{catalog}.{schema}.azure_costs",
+        rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        subscription_id=subscription_id,
+        scope_filter=scope_filter,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+
+def validate_detail_reconciliation(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    rows: list[dict],
+    *,
+    workspace_id: str,
+    environment: str,
+    subscription_id: str,
+    scope_filter: str,
+    window_start: str,
+    window_end: str,
+) -> list[dict]:
+    """Fail unless detail target counts match the exact source window by day."""
+
+    return _validate_reconciled_rows(
+        w,
+        warehouse_id,
+        count_detail_costs_sql(catalog, schema),
+        f"{catalog}.{schema}.azure_cost_details",
+        rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        subscription_id=subscription_id,
+        scope_filter=scope_filter,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+
+def _validate_reconciled_rows(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    sql: str,
+    table: str,
+    rows: list[dict],
+    *,
+    workspace_id: str,
+    environment: str,
+    subscription_id: str,
+    scope_filter: str,
+    window_start: str,
+    window_end: str,
+) -> list[dict]:
+    summaries = []
+    for unit_start, unit_end, unit_rows in _validation_windows(
+        rows,
+        workspace_id=workspace_id,
+        environment=environment,
+        subscription_id=subscription_id,
+        scope_filter=scope_filter,
+        window_start=window_start,
+        window_end=window_end,
+    ):
+        expected = expected_daily_counts(unit_rows, unit_start, unit_end)
+        params = {
+            "workspace_id": workspace_id,
+            "environment": environment,
+            "subscription_id": subscription_id,
+            "scope_filter": scope_filter,
+            "window_start": unit_start,
+            "window_end": unit_end,
+        }
+        try:
+            target_rows = run_query(w, sql, warehouse_id, params, row_limit=len(expected))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to validate required table {table} after reconciliation."
+            ) from exc
+        observed = {day: 0 for day in expected}
+        observed_scope = {day: 0 for day in expected}
+        for target_row in target_rows:
+            day = str(target_row.get("usage_date", ""))[:10]
+            if day not in expected:
+                raise RuntimeError(
+                    f"Load integrity mismatch for {table}: target returned unexpected day {day}."
+                )
+            observed[day] += int(target_row.get("row_count") or 0)
+            observed_scope[day] += int(target_row.get("scope_row_count") or 0)
+        mismatches = [
+            (day, expected[day], observed[day], observed_scope[day])
+            for day in expected
+            if expected[day] != observed[day] or expected[day] != observed_scope[day]
+        ]
+        if mismatches:
+            details = ", ".join(
+                f"{day} expected={source} target={target} current_scope={scoped}"
+                for day, source, target, scoped in mismatches[:5]
+            )
+            raise RuntimeError(f"Load integrity mismatch for {table}: {details}")
+        summaries.append(
+            {
+                "table": table,
+                "window_start": unit_start,
+                "window_end": unit_end,
+                "source_rows": sum(expected.values()),
+                "target_rows": sum(observed.values()),
+                "validated_days": len(expected),
+                "status": "validated",
+            }
+        )
+    return summaries
+
+
+def _validation_windows(
+    rows: list[dict],
+    *,
+    workspace_id: str,
+    environment: str,
+    subscription_id: str,
+    scope_filter: str,
+    window_start: str,
+    window_end: str,
+) -> list[tuple[str, str, list[dict]]]:
+    """Mirror the atomic windows selected by ``_store_reconciled_rows``."""
+
+    params = _reconciliation_params(
+        rows,
+        workspace_id,
+        environment,
+        subscription_id,
+        scope_filter,
+        window_start,
+        window_end,
+    )
+    if len(params["rows"].encode("utf-8")) <= _MAX_SQL_PARAMETER_BYTES:
+        return [(params["window_start"], params["window_end"], rows)]
+    start = date.fromisoformat(params["window_start"])
+    end = date.fromisoformat(params["window_end"])
+    windows = []
+    current = start
+    while current <= end:
+        day = current.isoformat()
+        windows.append(
+            (day, day, [row for row in rows if str(row.get("usage_date"))[:10] == day])
+        )
+        current += timedelta(days=1)
+    return windows
 
 
 # --- reporting ----------------------------------------------------------------
