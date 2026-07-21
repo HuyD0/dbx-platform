@@ -1,7 +1,11 @@
 # dbx-platform resolves from the wheel staged into ./wheels by the deploy
 # workflow (see .github/workflows/deploy.yml) — the app reuses the exact
 # package the CLI and jobs run, zero duplicated logic.
+#
+# The [chat] extra adds langgraph + databricks-langchain so the read-only agent
+# runs in-process (backend/routers/chat.py); it queries the foundation-model
+# endpoint bound as the `chat-model` app resource.
 --find-links wheels
-dbx-platform
+dbx-platform[chat]
 fastapi
 uvicorn

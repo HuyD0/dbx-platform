@@ -35,12 +35,21 @@ forecast = [
     "lightgbm>=4.3",
     "pandas>=2.0",
 ]
-# The served LangGraph agent (agents/platform_agent) — kept out of the core
-# wheel so scheduled jobs stay lean.
-agent = [
-    "mlflow>=3.0",
+# The read-only LangGraph chat agent's runtime, run in-process by the Platform
+# Console (apps/platform-console installs dbx-platform[chat]). Kept out of the
+# core wheel so scheduled jobs stay lean. This is a deliberate departure from
+# the earlier "served endpoint only" design: the read-only app now carries the
+# langchain/langgraph surface so chat works without a deployed serving endpoint.
+chat = [
     "langgraph>=0.2",
     "databricks-langchain>=0.4",
+]
+# The optional MLflow-served deployment of the same graph (agents/platform_agent
+# wraps it as a ResponsesAgent). Adds the packaging/serving deps on top of chat.
+# Serving is still gated behind an approved model-deploy action; see runbook.
+agent = [
+    "dbx-platform[chat]",
+    "mlflow>=3.0",
     "databricks-agents>=1.0",
 ]
 

@@ -18,7 +18,9 @@ env:
   # docs/runbook.md; source-only local runs never authorize execution.
   # - name: DBX_PLATFORM_CONSOLE_ACTIONS
   #   value: "false"
-  # Override when the platform agent's serving endpoint name differs from the
-  # default agents_<catalog>-<schema>-platform_agent.
-  # - name: DBX_PLATFORM_AGENT_ENDPOINT
-  #   value: "agents_dbx_dev-dbx_platform-platform_agent"
+  # The in-process chat agent's foundation-model endpoint. Bundle deployments
+  # inject this from the bound `chat-model` app resource (resources/app.yml).
+  # A source-only local run falls back to Settings().digest_model; override here
+  # only if that endpoint name differs in your workspace.
+  # - name: DBX_PLATFORM_CHAT_MODEL_ENDPOINT
+  #   value: "databricks-claude-sonnet-4-5"

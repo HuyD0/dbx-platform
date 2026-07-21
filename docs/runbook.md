@@ -232,9 +232,29 @@ Built-in pay-per-token endpoints are excluded from findings that cannot apply
 to them. Serving reconfiguration, endpoint/model deletion, model promotion,
 and agent deployment are not general executor actions in v1.
 
-`agents/platform_agent/deploy_agent.py` intentionally exits without logging,
-registering, or deploying. Add a narrowly scoped, tested model-deploy action
-before enabling it.
+### Chat agent
+
+The read-only chat agent runs **in-process** inside the Platform Console. The
+graph, its read-only tools, and its prompt live in the `dbx_platform.agent`
+package (shipped in the wheel); the app installs the `dbx-platform[chat]` extra
+(`langgraph`, `databricks-langchain`) and builds the graph lazily in
+`backend/routers/chat.py`. This is a deliberate trade-off: the otherwise-lean
+read-only app now carries the LangChain/LangGraph dependency surface so chat
+works without any deployed serving endpoint.
+
+The agent reasons with a foundation-model endpoint bound as the app's
+`chat-model` resource (`resources/app.yml`) with **CAN_QUERY** only — the app
+sends prompts, it cannot manage the endpoint, and the agent's own tools remain
+read-only. If chat shows "unavailable", check, in order: the app installed the
+`chat` extra; the `chat-model` resource is bound and `READY`; the app service
+principal has CAN_QUERY. The app degrades to friendly guidance rather than
+surfacing a raw error.
+
+Serving the same graph on a dedicated model-serving endpoint stays optional and
+gated: `agents/platform_agent/agent.py` wraps the packaged graph as an MLflow
+ResponsesAgent, but `agents/platform_agent/deploy_agent.py` intentionally exits
+without logging, registering, or deploying. Add a narrowly scoped, tested
+model-deploy action before enabling it.
 
 ### AI catalog & monitoring
 

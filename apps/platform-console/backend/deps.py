@@ -237,14 +237,15 @@ def get_action_executor_client():
     return ActionExecutorClient(get_ws(), action_executor_job_id())
 
 
-def agent_endpoint() -> str:
-    """Serving endpoint name of the platform agent. agents.deploy names it
-    agents_{catalog}-{schema}-{model}; override with DBX_PLATFORM_AGENT_ENDPOINT."""
-    explicit = os.environ.get("DBX_PLATFORM_AGENT_ENDPOINT", "").strip()
+def chat_model_endpoint() -> str:
+    """Foundation-model endpoint the in-process chat agent reasons with.
+
+    Bound as the app's ``chat-model`` resource, whose name is injected as
+    DBX_PLATFORM_CHAT_MODEL_ENDPOINT; falls back to the digest model."""
+    explicit = os.environ.get("DBX_PLATFORM_CHAT_MODEL_ENDPOINT", "").strip()
     if explicit:
         return explicit
-    s = get_settings()
-    return f"agents_{s.dashboard_catalog}-{s.dashboard_schema}-platform_agent"
+    return get_settings().digest_model
 
 
 def clamp_days(days: int, lo: int = 7, hi: int = 90) -> int:

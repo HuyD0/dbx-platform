@@ -1,16 +1,18 @@
 """Offline tests for the platform agent's pure parts.
 
-The agent's runtime deps (langgraph, mlflow) are an optional extra, so this
-loads formatting.py directly by path instead of importing the package.
+The agent's runtime deps (langgraph, databricks-langchain, mlflow) are optional
+extras, so this loads formatting.py directly by path instead of importing the
+package, which keeps the test runnable with only the core [dev] deps.
 """
 
 import importlib.util
 from pathlib import Path
 
+_AGENT_DIR = Path(__file__).resolve().parent.parent / "src" / "dbx_platform" / "agent"
+
 _SPEC = importlib.util.spec_from_file_location(
     "platform_agent_formatting",
-    Path(__file__).resolve().parent.parent
-    / "agents" / "platform_agent" / "formatting.py",
+    _AGENT_DIR / "formatting.py",
 )
 formatting = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(formatting)
@@ -73,10 +75,7 @@ def test_agent_tools_wrap_no_mutating_functions():
     """The tool module must never wrap an apply/mutate/pause/revoke function.
     The propose_* tools are dry-runs: they classify and emit a marker, and the
     mutation happens only in the Platform Console's confirm-gated apply."""
-    source = (
-        Path(__file__).resolve().parent.parent
-        / "agents" / "platform_agent" / "tools.py"
-    ).read_text()
+    source = (_AGENT_DIR / "tools.py").read_text()
     for forbidden in ("apply_", "pause_job", "revoke_", "run_setup", "permanent_delete",
                       "run_now", "jobs.update", "jobs.delete"):
         assert forbidden not in source, f"agent tools reference {forbidden}"

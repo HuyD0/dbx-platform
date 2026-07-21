@@ -1,39 +1,22 @@
-"""LangGraph ReAct agent over the dbx-platform read-only tools, wrapped as an
-MLflow ResponsesAgent for the Mosaic AI Agent Framework.
+"""MLflow ResponsesAgent wrapper around the packaged read-only LangGraph graph.
 
-Logged code-based (mlflow.models.set_model at the bottom); served on a
-Databricks model serving endpoint by deploy_agent.py. The LLM is a
-Databricks-hosted foundation model (same endpoint setting as the digest).
+The graph, tools and prompt live in the ``dbx_platform.agent`` package (shipped
+in the wheel) so the Platform Console can run them in-process. This module only
+adapts that graph to the Mosaic AI Agent Framework for the *optional* served
+deployment. Serving is still gated: ``deploy_agent.py`` intentionally refuses
+to register or deploy until a narrowly scoped, approved model-deploy action
+exists (see docs/runbook.md).
+
+Logged code-based (mlflow.models.set_model at the bottom).
 """
 
 from __future__ import annotations
 
-import os
-
 import mlflow
-from databricks_langchain import ChatDatabricks
-from langgraph.prebuilt import create_react_agent
 from mlflow.pyfunc import ResponsesAgent
 from mlflow.types.responses import ResponsesAgentRequest, ResponsesAgentResponse
 
-from dbx_platform.config import Settings
-
-# Package-relative imports are unavailable when MLflow loads this file as a
-# standalone model; both layouts are supported.
-try:
-    from .formatting import SYSTEM_PROMPT
-    from .tools import ALL_TOOLS
-except ImportError:  # pragma: no cover - serving layout
-    from formatting import SYSTEM_PROMPT
-    from tools import ALL_TOOLS
-
-
-def build_graph():
-    model_endpoint = (
-        os.environ.get("DBX_PLATFORM_DIGEST_MODEL") or Settings().digest_model
-    )
-    llm = ChatDatabricks(endpoint=model_endpoint)
-    return create_react_agent(llm, ALL_TOOLS, prompt=SYSTEM_PROMPT)
+from dbx_platform.agent.graph import build_graph
 
 
 class PlatformResponsesAgent(ResponsesAgent):

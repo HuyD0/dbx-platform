@@ -50,6 +50,10 @@ resources:
             value: ${var.operator_group}
           - name: DBX_PLATFORM_CONSOLE_ACTIONS
             value: ${var.actions_enabled}
+          # Name of the foundation-model endpoint the in-process read-only chat
+          # agent reasons with, injected from the chat-model resource below.
+          - name: DBX_PLATFORM_CHAT_MODEL_ENDPOINT
+            value_from: chat-model
       resources:
         - name: sql-warehouse
           description: Dedicated bundle-owned warehouse for Mission Control
@@ -78,3 +82,12 @@ resources:
           job:
             id: ${resources.jobs.cost_forecast_train.id}
             permission: CAN_VIEW
+        - name: chat-model
+          description: >
+            Foundation-model endpoint the in-process read-only chat agent
+            queries for inference. CAN_QUERY only: the app sends prompts, it
+            cannot edit, delete, or manage the endpoint. The agent's own tools
+            remain read-only and cannot mutate the workspace.
+          serving_endpoint:
+            name: databricks-claude-sonnet-4-5
+            permission: CAN_QUERY

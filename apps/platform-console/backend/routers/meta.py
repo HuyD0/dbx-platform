@@ -47,7 +47,7 @@ def config() -> dict:
         "actions_enabled": deps.actions_enabled(),
         "findings_table": deps.findings_table(),
         "digest_model": s.digest_model,
-        "agent_endpoint": deps.agent_endpoint(),
+        "chat_model_endpoint": deps.chat_model_endpoint(),
         "lookback_days": s.lookback_days,
         "required_tags": s.required_tag_list(),
         "thresholds": {

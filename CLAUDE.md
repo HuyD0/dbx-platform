@@ -28,14 +28,16 @@ Schedules may read and append internal findings/cost/audit telemetry. Training,
 model promotion, budgets/configuration, manual stateful Jobs, remediation, and
 runtime state require approval — except the prod Platform Console app, which
 deploys `started: true` and is therefore started directly by CI (`resources/app.yml`);
-the warehouse and job schedules still require an approved reconciliation. The
-served agent remains read-only and can only cite evidence/draft proposals.
+the warehouse and job schedules still require an approved reconciliation. The chat
+agent runs in-process in the app (the `dbx-platform[chat]` extra) against a
+CAN_QUERY-bound `chat-model` endpoint; it remains read-only and can only cite
+evidence/draft proposals.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `src/dbx_platform/` | CLI + one module per area (`cost`, `azure_cost`, `forecast_*`, `security`, `governance`, `housekeeping`, `ai_catalog`, `ai_monitor`, `dashboards`) |
+| `src/dbx_platform/` | CLI + one module per area (`cost`, `azure_cost`, `forecast_*`, `security`, `governance`, `housekeeping`, `ai_catalog`, `ai_monitor`, `dashboards`); `agent/` packages the read-only chat graph the app runs in-process |
 | `src/dbx_platform/queries/` | SQL against Databricks system tables |
 | `resources/*.yml` | Bundle job definitions, included by `databricks.yml` |
 | `policies/*.json` | Cluster policies as code, reconciled by `governance policy-sync` |

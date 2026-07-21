@@ -29,6 +29,7 @@ sys.path.insert(0, str(APP_DIR))
 from backend import cache, deps  # noqa: E402
 from backend.proposals import parse_proposals  # noqa: E402
 from backend.routers import actions  # noqa: E402
+from backend.routers import chat as chat_router  # noqa: E402
 
 from dbx_platform.config import Settings  # noqa: E402
 from dbx_platform.system_tables import SystemTablesUnavailableError  # noqa: E402
@@ -102,6 +103,20 @@ def test_app_yaml_launches_the_backend():
     requirements = (APP_DIR / "requirements.txt").read_text()
     assert "--find-links wheels" in requirements
     assert "fastapi" in requirements
+
+
+def test_app_binds_chat_model_endpoint_with_can_query_only():
+    """The in-process chat agent queries a bound serving endpoint. The binding
+    must be CAN_QUERY (least privilege — send prompts, never manage), and the
+    app must install the [chat] extra that ships langgraph/databricks-langchain."""
+    bundle = yaml.safe_load((APP_DIR.parent.parent / "resources" / "app.yml").read_text())
+    app = bundle["resources"]["apps"]["platform_console"]
+    chat_model = next(r for r in app["resources"] if r["name"] == "chat-model")
+    assert chat_model["serving_endpoint"]["permission"] == "CAN_QUERY"
+    env = {e["name"]: e for e in app["config"]["env"]}
+    assert env["DBX_PLATFORM_CHAT_MODEL_ENDPOINT"]["value_from"] == "chat-model"
+    requirements = (APP_DIR / "requirements.txt").read_text()
+    assert "dbx-platform[chat]" in requirements
 
 
 def test_bundle_artifact_build_uses_managed_environment():
@@ -387,18 +402,41 @@ def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
     assert resp.json()["error"] == "warehouse_not_configured"
 
 
-def test_chat_degrades_when_the_agent_endpoint_is_missing(client, ws):
-    ws.api_client.do.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
+class _FakeMessage:
+    """Stand-in for a LangChain message: only `.content` is read downstream."""
+
+    def __init__(self, content: str):
+        self.content = content
+
+
+class _FakeGraph:
+    """In-process graph seam replacement — records invocations, no langgraph."""
+
+    def __init__(self, *, text: str | None = None, exc: Exception | None = None):
+        self._text = text
+        self._exc = exc
+        self.calls: list[dict] = []
+
+    def invoke(self, state: dict) -> dict:
+        self.calls.append(state)
+        if self._exc is not None:
+            raise self._exc
+        return {"messages": [_FakeMessage(self._text)]}
+
+
+def test_chat_degrades_when_the_in_process_agent_is_unreachable(client, monkeypatch):
+    # Simulates the bound chat-model endpoint being absent/NOT_READY, or the
+    # chat extra not installed: any failure degrades to friendly guidance.
+    fake = _FakeGraph(exc=RuntimeError("RESOURCE_DOES_NOT_EXIST"))
+    monkeypatch.setattr(chat_router, "get_graph", lambda: fake)
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 503
     assert resp.json()["error"] == "agent_unavailable"
 
 
-def test_chat_denies_viewers_before_invoking_app_sp_agent(
-    client,
-    ws,
-    monkeypatch,
-):
+def test_chat_denies_viewers_before_invoking_the_in_process_agent(client, monkeypatch):
+    fake = _FakeGraph(text="should never run for a viewer")
+    monkeypatch.setattr(chat_router, "get_graph", lambda: fake)
     monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
     deps.get_identity_verifier.cache_clear()
     resp = client.post(
@@ -407,19 +445,15 @@ def test_chat_denies_viewers_before_invoking_app_sp_agent(
     )
     assert resp.status_code == 403
     assert resp.json()["error"] == "unauthorized"
-    ws.api_client.do.assert_not_called()
+    assert fake.calls == []
 
 
-def test_chat_parses_agent_proposals(client, ws):
-    ws.api_client.do.return_value = {
-        "output": [{
-            "type": "message",
-            "content": [{"type": "output_text", "text": (
-                "Two stale clusters are burning money.\n"
-                'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
-            )}],
-        }],
-    }
+def test_chat_parses_agent_proposals(client, monkeypatch):
+    fake = _FakeGraph(text=(
+        "Two stale clusters are burning money.\n"
+        'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
+    ))
+    monkeypatch.setattr(chat_router, "get_graph", lambda: fake)
     resp = client.post(
         "/api/chat",
         json={
@@ -436,13 +470,13 @@ def test_chat_parses_agent_proposals(client, ws):
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
-    invocation = ws.api_client.do.call_args.kwargs["body"]["input"]
-    assert invocation[0]["role"] == "system"
-    assert "Every factual claim must cite" in invocation[0]["content"]
-    assert invocation[1]["role"] == "system"
-    assert "PAGE_CONTEXT" in invocation[1]["content"]
-    assert "/security-risk" in invocation[1]["content"]
-    assert invocation[-1] == {"role": "user", "content": "clean up"}
+    prompt = fake.calls[0]["messages"]
+    assert prompt[0]["role"] == "system"
+    assert "Every factual claim must cite" in prompt[0]["content"]
+    assert prompt[1]["role"] == "system"
+    assert "PAGE_CONTEXT" in prompt[1]["content"]
+    assert "/security-risk" in prompt[1]["content"]
+    assert prompt[-1] == {"role": "user", "content": "clean up"}
 
 
 # --- proposal marker parsing (pure) ----------------------------------------

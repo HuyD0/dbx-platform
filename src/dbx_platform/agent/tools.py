@@ -1,13 +1,15 @@
 """Read-only LangChain tools over the dbx_platform checks.
 
 The tool set is read-only *by construction*: no apply/mutate function is
-wrapped here, so the served agent can diagnose and recommend but has nothing
-it could call to change the workspace. The propose_* tools are dry-runs that
-end their output with a machine-readable marker line; the Platform Console
-parses those markers into confirm-gated cards, and a human performs the
-actual apply there. Auth is ambient (the serving endpoint's service
-principal / local unified auth); the warehouse comes from
-DBX_PLATFORM_WAREHOUSE_ID.
+wrapped here, so the agent can diagnose and recommend but has nothing it could
+call to change the workspace. The propose_* tools are dry-runs that end their
+output with a machine-readable marker line; the Platform Console parses those
+markers into confirm-gated cards, and a human performs the actual apply there.
+Auth is ambient (the app / serving service principal, or local unified auth);
+the warehouse comes from DBX_PLATFORM_WAREHOUSE_ID.
+
+Importing this module pulls in ``langchain_core`` (the ``chat``/``agent``
+extra), so import it only from a code path that has those deps installed.
 """
 
 from __future__ import annotations
@@ -23,10 +25,7 @@ from dbx_platform import cost, governance, housekeeping, llm_cost, ml, security
 from dbx_platform.client import get_client
 from dbx_platform.config import Settings
 
-try:
-    from .formatting import rows_to_text
-except ImportError:  # pragma: no cover - MLflow standalone code layout
-    from formatting import rows_to_text
+from .formatting import rows_to_text
 
 
 @lru_cache(maxsize=1)

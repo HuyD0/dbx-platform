@@ -1,17 +1,24 @@
-"""Chat with the platform agent's model-serving endpoint.
+"""Chat with the platform agent, run in-process.
 
-The agent (agents/platform_agent) is read-only by construction; when asked to
-change something it emits proposal markers that this router parses into
-structured proposals. The UI renders them as cards whose plans are rebuilt by
-the durable approval service. The agent's output is never trusted as an
-executor payload. The backend is stateless: the conversation lives in the
-browser.
+The read-only LangGraph agent (dbx_platform.agent) is built and invoked inside
+this process against the foundation-model endpoint bound as the ``chat-model``
+app resource. The agent is read-only by construction; when asked to change
+something it emits proposal markers that this router parses into structured
+proposals. The UI renders them as cards whose plans are rebuilt by the durable
+approval service. The agent's output is never trusted as an executor payload.
+The backend is stateless: the conversation lives in the browser.
+
+The graph pulls in ``langchain``/``langgraph`` (the ``dbx-platform[chat]``
+extra), so those imports are deferred to the request path — the credential-free
+test/CI environment installs only the core deps and imports this router when it
+builds the FastAPI app.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -42,30 +49,43 @@ If evidence lacks a source or timestamp, say that explicitly.
 """
 
 _DEPLOY_HINT = (
-    "Deploy the agent with `python agents/platform_agent/deploy_agent.py`, grant this "
-    "app's service principal CAN_QUERY on the endpoint, and set "
-    "DBX_PLATFORM_AGENT_ENDPOINT in app.yaml if the name differs. See docs/runbook.md."
+    "The chat agent runs in-process: the App must install the dbx-platform[chat] "
+    "extra (langgraph, databricks-langchain), and the foundation-model endpoint "
+    "must be bound as the app's `chat-model` resource with CAN_QUERY and be READY. "
+    "See docs/runbook.md."
 )
 
 
-def _extract_text(response: dict) -> str:
-    """Pull assistant text out of a ResponsesAgent invocation response,
-    tolerating shape drift across mlflow versions."""
-    chunks: list[str] = []
-    for item in response.get("output") or []:
-        content = item.get("content")
-        if isinstance(content, str):
-            chunks.append(content)
-            continue
-        for part in content or []:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                chunks.append(part["text"])
-    return "\n".join(c for c in chunks if c).strip()
+@lru_cache(maxsize=1)
+def get_graph():
+    """Compile the read-only LangGraph agent once per process.
+
+    Deferred import: the langgraph/databricks-langchain deps ship only with the
+    ``chat`` extra, which the app installs but the credential-free test env does
+    not. Tests patch this seam, so the heavy import never runs there.
+    """
+    from dbx_platform.agent.graph import build_graph
+
+    return build_graph()
+
+
+def _extract_text(result: object) -> str:
+    """Pull the final assistant text out of a LangGraph invocation result,
+    tolerating LangChain message objects or plain dicts."""
+    messages = result.get("messages") if isinstance(result, dict) else None
+    if not messages:
+        return ""
+    final = messages[-1]
+    content = getattr(final, "content", None)
+    if content is None and isinstance(final, dict):
+        content = final.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    return str(content).strip() if content else ""
 
 
 @router.post("")
 def chat(body: ChatRequest):
-    endpoint = deps.agent_endpoint()
     page_context = json.dumps(
         body.context.model_dump(mode="json"),
         sort_keys=True,
@@ -80,19 +100,15 @@ def chat(body: ChatRequest):
         *[{"role": message.role, "content": message.content} for message in body.messages],
     ]
     try:
-        response = deps.get_ws().api_client.do(
-            "POST",
-            f"/serving-endpoints/{endpoint}/invocations",
-            body={"input": prompt},
-        )
+        result = get_graph().invoke({"messages": prompt})
     except Exception as exc:  # noqa: BLE001 — the agent is optional; degrade with guidance
-        log.info("agent endpoint unavailable", exc_info=exc)
+        log.info("chat agent unavailable", exc_info=exc)
         return JSONResponse(status_code=503, content=payload(
             "agent_unavailable", "The contextual assistant is currently unavailable.",
             _DEPLOY_HINT))
-    text = _extract_text(response if isinstance(response, dict) else {})
+    text = _extract_text(result)
     if not text:
         return JSONResponse(status_code=502, content=payload(
-            "agent_bad_response", f"Agent endpoint '{endpoint}' returned no text."))
+            "agent_bad_response", "The chat agent returned no text."))
     message, proposals = parse_proposals(text)
-    return {"message": message, "proposals": proposals, "endpoint": endpoint}
+    return {"message": message, "proposals": proposals, "endpoint": deps.chat_model_endpoint()}
