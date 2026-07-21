@@ -85,3 +85,66 @@ class ChatPageContext(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=50)
     context: ChatPageContext = Field(default_factory=ChatPageContext)
+
+
+class AgentExecutionStage(BaseModel):
+    """One server-observed segment of a read-only assistant execution."""
+
+    id: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=200)
+    category: Literal[
+        "foundry_agent",
+        "databricks_retrieval",
+        "llm_synthesis",
+    ]
+    start_ms: float = Field(ge=0)
+    duration_ms: float | None = Field(default=None, ge=0)
+    detail: str | None = Field(default=None, max_length=500)
+
+
+class AgentExecutionTrace(BaseModel):
+    """Bounded timing metadata; unavailable streaming timings remain null."""
+
+    total_ms: float | None = Field(default=None, ge=0)
+    ttft_ms: float | None = Field(default=None, ge=0)
+    tpot_ms: float | None = Field(default=None, ge=0)
+    timing_source: Literal["server", "unavailable"] = "unavailable"
+    stages: list[AgentExecutionStage] = Field(default_factory=list, max_length=50)
+
+
+class ComplianceMetric(BaseModel):
+    """A ratio backed by explicit, currently attested resource evidence."""
+
+    id: Literal[
+        "zdr",
+        "content_safety",
+        "access_control",
+        "audit_logging",
+        "rate_limit_headroom",
+    ]
+    label: str = Field(min_length=1, max_length=100)
+    value_pct: float | None = Field(default=None, ge=0, le=100)
+    compliant_resources: int = Field(ge=0)
+    evaluated_resources: int = Field(ge=0)
+    total_resources: int = Field(ge=0)
+    evidence_note: str = Field(min_length=1, max_length=500)
+
+
+class ZdrAlert(BaseModel):
+    """An explicit zero-data-retention control failure, never an inference."""
+
+    resource_id: str = Field(min_length=1, max_length=1000)
+    resource_name: str = Field(min_length=1, max_length=300)
+    scope: str = Field(min_length=1, max_length=100)
+    provider: str = Field(min_length=1, max_length=100)
+    status: Literal["disabled"] = "disabled"
+    remediation: str = Field(min_length=1, max_length=1000)
+
+
+class AiCompliancePosture(BaseModel):
+    """Cross-provider AI control posture returned to both governance views."""
+
+    metrics: list[ComplianceMetric] = Field(min_length=5, max_length=5)
+    zdr_alerts: list[ZdrAlert] = Field(default_factory=list)
+    unverified_zdr_resources: int = Field(ge=0)
+    evaluated_resources: int = Field(ge=0)

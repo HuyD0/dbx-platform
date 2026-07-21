@@ -60,7 +60,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Mission Control", icon: LayoutDashboard, page: <MissionControl /> },
-  { to: "/overview", label: "Overview", icon: LayoutGrid, page: <Overview /> },
+  { to: "/overview", label: "Command Center", icon: LayoutGrid, page: <Overview /> },
   { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
   { to: "/cost", label: "Cost", icon: CircleDollarSign, page: <CostValue /> },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },

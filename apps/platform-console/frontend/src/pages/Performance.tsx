@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FindingsSection } from "../components/FindingsSection";
+import { GatewayTelemetry, LiveRatesIndicator } from "../components/GatewayTelemetry";
 import { Bento, BentoCell, Card, SectionTitle } from "../components/ui";
 
 const WINDOWS = [7, 30, 90];
@@ -12,6 +13,7 @@ export function Performance() {
         <SectionTitle
           title="Analysis window"
           subtitle="All regression and utilization views use the same comparison period"
+          right={<LiveRatesIndicator />}
         />
         <div className="flex items-center gap-1" role="group" aria-label="Performance analysis window">
           {WINDOWS.map((window) => (
@@ -32,10 +34,12 @@ export function Performance() {
         </div>
       </Card>
 
-      {/* Bento grid: throughput/latency regression views get the wide top row,
-          the remaining utilization and reliability views tile beneath them. */}
+      <GatewayTelemetry days={days} />
+
+      {/* The governed gateway telemetry owns the wide asymmetric top row; the
+          operational regression views continue to use the shared Bento shell. */}
       <Bento>
-        <BentoCell span="lg:col-span-6" bare>
+        <BentoCell span="lg:col-span-7" bare className="[&>*]:h-full">
           <FindingsSection
             title="Job duration regressions"
             subtitle="p50/p95, queue time, retries and SLA exposure against the prior window"
@@ -44,7 +48,7 @@ export function Performance() {
             emptyMessage="No material job regression."
           />
         </BentoCell>
-        <BentoCell span="lg:col-span-6" bare>
+        <BentoCell span="lg:col-span-5" bare className="[&>*]:h-full">
           <FindingsSection
             title="SQL query regressions"
             subtitle="Latency, queueing, bytes scanned and cost-per-query shifts"
@@ -54,7 +58,7 @@ export function Performance() {
           />
         </BentoCell>
 
-        <BentoCell span="lg:col-span-7" bare>
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="Under-utilized clusters"
             subtitle="Observed load does not justify size; recommendations preserve declared SLO headroom"
@@ -63,7 +67,7 @@ export function Performance() {
             emptyMessage="No under-utilized clusters."
           />
         </BentoCell>
-        <BentoCell span="lg:col-span-5" bare>
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="SQL warehouse pressure"
             subtitle="Idle spend, queueing and sustained capacity pressure"
@@ -73,7 +77,7 @@ export function Performance() {
           />
         </BentoCell>
 
-        <BentoCell span="lg:col-span-5" bare>
+        <BentoCell span="lg:col-span-4" bare className="[&>*]:h-full">
           <FindingsSection
             title="Failed and retry waste"
             subtitle="Cost and elapsed time burned on failed, timed-out or retried runs"
@@ -82,7 +86,7 @@ export function Performance() {
             emptyMessage="No failed-run waste."
           />
         </BentoCell>
-        <BentoCell span="lg:col-span-7" bare>
+        <BentoCell span="lg:col-span-12" bare className="[&>*]:h-full">
           <FindingsSection
             title="Serving reliability"
             subtitle="p95 latency, error rate, retry amplification and cost per successful request"

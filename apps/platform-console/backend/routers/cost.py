@@ -104,6 +104,35 @@ def attribution(dimension: str = "team", days: int = 30, refresh: bool = False) 
     return envelope(data, as_of, hit)
 
 
+@router.get("/foundry-attribution")
+def foundry_attribution(days: int = 30, refresh: bool = False) -> dict:
+    """Current-scope Foundry actuals from persisted resource/meter detail."""
+
+    days = deps.clamp_days(days)
+    workspace_id, environment = deps.control_plane_scope()
+
+    def load() -> dict:
+        settings = deps.get_settings()
+        return azure_cost.foundry_attribution(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            settings.dashboard_catalog,
+            settings.dashboard_schema,
+            days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+
+    result, as_of, hit = cache.cached(
+        f"cost/foundry-attribution/{workspace_id}/{environment}/{days}",
+        load,
+        refresh,
+    )
+    response = envelope(result["rows"], as_of, hit)
+    response["source_status"] = result["source_status"]
+    return response
+
+
 @router.get("/azure-detail")
 def azure_detail(
     by: str = "meter",

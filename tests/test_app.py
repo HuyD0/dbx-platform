@@ -546,6 +546,10 @@ def test_chat_parses_backend_agent_proposals(client, monkeypatch):
             "observed_at": "2026-07-18T12:00:00+00:00",
         }
     ]
+    assert body["execution_trace"]["timing_source"] == "server"
+    assert body["execution_trace"]["ttft_ms"] is None
+    assert body["execution_trace"]["tpot_ms"] is None
+    assert body["execution_trace"]["stages"][0]["category"] == "llm_synthesis"
     invocation = agent.invoke.call_args.args[0]
     assert invocation[0]["role"] == "system"
     assert "Every factual claim must cite" in invocation[0]["content"]
@@ -915,3 +919,53 @@ def test_azure_detail_passes_validated_bucket(client, monkeypatch):
 def test_azure_detail_rejects_unknown_dimension_or_bucket(client):
     assert client.get("/api/cost/azure-detail?by=owner").status_code == 400
     assert client.get("/api/cost/azure-detail?bucket=aws").status_code == 400
+
+
+def test_foundry_attribution_returns_rows_currency_and_source_status(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_foundry(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            days=days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return {
+            "rows": [
+                {
+                    "resource_id": "/subscriptions/s/resourceGroups/rg-ai/accounts/a",
+                    "resource_group": "rg-ai",
+                    "resource_type": "Microsoft.CognitiveServices/accounts",
+                    "meter_name": "gpt-5 input tokens",
+                    "cost": 12.5,
+                    "currency": "CAD",
+                    "cost_basis": "AZURE_ACTUAL",
+                }
+            ],
+            "source_status": {
+                "status": "healthy",
+                "source": "Azure Cost Management · azure_cost_details",
+                "notes": "Persisted actuals are available.",
+            },
+        }
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "foundry_attribution", fake_foundry)
+    body = client.get("/api/cost/foundry-attribution?days=30").json()
+
+    assert captured["days"] == 30
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["currency"] == "CAD"
+    assert body["data"][0]["cost_basis"] == "AZURE_ACTUAL"
+    assert body["source_status"]["status"] == "healthy"

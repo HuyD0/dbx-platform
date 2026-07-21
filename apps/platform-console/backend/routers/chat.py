@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -17,7 +18,7 @@ from backend import deps
 from backend.control_plane import ActionNotFoundError, ActionStatus, Actor
 from backend.errors import payload
 from backend.identity import mask_for_viewer
-from backend.models import ChatRequest
+from backend.models import AgentExecutionTrace, ChatRequest
 from backend.proposals import parse_evidence_citations, parse_proposals
 
 log = logging.getLogger("platform_console")
@@ -194,8 +195,14 @@ def chat(body: ChatRequest, request: Request):
         {"role": message.role, "content": message.content}
         for message in body.messages
     )
+    agent = deps.get_platform_agent()
+    started = time.perf_counter()
+    raw_trace = None
     try:
-        text = deps.get_platform_agent().invoke(prompt)
+        if getattr(agent, "supports_execution_trace", False) is True:
+            text, raw_trace = agent.invoke_with_trace(prompt)
+        else:
+            text = deps.get_platform_agent().invoke(prompt)
     except Exception as exc:  # noqa: BLE001 — agent is optional; degrade with guidance
         log.info("backend LangGraph agent unavailable", exc_info=exc)
         return JSONResponse(status_code=503, content=payload(
@@ -206,9 +213,29 @@ def chat(body: ChatRequest, request: Request):
             "agent_bad_response", "The backend LangGraph agent returned no text."))
     message, proposals = parse_proposals(text)
     message, citations = parse_evidence_citations(message)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    if not isinstance(raw_trace, dict):
+        raw_trace = {
+            "total_ms": elapsed_ms,
+            "ttft_ms": None,
+            "tpot_ms": None,
+            "timing_source": "server",
+            "stages": [
+                {
+                    "id": "stage-1",
+                    "label": "Backend assistant request",
+                    "category": "llm_synthesis",
+                    "start_ms": 0,
+                    "duration_ms": elapsed_ms,
+                    "detail": "Only end-to-end server timing was available.",
+                }
+            ],
+        }
+    execution_trace = AgentExecutionTrace.model_validate(raw_trace).model_dump(mode="json")
     return {
         "message": message,
         "proposals": proposals,
         "citations": citations,
         "endpoint": endpoint,
+        "execution_trace": execution_trace,
     }

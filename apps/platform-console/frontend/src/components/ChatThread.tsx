@@ -1,9 +1,18 @@
-import { ArrowUp, BookOpenCheck, DollarSign, Gauge, Shield, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ArrowUp,
+  BookOpenCheck,
+  ChevronDown,
+  Clock3,
+  DollarSign,
+  Gauge,
+  Shield,
+  Sparkles,
+} from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChat } from "../lib/chat";
 import { timeAgo } from "../lib/format";
-import type { Proposal } from "../lib/types";
+import type { AgentExecutionCategory, AgentExecutionTrace, Proposal } from "../lib/types";
 import { ActionPlanDialog, PlanActionButton } from "./ActionPlanDialog";
 import { ErrorState } from "./ui";
 
@@ -33,6 +42,189 @@ const SUGGESTIONS = [
     prompt: "Clean up stale clusters.",
   },
 ];
+
+const TRACE_CATEGORY: Record<AgentExecutionCategory, { label: string; bar: string; dot: string }> =
+  {
+    foundry_agent: {
+      label: "Microsoft Foundry Agent tool calls",
+      bar: "bg-[#FFCD67] text-[#240B15]",
+      dot: "bg-[#FFCD67]",
+    },
+    databricks_retrieval: {
+      label: "Databricks retrieval",
+      bar: "bg-[#00AAAD] text-[#240B15]",
+      dot: "bg-[#00AAAD]",
+    },
+    llm_synthesis: {
+      label: "LLM synthesis",
+      bar: "bg-[#8B001F] text-white",
+      dot: "bg-[#8B001F]",
+    },
+  };
+
+function isObservedDuration(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function formatDuration(value: number | null | undefined, perToken = false): string {
+  if (!isObservedDuration(value)) return "Unavailable";
+  if (perToken) return `${Number.isInteger(value) ? value : value.toFixed(1)} ms/token`;
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
+  return `${Math.round(value)} ms`;
+}
+
+/** An expandable, keyboard-operable waterfall. It only plots durations supplied
+ * by the server; absent telemetry is disclosed rather than estimated. */
+function AgentExecutionFlamegraph({ trace }: { trace?: AgentExecutionTrace }) {
+  const [expanded, setExpanded] = useState(false);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  const regionId = useId();
+  const stages = trace?.stages ?? [];
+  const observedEnds = stages
+    .filter((stage) => isObservedDuration(stage.duration_ms))
+    .map((stage) => Math.max(0, stage.start_ms) + (stage.duration_ms ?? 0));
+  const scaleMs = Math.max(
+    isObservedDuration(trace?.total_ms) ? trace.total_ms : 0,
+    ...observedEnds,
+    1,
+  );
+  const hasServerTiming = trace?.timing_source === "server";
+  const selectedStage = stages.find((stage) => stage.id === selectedStageId);
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-[#E4D7DB] bg-white">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={regionId}
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-[#FBF7F8]"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Clock3 className="h-3.5 w-3.5 shrink-0 text-[#8B001F]" />
+          <span>
+            <span className="block text-[11px] font-semibold text-[#240B15]">
+              Agent execution flamegraph
+            </span>
+            <span className="block text-[10px] text-[#806A72]">
+              {hasServerTiming
+                ? `${stages.length} observed stage${stages.length === 1 ? "" : "s"} · ${formatDuration(trace?.total_ms)}`
+                : "Timing telemetry unavailable"}
+            </span>
+          </span>
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`h-4 w-4 shrink-0 text-[#8B001F] transition-transform ${
+            expanded ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {expanded && (
+        <div id={regionId} className="border-t border-[#E4D7DB] p-3">
+          <div className="grid grid-cols-2 gap-2" aria-label="Generation latency metrics">
+            <div className="rounded-lg bg-[#FBF7F8] px-3 py-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-[#806A72]">
+                Time to first token
+              </p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-[#240B15]">
+                {formatDuration(trace?.ttft_ms)}
+              </p>
+            </div>
+            <div className="rounded-lg bg-[#FBF7F8] px-3 py-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-[#806A72]">
+                Time per output token
+              </p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-[#240B15]">
+                {formatDuration(trace?.tpot_ms, true)}
+              </p>
+            </div>
+          </div>
+
+          {!hasServerTiming && (
+            <p className="mt-3 rounded-lg border border-dashed border-[#E4D7DB] bg-[#FBF7F8] px-3 py-2 text-[11px] leading-5 text-[#806A72]">
+              This response did not include server timing. Stage durations, TTFT, and TPOT are
+              intentionally not estimated.
+            </p>
+          )}
+
+          {stages.length > 0 && (
+            <div className="mt-3">
+              <div
+                className="mb-1.5 flex justify-between text-[9px] tabular-nums text-[#B79AA3]"
+                aria-hidden="true"
+              >
+                <span>0 ms</span>
+                <span>{formatDuration(trace?.total_ms)}</span>
+              </div>
+              <ol className="space-y-2" aria-label="Agent execution stages">
+                {stages.map((stage) => {
+                  const category = TRACE_CATEGORY[stage.category];
+                  const durationObserved = isObservedDuration(stage.duration_ms);
+                  const left = Math.min(100, Math.max(0, (stage.start_ms / scaleMs) * 100));
+                  const width = durationObserved
+                    ? Math.max(4, Math.min(100 - left, ((stage.duration_ms ?? 0) / scaleMs) * 100))
+                    : 100;
+                  return (
+                    <li key={stage.id}>
+                      <p className="mb-1 flex items-center justify-between gap-2 text-[10px]">
+                        <span className="truncate font-medium text-[#4B3F43]">
+                          {category.label}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-[#806A72]">
+                          {formatDuration(stage.duration_ms)}
+                        </span>
+                      </p>
+                      <div className="relative h-7 rounded-md bg-[#FBF7F8]">
+                        <button
+                          type="button"
+                          aria-pressed={selectedStageId === stage.id}
+                          aria-label={`${stage.label}, ${category.label}, ${formatDuration(stage.duration_ms)}`}
+                          onClick={() =>
+                            setSelectedStageId((current) =>
+                              current === stage.id ? null : stage.id,
+                            )
+                          }
+                          className={`absolute inset-y-0 overflow-hidden rounded-md px-2 text-left text-[10px] font-semibold shadow-sm ring-offset-1 ring-offset-white focus-visible:ring-2 focus-visible:ring-[#F00037] ${
+                            durationObserved
+                              ? category.bar
+                              : "border border-dashed border-[#B79AA3] bg-white text-[#4B3F43]"
+                          }`}
+                          style={{ left: `${durationObserved ? left : 0}%`, width: `${width}%` }}
+                        >
+                          <span className="block truncate">{stage.label}</span>
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1" aria-label="Trace legend">
+            {(Object.keys(TRACE_CATEGORY) as AgentExecutionCategory[]).map((key) => (
+              <span key={key} className="inline-flex items-center gap-1 text-[9px] text-[#806A72]">
+                <span className={`h-2 w-2 rounded-sm ${TRACE_CATEGORY[key].dot}`} />
+                {TRACE_CATEGORY[key].label}
+              </span>
+            ))}
+          </div>
+
+          {selectedStage && (
+            <div className="mt-3 rounded-lg border-l-2 border-[#8B001F] bg-[#F9EAED] px-3 py-2">
+              <p className="text-[11px] font-semibold text-[#240B15]">{selectedStage.label}</p>
+              <p className="mt-0.5 text-[10px] leading-4 text-[#4B3F43]">
+                {selectedStage.detail || TRACE_CATEGORY[selectedStage.category].label}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function JobProposalCard({ proposal }: { proposal: Proposal }) {
   return (
@@ -160,8 +352,8 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
               Investigate this workspace
             </p>
             <p className="max-w-md text-sm text-ink-2">
-              I can investigate the page you are viewing and draft evidence-backed plans.
-              Every change is revalidated and requires your exact-plan approval.
+              I can investigate the page you are viewing and draft evidence-backed plans. Every
+              change is revalidated and requires your exact-plan approval.
             </p>
             <div
               className={`grid w-full gap-3 ${
@@ -193,7 +385,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
             {turns.map((turn, i) =>
               turn.role === "user" ? (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-accent/20 bg-tint px-4 py-2.5 text-sm text-ink">
+                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-[#E4D7DB] bg-[#F9EAED] px-4 py-2.5 text-sm text-[#240B15]">
                     {turn.content}
                   </div>
                 </div>
@@ -221,10 +413,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                               <span className="font-medium text-ink-2">{citation.source}</span>
                               <span className="text-muted">
                                 {citation.tool} ·{" "}
-                                <time
-                                  dateTime={citation.observed_at}
-                                  title={citation.observed_at}
-                                >
+                                <time dateTime={citation.observed_at} title={citation.observed_at}>
                                   {timeAgo(citation.observed_at)}
                                 </time>
                               </span>
@@ -249,6 +438,7 @@ export function ChatThread({ compact = false }: { compact?: boolean }) {
                         <ActionProposalCard key={j} proposal={p} />
                       ),
                     )}
+                    <AgentExecutionFlamegraph trace={turn.executionTrace} />
                   </div>
                 </div>
               ),

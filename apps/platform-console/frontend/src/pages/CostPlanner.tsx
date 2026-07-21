@@ -32,6 +32,7 @@ import {
 } from "../lib/types";
 
 type Phase = "wizard" | "review" | "results";
+const MONTHLY_BASELINE_HOURS = 2_000;
 
 /** AI Cost Planner: plain-English wizard → human review → deterministic
  * 3-tier TCO matrix. All math happens server-side in the tested engine; the
@@ -266,6 +267,7 @@ export function CostPlanner() {
                 rigorPct={rigorPct}
                 selectedTier={tier}
                 onSelectTier={setTier}
+                baselineHours={MONTHLY_BASELINE_HOURS}
               />
               {activeTier && (
                 <RigorSlider

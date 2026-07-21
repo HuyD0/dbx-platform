@@ -51,23 +51,55 @@ function renderThread() {
 }
 
 test("sends focused action context and preserves structured citations after focus clears", async () => {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-    new Response(
-      JSON.stringify({
-        message: "The current finding supports this exact plan.",
-        proposals: [],
-        citations: [
-          {
-            citation_id: "evidence-1",
-            tool: "get_canonical_findings",
-            source: "canonical platform_findings",
-            observed_at: "2026-07-18T12:00:00Z",
+  const fetchMock = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          message: "The current finding supports this exact plan.",
+          proposals: [],
+          citations: [
+            {
+              citation_id: "evidence-1",
+              tool: "get_canonical_findings",
+              source: "canonical platform_findings",
+              observed_at: "2026-07-18T12:00:00Z",
+            },
+          ],
+          endpoint: "test-agent",
+          execution_trace: {
+            total_ms: 1420,
+            ttft_ms: 820,
+            tpot_ms: 18.4,
+            timing_source: "server",
+            stages: [
+              {
+                id: "foundry-tools",
+                label: "Route and call tools",
+                category: "foundry_agent",
+                start_ms: 0,
+                duration_ms: 360,
+                detail: "Microsoft Foundry Agent selected the grounded evidence tools.",
+              },
+              {
+                id: "databricks-evidence",
+                label: "Retrieve canonical findings",
+                category: "databricks_retrieval",
+                start_ms: 320,
+                duration_ms: 500,
+                detail: "Databricks returned current canonical workspace findings.",
+              },
+              {
+                id: "synthesis",
+                label: "Synthesize cited answer",
+                category: "llm_synthesis",
+                start_ms: 780,
+                duration_ms: 640,
+              },
+            ],
           },
-        ],
-        endpoint: "test-agent",
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
   );
   vi.stubGlobal("fetch", fetchMock);
   const user = userEvent.setup();
@@ -83,6 +115,21 @@ test("sends focused action context and preserves structured citations after focu
   expect(screen.getByText(/get_canonical_findings/)).toBeInTheDocument();
   const observed = screen.getByTitle("2026-07-18T12:00:00Z");
   expect(observed).toHaveAttribute("datetime", "2026-07-18T12:00:00Z");
+  expect(screen.getByText("Explain this exact plan.")).toHaveClass(
+    "bg-[#F9EAED]",
+    "text-[#240B15]",
+  );
+
+  await user.click(screen.getByRole("button", { name: /Agent execution flamegraph/ }));
+  expect(screen.getByText("820 ms")).toBeInTheDocument();
+  expect(screen.getByText("18.4 ms/token")).toBeInTheDocument();
+  const retrievalStage = screen.getByRole("button", {
+    name: "Retrieve canonical findings, Databricks retrieval, 500 ms",
+  });
+  await user.click(retrievalStage);
+  expect(
+    screen.getByText("Databricks returned current canonical workspace findings."),
+  ).toBeInTheDocument();
 
   const request = fetchMock.mock.calls[0];
   const body = JSON.parse(String(request?.[1]?.body));
@@ -95,16 +142,17 @@ test("sends focused action context and preserves structured citations after focu
 test("focused answers explicitly disclose a missing structured citation", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          message: "No grounded marker was returned.",
-          proposals: [],
-          citations: [],
-          endpoint: "test-agent",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            message: "No grounded marker was returned.",
+            proposals: [],
+            citations: [],
+            endpoint: "test-agent",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
     ),
   );
   const user = userEvent.setup();
@@ -113,8 +161,12 @@ test("focused answers explicitly disclose a missing structured citation", async 
   await user.click(screen.getByRole("button", { name: "Ask focused" }));
 
   expect(
-    await screen.findByText(
-      "No structured source citation was returned for this focused answer.",
+    await screen.findByText("No structured source citation was returned for this focused answer."),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Agent execution flamegraph/ }));
+  expect(
+    screen.getByText(
+      "This response did not include server timing. Stage durations, TTFT, and TPOT are intentionally not estimated.",
     ),
   ).toBeInTheDocument();
   await waitFor(() =>

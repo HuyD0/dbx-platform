@@ -128,6 +128,30 @@ class DatabricksChatModelTests(unittest.TestCase):
         configure.assert_not_called()
         create.assert_called_once()
 
+    def test_platform_agent_returns_bounded_server_trace(self) -> None:
+        graph = MagicMock()
+        graph.invoke.return_value = {
+            "messages": [AIMessage(content="Evidence-backed answer.")],
+        }
+        agent = PlatformAgent(
+            endpoint="model",
+            workspace_client_factory=MagicMock(return_value=MagicMock()),
+            settings_factory=MagicMock(),
+            repository_factory=MagicMock(),
+        )
+        agent.__dict__["graph"] = graph
+
+        text, trace = agent.invoke_with_trace([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(text, "Evidence-backed answer.")
+        self.assertEqual(trace["timing_source"], "server")
+        self.assertIsNone(trace["ttft_ms"])
+        self.assertIsNone(trace["tpot_ms"])
+        self.assertEqual(trace["stages"][0]["category"], "llm_synthesis")
+        config = graph.invoke.call_args.kwargs["config"]
+        self.assertEqual(config["recursion_limit"], 20)
+        self.assertEqual(len(config["callbacks"]), 1)
+
     def test_trace_experiment_is_required(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "trace experiment"):
             configure_mlflow_tracing("")

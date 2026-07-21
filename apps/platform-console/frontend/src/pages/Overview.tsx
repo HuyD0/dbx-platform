@@ -4,6 +4,7 @@ import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import type { DashboardInfo, Envelope, OverviewData } from "../lib/types";
 import { BarList } from "../components/BarList";
+import { GatewayTelemetry, LiveRatesIndicator } from "../components/GatewayTelemetry";
 import { aggregateProductSpend } from "../components/ProductSpendBreakdown";
 import {
   AsOf,
@@ -11,6 +12,7 @@ import {
   BentoCell,
   ErrorState,
   HealthDot,
+  PageHeader,
   SectionTitle,
   Skeleton,
   StatTile,
@@ -52,11 +54,23 @@ export function Overview() {
   const productSpend = aggregateProductSpend(spendRows);
   const spendTotal = productSpend.reduce((acc, product) => acc + product.current, 0);
 
-  const clean = !!findings && findings.total === 0;
+  const findingState = !findings ? "idle" : findings.total === 0 ? "good" : "warning";
+  const findingStateLabel = !findings
+    ? "Finding evidence unavailable"
+    : findings.total === 0
+      ? "Platform clean"
+      : "Open findings";
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace pulse"
+        title="Command center"
+        description="Operational findings, spend, and AI Gateway rates in one modular workspace view."
+        actions={<LiveRatesIndicator />}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted">
           Findings from stored check runs; run any check fresh from its area page.
         </p>
@@ -69,7 +83,7 @@ export function Overview() {
       </div>
 
       {/* Bento grid: a wide hero health tile plus asymmetric supporting tiles,
-          then two half-width analytical panels and a full-width dashboards row. */}
+          governed gateway telemetry, and full-width analytical panels. */}
       <Bento>
         <BentoCell span="lg:col-span-6" bare>
           <StatTile
@@ -77,12 +91,12 @@ export function Overview() {
             label="Open findings"
             indicator={
               <HealthDot
-                state={clean ? "good" : "warning"}
-                label={clean ? "Platform clean" : "Open findings"}
+                state={findingState}
+                label={findingStateLabel}
               />
             }
             value={findings ? findings.total : "—"}
-            tone={findings && findings.total > 0 ? "warning" : "good"}
+            tone={!findings ? "default" : findings.total > 0 ? "warning" : "good"}
             hint={findings?.run_ts ? `last run ${timeAgo(findings.run_ts)}` : "no stored run yet"}
           />
         </BentoCell>
@@ -103,7 +117,7 @@ export function Overview() {
           <StatTile
             label={`Workspace spend (${spendRows.length ? "30d" : "n/a"})`}
             value={
-              spendTotal
+              spendRows.length > 0
                 ? spendTotal.toLocaleString("en-US", {
                     style: "currency",
                     currency: "USD",
@@ -113,6 +127,7 @@ export function Overview() {
             }
           />
         </BentoCell>
+
         <BentoCell span="lg:col-span-8">
           <SectionTitle
             title="Findings by area"
@@ -133,6 +148,10 @@ export function Overview() {
           ) : (
             <p className="text-xs text-muted">{d.findings.error?.message}</p>
           )}
+        </BentoCell>
+
+        <BentoCell span="lg:col-span-12" bare>
+          <GatewayTelemetry days={30} />
         </BentoCell>
 
         <BentoCell span="lg:col-span-12">

@@ -726,3 +726,92 @@ def test_report_detail_sql_binds_bucket_filter():
     sql = report_detail_sql("main", "dbx_platform", "meter", bucket="foundry_ai")
     assert "service_bucket = :bucket" in sql
     assert "'foundry_ai'" not in sql
+
+
+def test_foundry_attribution_sql_groups_every_dimension_and_currency():
+    sql = azure_cost.foundry_attribution_sql("main", "dbx_platform")
+
+    assert "main.dbx_platform.azure_cost_details" in sql
+    assert "c.service_bucket = :bucket" in sql
+    assert "LOWER(COALESCE(c.meter_name, '')) LIKE :token_meter" in sql
+    assert "c.resource_id, c.resource_group, c.resource_type, c.meter_name" in sql
+    assert (
+        "GROUP BY c.resource_id, c.resource_group, c.resource_type, c.meter_name, "
+        "COALESCE(NULLIF(TRIM(c.currency), ''), 'UNRESOLVED')"
+    ) in sql
+    assert "MAX(c.currency)" not in sql
+    assert "c.scope_filter = s.scope_filter" in sql
+
+
+def test_foundry_attribution_reads_actuals_and_reports_persisted_source_health(
+    monkeypatch,
+):
+    calls = []
+    actuals = [
+        {
+            "resource_id": "/subscriptions/s/resourceGroups/rg-ai/providers/x/accounts/a",
+            "resource_group": "rg-ai",
+            "resource_type": "x/accounts",
+            "meter_name": "gpt-5 input tokens",
+            "cost": 14.25,
+            "currency": "CAD",
+        }
+    ]
+
+    def fake_run(_w, sql, _warehouse, params=None, **kwargs):
+        calls.append((sql, params, kwargs))
+        if "current_scope_count" in sql:
+            return [
+                {
+                    "current_scope_count": 1,
+                    "detail_row_count": 12,
+                    "coverage_start": "2026-07-01",
+                    "coverage_end": "2026-07-20",
+                    "last_ingested_at": "2026-07-20T03:00:00Z",
+                }
+            ]
+        return actuals
+
+    monkeypatch.setattr("dbx_platform.azure_cost.run_query", fake_run)
+    result = azure_cost.foundry_attribution(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        30,
+        workspace_id="w1",
+        environment="prod",
+    )
+
+    assert result["rows"] == actuals
+    assert result["source_status"]["status"] == "healthy"
+    assert calls[0][1] == {
+        "days": 29,
+        "workspace_id": "w1",
+        "environment": "prod",
+        "bucket": "foundry_ai",
+        "token_meter": "%token%",
+    }
+    assert calls[0][2]["row_limit"] == 100_000
+
+
+def test_foundry_attribution_marks_missing_detail_ingestion_unavailable(monkeypatch):
+    def fake_run(_w, sql, _warehouse, params=None, **_kwargs):
+        if "current_scope_count" in sql:
+            return [{"current_scope_count": 1, "detail_row_count": 0}]
+        return []
+
+    monkeypatch.setattr("dbx_platform.azure_cost.run_query", fake_run)
+    result = azure_cost.foundry_attribution(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        7,
+        workspace_id="w1",
+        environment="prod",
+    )
+
+    assert result["rows"] == []
+    assert result["source_status"]["status"] == "unavailable"
+    assert "azure_cost_details" in result["source_status"]["notes"]

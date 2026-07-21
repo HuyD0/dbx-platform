@@ -2,21 +2,36 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brand system. The shell is deliberately neutral: red identifies the product
-   and primary actions, while operational states keep their own semantic
-   colors. Light is the first-visit theme and dark remains user-selectable. */
+/* Mission-control brand system. Red identifies the product and primary
+   actions, while operational states keep their own semantic colors. Light is
+   the first-visit theme and dark remains user-selectable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #f6f6f7;
+  /* Canonical mission-control palette. Keep these literal aliases available to
+     Tailwind (`bg-teal-accent`, `border-sand-border`, …) so charts and state
+     affordances never depend on an incidental semantic color mapping. */
+  --color-primary-red: #F00037;
+  --color-deep-maroon: #240B15;
+  --color-mid-red: #8B001F;
+  --color-light-background: #FBF7F8;
+  --color-pink-tint: #F9EAED;
+  --color-light-gold: #FFF8E1;
+  --color-gold-accent: #FFCD67;
+  --color-teal-accent: #00AAAD;
+  --color-green-accent: #72BF44;
+  --color-muted-rose-grey: #B79AA3;
+  --color-sand-border: #E4D7DB;
+
+  --color-page: #FBF7F8;
   --color-surface: #ffffff;
   --color-raised: #ffffff;
-  --color-tint: #eff0f3;
-  --color-ink: #1b1a1f;
-  --color-ink-2: #52525b;
-  --color-muted: #676c78;
-  --color-grid: #e4e4e8;
-  --color-hairline: rgba(24, 24, 27, 0.07);
+  --color-tint: #F9EAED;
+  --color-ink: #240B15;
+  --color-ink-2: #4b3f43;
+  --color-muted: #806a72;
+  --color-grid: #E4D7DB;
+  --color-hairline: rgba(36, 11, 21, 0.08);
 
   --color-brand-primary: #f00037;
   --color-brand-maroon: #240b15;
@@ -144,12 +159,11 @@ body {
     radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 12%, transparent), transparent 60%);
 }
 
-/* Graphite-smoke glassmorphism. Surfaces are translucent and blurred over the
-   ambient wash, kept at a high opacity so body text stays legible on the frost.
-   The @supports guard below means unsupported browsers fall back to the opaque
-   token background, and forced-colors mode resets these entirely. */
+/* Cards remain exact white/sand surfaces on the light canvas. Dark mode keeps
+   the upstream frosted treatment over its graphite-smoke wash. Forced-colors
+   mode resets both treatments below. */
 .glass {
-  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  background: var(--color-surface);
   border: 1px solid var(--color-grid);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(24, 24, 27, 0.06);
 }
@@ -158,9 +172,9 @@ body {
   border-color: var(--color-grid);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
-/* Raised dialogs and drawers are more opaque so dense JSON/tables hold contrast. */
+/* Raised dialogs and drawers are opaque in light mode so dense JSON/tables hold contrast. */
 .glass-strong {
-  background: color-mix(in srgb, var(--color-raised) 95%, transparent);
+  background: var(--color-raised);
   border: 1px solid var(--color-grid);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
@@ -170,11 +184,11 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass {
+  .dark .glass {
     -webkit-backdrop-filter: saturate(160%) blur(14px);
     backdrop-filter: saturate(160%) blur(14px);
   }
-  .glass-strong {
+  .dark .glass-strong {
     -webkit-backdrop-filter: saturate(180%) blur(22px);
     backdrop-filter: saturate(180%) blur(22px);
   }
