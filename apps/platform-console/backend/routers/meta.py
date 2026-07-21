@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 import dbx_platform
 from backend import cache, deps
@@ -76,6 +76,83 @@ def config() -> dict:
             "util_cpu_threshold_pct": s.util_cpu_threshold_pct,
             "util_mem_threshold_pct": s.util_mem_threshold_pct,
             "gpu_max_uptime_hours": s.gpu_max_uptime_hours,
+        },
+    }
+
+
+@router.get("/api/workspaces")
+def workspaces(request: Request) -> dict:
+    actor = request.state.actor
+    workspace_id = _workspace_id()
+    environment = os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev")
+    is_admin = actor.has_role("operator") or actor.has_role("approver")
+    capabilities = [
+        {
+            "id": "personal-evidence",
+            "label": "View workspace evidence",
+            "description": (
+                "See health, cost, governance, AI, and operational evidence with "
+                "viewer-safe redaction."
+            ),
+            "enabled": True,
+        },
+        {
+            "id": "propose-actions",
+            "label": "Draft governed changes",
+            "description": (
+                "Create immutable proposals for workspace changes; execution still "
+                "requires approval."
+            ),
+            "enabled": actor.has_role("proposer"),
+        },
+        {
+            "id": "approve-actions",
+            "label": "Approve exact plans",
+            "description": (
+                "Approve one current, immutable plan before a dedicated executor "
+                "can run it."
+            ),
+            "enabled": actor.has_role("approver"),
+        },
+        {
+            "id": "admin-console",
+            "label": "Platform admin view",
+            "description": (
+                "Review all workspace evidence and pending governed actions for "
+                "this control plane."
+            ),
+            "enabled": is_admin,
+        },
+    ]
+    workspace = {
+        "workspace_id": workspace_id,
+        "name": (
+            os.environ.get("DBX_PLATFORM_WORKSPACE_NAME")
+            or workspace_id
+            or "Current workspace"
+        ),
+        "environment": environment,
+        "relationship": "platform_admin" if is_admin else "workspace_user",
+        "roles": sorted(actor.roles),
+        "capabilities": capabilities,
+        "management_mode": "governed_approval" if is_admin else "viewer_safe",
+    }
+    return {
+        "actor": {
+            "actor_id": actor.actor_id,
+            "email": actor.email,
+            "roles": sorted(actor.roles),
+            "view": "platform_admin" if is_admin else "workspace_user",
+        },
+        "workspaces": [workspace],
+        "source_status": {
+            "status": "partial",
+            "source": "databricks_app_obo",
+            "notes": (
+                "Uses the Databricks Apps forwarded user token as OBO passthrough "
+                "for this workspace. Account-wide workspace discovery can be "
+                "added behind the same entitlement model."
+            ),
         },
     }
 
