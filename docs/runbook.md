@@ -256,7 +256,10 @@ and agent deployment are not general executor actions in v1.
 
 `agents/platform_agent/deploy_agent.py` intentionally exits without logging,
 registering, or deploying. Add a narrowly scoped, tested model-deploy action
-before enabling it.
+before enabling it. The Platform Console assistant does not need that action:
+its LangGraph runtime is hosted inside the read-only App and queries the
+`chat-model` foundation endpoint through an App resource binding with only
+`CAN_QUERY`.
 
 ### AI catalog & monitoring
 
