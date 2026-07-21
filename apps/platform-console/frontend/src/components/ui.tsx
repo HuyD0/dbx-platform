@@ -234,16 +234,26 @@ const errorGuidance: Record<string, string> = {
 export function ErrorState({ error }: { error: unknown }) {
   const apiErr = error instanceof ApiError ? error : null;
   const unavailable = apiErr && [404, 405, 501].includes(apiErr.status);
+  // A gateway/proxy response carries no typed app body, so api.ts labels it with
+  // the generic "http_error" code. On a transient status (502/503/504) this
+  // means the warehouse is likely cold-starting or the backend was briefly
+  // unreachable — a retry, not a broken data source. Typed app 503s keep their
+  // own code (e.g. system_tables_unavailable) and are unaffected.
+  const transient =
+    !!apiErr && apiErr.code === "http_error" && [502, 503, 504].includes(apiErr.status);
+  const neutral = unavailable || transient;
   const title = unavailable
     ? "This capability is not connected in this deployment."
-    : apiErr
-      ? (errorGuidance[apiErr.code] ?? "The data source could not be read.")
-      : "The data source could not be read.";
+    : transient
+      ? "The data source is temporarily unavailable."
+      : apiErr
+        ? (errorGuidance[apiErr.code] ?? "The data source could not be read.")
+        : "The data source could not be read.";
   const detail = apiErr ? apiErr.message : String(error);
   return (
     <div
       className={`rounded-lg border px-3 py-3 text-sm ${
-        unavailable
+        neutral
           ? "border-grid bg-hairline/30"
           : "border-status-serious/30 bg-status-serious/5"
       }`}
@@ -251,11 +261,13 @@ export function ErrorState({ error }: { error: unknown }) {
     >
       <div
         className={`flex items-center gap-2 font-medium ${
-          unavailable ? "text-ink-2" : "text-status-serious"
+          neutral ? "text-ink-2" : "text-status-serious"
         }`}
       >
         {unavailable ? (
           <DatabaseZap className="h-4 w-4 shrink-0" />
+        ) : transient ? (
+          <Clock3 className="h-4 w-4 shrink-0" />
         ) : (
           <AlertTriangle className="h-4 w-4 shrink-0" />
         )}
@@ -264,9 +276,11 @@ export function ErrorState({ error }: { error: unknown }) {
       <p className="mt-1 text-xs text-muted">
         {unavailable
           ? "The interface is ready and will populate when its backend endpoint is enabled."
-          : apiErr?.code.startsWith("pricing_snapshot")
-            ? "Ask an approver to run the estimator-prices-pull job once. Your answers are saved on this screen, so you can retry after pricing is ready."
-            : "Check data access and source health, then try refreshing."}
+          : transient
+            ? "The warehouse may be waking up, or the backend was briefly unreachable. Wait a moment, then refresh."
+            : apiErr?.code.startsWith("pricing_snapshot")
+              ? "Ask an approver to run the estimator-prices-pull job once. Your answers are saved on this screen, so you can retry after pricing is ready."
+              : "Check data access and source health, then try refreshing."}
       </p>
       {apiErr?.hint && <p className="mt-1 text-xs text-muted">{apiErr.hint}</p>}
       {!unavailable && detail && (
