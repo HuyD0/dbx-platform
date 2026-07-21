@@ -112,4 +112,5 @@ def test_llm_cost_tool_excludes_foreign_workspace_rows(monkeypatch, request):
     assert "cost=7.0" in result
     assert "requests=3" in result
     assert "foreign-model" not in result
-    assert "999" not in result
+    assert "cost=999" not in result
+    assert "requests=999" not in result

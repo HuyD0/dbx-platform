@@ -76,6 +76,9 @@ jobs:
       - name: Install
         working-directory: apps/platform-console/frontend
         run: npm ci
+      - name: Install Chromium
+        working-directory: apps/platform-console/frontend
+        run: npx playwright install --with-deps chromium
       - name: Accessibility and interaction tests
         working-directory: apps/platform-console/frontend
         run: npm test

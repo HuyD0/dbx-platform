@@ -81,3 +81,88 @@ next decision while keeping evidence, approval, execution, and verification visi
 
 Generated with the built-in image-generation workflow using the supplied screenshot as the visual
 and content reference.
+
+## Institutional neutral mockups
+
+These ten additional mockups use a restrained operator-console system intended for an institutional
+platform team. White, graphite, black, and cool grey establish the hierarchy. Muted semantic color
+appears only when it conveys risk, warning, verified health, or evidence linkage.
+
+### Visual system
+
+- Use **ink `#111315`**, white, and **canvas grey `#F4F5F5`** for the main hierarchy.
+- Use compact typography, tabular numerals, hairline dividers, and 3–6 px corner radii.
+- Prefer registers, timelines, and structured fields over decorative cards and oversized metrics.
+- Reserve **muted red `#B4232C`** for actual risk or approval urgency.
+- Keep healthy, warning, and evidence states desaturated and pair color with explicit text.
+- Preserve a visible read-only boundary and the full evidence → plan → approval → confirmation →
+  execution → verification workflow.
+
+### OTPP concepts
+
+11. **Command Overview** — a dense production overview led by the decision queue and operating
+    signal.
+12. **Evidence Register** — a source-health register with freshness, coverage, and exact run
+    attestations.
+13. **Approval Review** — a focused review screen separating immutable plan scope, eligibility,
+    expiry, and confirmation.
+14. **Control Portfolio** — governance coverage and exception expiry across operational domains.
+15. **Agent Copilot** — a split-view investigation surface where the assistant remains visibly
+    read-only and every answer has a cited evidence card.
+16. **Morning Brief** — a quiet editorial summary for platform leadership.
+17. **Incident Pulse** — a monochrome dark operations view with one restrained severity signal.
+18. **Cost Lens** — attributed spend, forecast variance, and evidence-backed opportunities.
+19. **Policy Map** — policy source hierarchy, assignment coverage, exceptions, and drift.
+20. **Calm Zero State** — a useful zero-findings state with explicit coverage and remaining work.
+
+### OTPP files
+
+- `11-otpp-command-ribbon.svg`
+- `12-otpp-evidence-cards.svg`
+- `13-otpp-approval-stage.svg`
+- `14-otpp-portfolio-heatmap.svg`
+- `15-otpp-agent-copilot.svg`
+- `16-otpp-morning-brief.svg`
+- `17-otpp-incident-pulse.svg`
+- `18-otpp-cost-lens.svg`
+- `19-otpp-policy-map.svg`
+- `20-otpp-calm-zero.svg`
+
+## Brand-balanced drafts
+
+These five comparison drafts restore the OTPP red and maroon identity while keeping the interface
+institutional and operational. All five use the same core content so the visual direction—not the
+information architecture—can be compared directly.
+
+21. **Editorial Burgundy** — warm paper, a burgundy masthead, and a thin red brand rule.
+22. **Redline Grid** — predominantly black and white, with a precise red navigation spine.
+23. **Rose Ledger** — pale rose atmosphere and a dense, finance-inspired decision ledger.
+24. **Dark Maroon Command** — immersive dark brand canvas with restrained semantic accents.
+25. **Brand Spine** — white operational canvas organized by a strong maroon-and-red vertical spine.
+
+### Brand-balanced files
+
+- `21-brand-editorial-burgundy.svg`
+- `22-brand-redline-grid.svg`
+- `23-brand-rose-ledger.svg`
+- `24-brand-dark-command.svg`
+- `25-brand-spine.svg`
+
+## Creative brand directions
+
+These five concepts move beyond conventional sidebar-and-card dashboard composition while
+retaining the institutional red, burgundy, maroon, rose, cream, and neutral brand system.
+
+26. **Decision Ribbon** — the six controlled action states become the page architecture.
+27. **Evidence Constellation** — source provenance and freshness orbit the immutable plan.
+28. **Annual-report Brief** — editorial hierarchy inspired by an institutional annual report.
+29. **Twin Lens** — business consequence and exact operator mechanics share one decisive seam.
+30. **Command Monolith** — a central branded object carries the priority decision through the view.
+
+### Creative files
+
+- `26-creative-decision-ribbon.svg`
+- `27-creative-evidence-constellation.svg`
+- `28-creative-annual-brief.svg`
+- `29-creative-twin-lens.svg`
+- `30-creative-command-monolith.svg`
