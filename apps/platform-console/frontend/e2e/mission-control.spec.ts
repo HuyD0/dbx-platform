@@ -346,7 +346,7 @@ async function preserveDesktopVisualBaselineHeight(page: Page, width: number) {
   // Keep that tail explicit so full-page screenshots remain stable when browser
   // layout engines round content height a few pixels differently.
   await page.addStyleTag({
-    content: "html, body, #root { min-height: 1543px !important; }",
+    content: "html, body, #root { min-height: 1559px !important; }",
   });
 }
 

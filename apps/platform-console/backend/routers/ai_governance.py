@@ -12,10 +12,20 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from backend import cache, deps
-from backend.models import envelope
+from backend.models import AiCompliancePosture, envelope
 from dbx_platform import ai_catalog, ai_monitor
 
 router = APIRouter(prefix="/api/ai-governance")
+
+def build_compliance_posture(
+    catalog_rows: list[dict],
+    access_rows: list[dict],
+) -> AiCompliancePosture:
+    """Validate the canonical package aggregation against the API schema."""
+
+    return AiCompliancePosture.model_validate(
+        ai_catalog.build_compliance_posture(catalog_rows, access_rows)
+    )
 
 
 @router.get("/catalog")
@@ -90,5 +100,39 @@ def monitor(days: int = 30, refresh: bool = False) -> dict:
 
     data, as_of, hit = cache.cached(
         f"ai-governance/monitor/{workspace_id}/{days}", load, refresh
+    )
+    return envelope(data, as_of, hit)
+
+
+@router.get("/compliance")
+def compliance(refresh: bool = False) -> dict:
+    """Read-only, evidence-backed AI compliance ratios and explicit ZDR gaps."""
+
+    workspace_id, environment = deps.control_plane_scope()
+
+    def load() -> dict:
+        settings = deps.get_settings()
+        catalog_rows = ai_catalog.read_catalog(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            settings.dashboard_catalog,
+            settings.dashboard_schema,
+            workspace_id,
+            environment,
+        )
+        access_rows = ai_catalog.read_access(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            settings.dashboard_catalog,
+            settings.dashboard_schema,
+            workspace_id,
+            environment,
+        )
+        return build_compliance_posture(catalog_rows, access_rows).model_dump(mode="json")
+
+    data, as_of, hit = cache.cached(
+        f"ai-governance/compliance/{workspace_id}/{environment}",
+        load,
+        refresh,
     )
     return envelope(data, as_of, hit)

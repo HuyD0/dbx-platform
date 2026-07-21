@@ -1,12 +1,45 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { FindingsSection } from "../components/FindingsSection";
-import { ProductSpendBreakdown } from "../components/ProductSpendBreakdown";
+import {
+  ProductSpendBreakdown,
+  type FoundrySourceState,
+} from "../components/ProductSpendBreakdown";
 import { Card, SectionTitle } from "../components/ui";
+import { apiGet } from "../lib/api";
+import type { Envelope, Row } from "../lib/types";
 
 const WINDOWS = [7, 30, 90];
 
 export function Cost() {
   const [days, setDays] = useState(30);
+  const foundry = useQuery({
+    queryKey: ["/api/cost/foundry-attribution", { days }],
+    queryFn: () =>
+      apiGet<Envelope<Row[]>>("/api/cost/foundry-attribution", { days }),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const sourceStatus = foundry.data?.source_status;
+  const foundrySource: FoundrySourceState = foundry.isPending
+    ? { status: "loading", rows: [] }
+    : foundry.isError
+      ? {
+          status: "error",
+          rows: [],
+          message: "Foundry actuals could not be loaded. Check Azure cost source health and retry.",
+        }
+      : sourceStatus && !["healthy", "available"].includes(sourceStatus.status.toLowerCase())
+        ? {
+            status: "unavailable",
+            rows: [],
+            message: sourceStatus.notes,
+          }
+        : {
+            status: "ready",
+            rows: foundry.data?.data ?? [],
+            message: sourceStatus?.notes,
+          };
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-1 text-xs">
@@ -63,7 +96,10 @@ export function Cost() {
         path="/api/cost/products"
         params={{ days }}
         emptyMessage="No billed usage in the window."
-        render={(rows) => <ProductSpendBreakdown rows={rows} days={days} />}
+        renderWhenEmpty
+        render={(rows) => (
+          <ProductSpendBreakdown rows={rows} days={days} foundrySource={foundrySource} />
+        )}
       />
       <FindingsSection
         title="Most expensive jobs"

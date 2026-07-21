@@ -8,6 +8,21 @@
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
+  /* Canonical mission-control palette. Keep these literal aliases available to
+     Tailwind (`bg-teal-accent`, `border-sand-border`, …) so charts and state
+     affordances never depend on an incidental semantic color mapping. */
+  --color-primary-red: #f00037;
+  --color-deep-maroon: #240b15;
+  --color-mid-red: #8b001f;
+  --color-light-background: #fbf7f8;
+  --color-pink-tint: #f9eaed;
+  --color-light-gold: #fff8e1;
+  --color-gold-accent: #ffcd67;
+  --color-teal-accent: #00aaad;
+  --color-green-accent: #72bf44;
+  --color-muted-rose-grey: #b79aa3;
+  --color-sand-border: #e4d7db;
+
   --color-page: #fbf7f8;
   --color-surface: #ffffff;
   --color-raised: #ffffff;

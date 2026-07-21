@@ -4,8 +4,17 @@ import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import type { DashboardInfo, Envelope, OverviewData } from "../lib/types";
 import { BarList } from "../components/BarList";
+import { GatewayTelemetry, LiveRatesIndicator } from "../components/GatewayTelemetry";
 import { aggregateProductSpend } from "../components/ProductSpendBreakdown";
-import { AsOf, Card, ErrorState, SectionTitle, Skeleton, StatTile } from "../components/ui";
+import {
+  AsOf,
+  Card,
+  ErrorState,
+  PageHeader,
+  SectionTitle,
+  Skeleton,
+  StatTile,
+} from "../components/ui";
 
 export function Overview() {
   const queryClient = useQueryClient();
@@ -44,8 +53,15 @@ export function Overview() {
   const spendTotal = productSpend.reduce((acc, product) => acc + product.current, 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Workspace pulse"
+        title="Command center"
+        description="Operational findings, spend, and AI Gateway rates in one modular workspace view."
+        actions={<LiveRatesIndicator />}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted">
           Findings from stored check runs; run any check fresh from its area page.
         </p>
@@ -57,37 +73,47 @@ export function Overview() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile
-          label="Open findings"
-          value={findings ? findings.total : "—"}
-          tone={findings && findings.total > 0 ? "warning" : "good"}
-          hint={findings?.run_ts ? `last run ${timeAgo(findings.run_ts)}` : "no stored run yet"}
-        />
-        <StatTile
-          label="Areas affected"
-          value={findings ? Object.keys(findings.by_area).length : "—"}
-        />
-        <StatTile
-          label={`Workspace spend (${spendRows.length ? "30d" : "n/a"})`}
-          value={
-            spendTotal
-              ? spendTotal.toLocaleString("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  maximumFractionDigits: 0,
-                })
-              : "—"
-          }
-        />
-        <StatTile
-          label="Latest AI digest"
-          value={d.digest.data?.latest_run_ts ? timeAgo(d.digest.data.latest_run_ts) : "none"}
-        />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
+        <div className="xl:col-span-4 [&>*]:h-full">
+          <StatTile
+            label="Open findings"
+            value={findings ? findings.total : "—"}
+            tone={findings && findings.total > 0 ? "warning" : "good"}
+            hint={findings?.run_ts ? `last run ${timeAgo(findings.run_ts)}` : "no stored run yet"}
+          />
+        </div>
+        <div className="xl:col-span-2 [&>*]:h-full">
+          <StatTile
+            label="Areas affected"
+            value={findings ? Object.keys(findings.by_area).length : "—"}
+          />
+        </div>
+        <div className="xl:col-span-3 [&>*]:h-full">
+          <StatTile
+            label={`Workspace spend (${spendRows.length ? "30d" : "n/a"})`}
+            value={
+              spendRows.length > 0
+                ? spendTotal.toLocaleString("en-US", {
+                    style: "currency",
+                    currency: "USD",
+                    maximumFractionDigits: 0,
+                  })
+                : "—"
+            }
+          />
+        </div>
+        <div className="xl:col-span-3 [&>*]:h-full">
+          <StatTile
+            label="Latest AI digest"
+            value={d.digest.data?.latest_run_ts ? timeAgo(d.digest.data.latest_run_ts) : "none"}
+          />
+        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+      <GatewayTelemetry days={30} />
+
+      <div className="grid gap-4 lg:grid-cols-12">
+        <Card className="lg:col-span-5">
           <SectionTitle
             title="Findings by area"
             subtitle="Latest stored run of the platform checks"
@@ -108,7 +134,7 @@ export function Overview() {
             <p className="text-xs text-muted">{d.findings.error?.message}</p>
           )}
         </Card>
-        <Card>
+        <Card className="lg:col-span-7">
           <SectionTitle title="Spend by product" subtitle="Workspace list cost, last 30 days" />
           {d.spend.data ? (
             <BarList

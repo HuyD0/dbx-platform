@@ -754,6 +754,137 @@ def report_detail(
     )
 
 
+def foundry_attribution_sql(catalog: str, schema: str) -> str:
+    """Current-scope Foundry actuals at resource and meter grain.
+
+    Currency is part of the grouping key. A caller can therefore aggregate
+    rows only inside an explicit currency partition; this query never converts
+    or silently combines Azure billing currencies.
+    """
+
+    detail_fq = f"{catalog}.{schema}.azure_cost_details"
+    coarse_fq = f"{catalog}.{schema}.azure_costs"
+    currency = "COALESCE(NULLIF(TRIM(c.currency), ''), 'UNRESOLVED')"
+    return (
+        "WITH current_scope AS ("
+        "SELECT subscription_id, scope_filter "
+        f"FROM {coarse_fq} WHERE workspace_id = :workspace_id "
+        "AND environment = :environment AND COALESCE(scope_filter, '') <> '' "
+        "ORDER BY ingested_at DESC LIMIT 1"
+        ") "
+        "SELECT c.resource_id, c.resource_group, c.resource_type, c.meter_name, "
+        f"{currency} AS currency, ROUND(SUM(c.cost), 4) AS cost, "
+        "MIN(c.usage_date) AS first_day, MAX(c.usage_date) AS last_day, "
+        "MAX(c.ingested_at) AS last_ingested_at, "
+        "'foundry_ai' AS service_bucket, 'AZURE_ACTUAL' AS cost_basis, "
+        "'azure_cost_details' AS cost_source "
+        f"FROM {detail_fq} c INNER JOIN current_scope s "
+        "ON c.subscription_id = s.subscription_id AND c.scope_filter = s.scope_filter "
+        "WHERE c.usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "AND c.workspace_id = :workspace_id AND c.environment = :environment "
+        "AND c.service_bucket = :bucket "
+        "AND LOWER(COALESCE(c.meter_name, '')) LIKE :token_meter "
+        "GROUP BY c.resource_id, c.resource_group, c.resource_type, c.meter_name, "
+        f"{currency} "
+        "ORDER BY currency, cost DESC, c.resource_id, c.meter_name"
+    )
+
+
+def foundry_attribution_status_sql(catalog: str, schema: str) -> str:
+    """Availability of persisted resource/meter detail for the current scope."""
+
+    detail_fq = f"{catalog}.{schema}.azure_cost_details"
+    coarse_fq = f"{catalog}.{schema}.azure_costs"
+    return (
+        "WITH current_scope AS ("
+        "SELECT subscription_id, scope_filter "
+        f"FROM {coarse_fq} WHERE workspace_id = :workspace_id "
+        "AND environment = :environment AND COALESCE(scope_filter, '') <> '' "
+        "ORDER BY ingested_at DESC LIMIT 1"
+        "), scoped_detail AS ("
+        "SELECT c.usage_date, c.ingested_at "
+        f"FROM {detail_fq} c INNER JOIN current_scope s "
+        "ON c.subscription_id = s.subscription_id AND c.scope_filter = s.scope_filter "
+        "WHERE c.workspace_id = :workspace_id AND c.environment = :environment"
+        ") "
+        "SELECT (SELECT COUNT(*) FROM current_scope) AS current_scope_count, "
+        "COUNT(*) AS detail_row_count, MIN(usage_date) AS coverage_start, "
+        "MAX(usage_date) AS coverage_end, MAX(ingested_at) AS last_ingested_at "
+        "FROM scoped_detail"
+    )
+
+
+def foundry_attribution(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    catalog: str,
+    schema: str,
+    days: int,
+    *,
+    workspace_id: str,
+    environment: str,
+) -> dict:
+    """Read persisted Foundry actuals and their source availability.
+
+    This function is deliberately read-only. It reports an empty healthy
+    window separately from an unavailable detail ingestion source.
+    """
+
+    params: dict[str, int | str] = {
+        "days": _inclusive_lookback(days),
+        "workspace_id": workspace_id,
+        "environment": environment,
+        "bucket": "foundry_ai",
+        "token_meter": "%token%",
+    }
+    rows = run_query(
+        w,
+        foundry_attribution_sql(catalog, schema),
+        warehouse_id,
+        params,
+        row_limit=100_000,
+    )
+    health_rows = run_query(
+        w,
+        foundry_attribution_status_sql(catalog, schema),
+        warehouse_id,
+        {"workspace_id": workspace_id, "environment": environment},
+        row_limit=1,
+    )
+    health = health_rows[0] if health_rows else {}
+    scope_count = int(health.get("current_scope_count") or 0)
+    detail_count = int(health.get("detail_row_count") or 0)
+    if scope_count < 1:
+        status = "unavailable"
+        notes = (
+            "No current Azure Cost Management scope has been persisted for this "
+            "workspace and environment."
+        )
+    elif detail_count < 1:
+        status = "unavailable"
+        notes = (
+            "The current Azure billing scope exists, but azure_cost_details has no "
+            "persisted resource/meter rows. Run the governed Azure cost pull."
+        )
+    else:
+        status = "healthy"
+        notes = (
+            "Persisted Azure resource/meter actuals are available. An empty result "
+            "means no Foundry token-meter billed cost was recorded in this window."
+        )
+    return {
+        "rows": rows,
+        "source_status": {
+            "status": status,
+            "source": "Azure Cost Management · azure_cost_details",
+            "notes": notes,
+            "coverage_start": health.get("coverage_start"),
+            "coverage_end": health.get("coverage_end"),
+            "last_success_at": health.get("last_ingested_at"),
+        },
+    }
+
+
 def daily_bucket_sql(catalog: str, schema: str) -> str:
     """Daily spend per service bucket over the :days window. Pure."""
     fq = f"{catalog}.{schema}.azure_costs"

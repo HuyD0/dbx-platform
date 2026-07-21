@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { axe, toHaveNoViolations } from "jest-axe";
 import { expect, test, vi } from "vitest";
 import type {
+  EstimateLineItem,
   EstimateMatrix,
   EstimateTier,
   EstimatorPattern,
@@ -51,6 +52,30 @@ function tierFixture(overrides: Partial<EstimateTier> = {}): EstimateTier {
     rigor_locked_reason: "",
     default_rigor_pct: 10,
     scenarios: { azure: estimateFixture(), databricks: estimateFixture({ scenario: "databricks" }) },
+    ...overrides,
+  };
+}
+
+function lineItemFixture(overrides: Partial<EstimateLineItem> = {}): EstimateLineItem {
+  return {
+    component: "serving_compute",
+    env: "prod",
+    tier: "production",
+    scenario: "databricks",
+    label: "Serving capacity (answers on demand)",
+    quantity: 2_000,
+    unit: "DBUs",
+    unit_price: 0.05,
+    currency: "USD",
+    price_source: "test",
+    meter_name: "test meter",
+    snapshot_date: "2026-07-14",
+    provenance: "test fixture",
+    monthly_cost: 100,
+    formula: "2,000 DBUs × $0.05",
+    assumptions: [],
+    is_eval_tax: false,
+    eval_group: null,
     ...overrides,
   };
 }
@@ -111,17 +136,65 @@ test("locked tiers pin the slider and explain why", () => {
 
 // --- TcoMatrix ----------------------------------------------------------------
 
-test("TCO matrix shows run/checking split per environment and flags missing prices", async () => {
+test("TCO matrix progressively reveals compute and per-session token comparisons", async () => {
+  const databricks = estimateFixture({
+    scenario: "databricks",
+    line_items: [
+      lineItemFixture(),
+      lineItemFixture({
+        component: "model_tokens",
+        label: "Answering requests (AI model, reading)",
+        quantity: 2,
+        unit: "million text units",
+        monthly_cost: 4,
+      }),
+      lineItemFixture({
+        component: "model_tokens",
+        label: "Answering requests (AI model, writing)",
+        quantity: 0.5,
+        unit: "million text units",
+        monthly_cost: 2,
+      }),
+    ],
+  });
+  const azure = estimateFixture({
+    scenario: "azure",
+    missing_prices: ["state_store/prod: Remembering users"],
+    line_items: [
+      lineItemFixture({
+        scenario: "azure",
+        label: "Hosting machines (Kubernetes workers)",
+        quantity: 2_000,
+        unit: "machine-hours",
+      }),
+      lineItemFixture({
+        component: "model_tokens",
+        scenario: "azure",
+        label: "Answering requests (AI model, reading)",
+        quantity: 2,
+        unit: "million text units",
+        monthly_cost: 4,
+      }),
+      lineItemFixture({
+        component: "model_tokens",
+        scenario: "azure",
+        label: "Answering requests (AI model, writing)",
+        quantity: 0.5,
+        unit: "million text units",
+        monthly_cost: 2,
+      }),
+    ],
+  });
   const matrix: EstimateMatrix = {
     engine_version: "1",
     rate_card_version: "2026.07.1",
     snapshot_date: "2026-07-14",
-    requirements: {},
+    requirements: { monthly_requests: 1_000 },
     rigor_pct: 10,
     requirements_hash: "x".repeat(64),
     blueprint: [],
     tiers: {
-      production: tierFixture(),
+      production: tierFixture({ scenarios: { databricks, azure } }),
       fiduciary: tierFixture({
         label: "Fiduciary-grade compliance",
         rigor_locked: true,
@@ -136,6 +209,7 @@ test("TCO matrix shows run/checking split per environment and flags missing pric
       }),
     },
   };
+  const user = userEvent.setup();
   const { container } = render(
     <TcoMatrix
       matrix={matrix}
@@ -145,11 +219,26 @@ test("TCO matrix shows run/checking split per environment and flags missing pric
       onSelectTier={() => {}}
     />,
   );
+
+  expect(screen.getByTestId("tco-summary-row")).toHaveTextContent("2,000 h");
+  expect(screen.queryByTestId("tco-matrix")).not.toBeInTheDocument();
+  const toggle = screen.getByRole("button", { name: "Expand detailed comparison" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+  await user.click(toggle);
+  expect(screen.getByRole("button", { name: "Hide detailed comparison" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   const table = screen.getByTestId("tco-matrix");
-  const productionRow = within(table).getByRole("row", { name: /Production standard/ });
-  expect(productionRow).toHaveTextContent("run $100");
-  expect(productionRow).toHaveTextContent("checking $50.00");
-  expect(within(table).getByText(/1 price\(s\) unavailable/)).toBeInTheDocument();
+  expect(within(table).getByRole("columnheader", { name: /Databricks Serverless/ })).toBeVisible();
+  expect(within(table).getByRole("columnheader", { name: /Azure Warehouse Compute/ })).toBeVisible();
+  expect(within(table).getByRole("row", { name: /Serving compute allocation/ })).toHaveTextContent(
+    "2,000 DBUs",
+  );
+  expect(within(table).getByRole("row", { name: /LLM input tokens/ })).toHaveTextContent("2,000");
+  expect(within(table).getByRole("row", { name: /LLM output tokens/ })).toHaveTextContent("500");
+  expect(screen.getByText(/1 price\(s\) unavailable/)).toBeInTheDocument();
   expect(await axe(container)).toHaveNoViolations();
 });
 

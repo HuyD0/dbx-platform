@@ -70,13 +70,46 @@ test("job plan explains the decision and requires a separate confirmation click"
   expect(
     screen.getByText("This starts one new run now. It does not change the job or its schedule."),
   ).toBeInTheDocument();
+  expect(screen.getByText("Human approval required")).toHaveClass(
+    "border-[#F00037]",
+    "text-[#8B001F]",
+  );
+  expect(
+    screen.getByRole("list", { name: "Approval and deployment pipeline" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("IaC diff preview")).toBeInTheDocument();
+  expect(screen.getByLabelText("Syntax-highlighted immutable plan diff")).toHaveTextContent(
+    new RegExp(`plan_sha256.*${plan.plan_hash}`),
+  );
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole("button", { name: "Approve and run once" }));
+  let approvalTrigger = screen.getByRole("button", { name: "Approve and run once" });
+  await user.click(approvalTrigger);
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole("alertdialog", { name: "Confirm approval" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Confirm and run once" }));
+  const confirmation = screen.getByRole("alertdialog", { name: "Confirm risk acceptance" });
+  expect(confirmation).toHaveAttribute("aria-labelledby");
+  let execute = screen.getByRole("button", { name: "Accept Risk & Execute" });
+  expect(execute).toHaveFocus();
+  expect(execute).toHaveClass("bg-[#F00037]", "text-xl", "font-bold");
+
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  approvalTrigger = screen.getByRole("button", { name: "Approve and run once" });
+  expect(approvalTrigger).toHaveFocus();
+  expect(
+    screen.queryByRole("alertdialog", { name: "Confirm risk acceptance" }),
+  ).not.toBeInTheDocument();
+
+  await user.click(approvalTrigger);
+  expect(screen.getByRole("button", { name: "Accept Risk & Execute" })).toHaveFocus();
+  await user.keyboard("{Escape}");
+  approvalTrigger = screen.getByRole("button", { name: "Approve and run once" });
+  expect(approvalTrigger).toHaveFocus();
+
+  await user.click(approvalTrigger);
+  execute = screen.getByRole("button", { name: "Accept Risk & Execute" });
+  await user.click(execute);
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Done" })).toHaveFocus());
   const approvalBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(approvalBody).toEqual({ plan_hash: plan.plan_hash });
 });

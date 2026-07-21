@@ -50,6 +50,17 @@ export interface OverviewData {
   digest: OverviewSection<{ latest_run_ts: string | null }>;
 }
 
+export interface GatewayTelemetryRow {
+  usage_date: string;
+  endpoint_name?: string | null;
+  app?: string | null;
+  requests?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  p95_latency_ms?: number | null;
+  source?: string | null;
+}
+
 export interface PlanResponse {
   plan_id: string;
   action: string;
@@ -109,11 +120,62 @@ export interface AssistantCitation {
   finding_id?: string;
 }
 
+export type AgentExecutionCategory =
+  | "foundry_agent"
+  | "databricks_retrieval"
+  | "llm_synthesis";
+
+export interface AgentExecutionStage {
+  id: string;
+  label: string;
+  category: AgentExecutionCategory;
+  start_ms: number;
+  duration_ms: number | null;
+  detail?: string;
+}
+
+/** Optional server-observed assistant timing. Nulls and the unavailable source
+ * are intentionally first-class so the console never fabricates latency. */
+export interface AgentExecutionTrace {
+  total_ms: number | null;
+  ttft_ms: number | null;
+  tpot_ms: number | null;
+  timing_source: "server" | "unavailable";
+  stages: AgentExecutionStage[];
+}
+
+export interface ComplianceMetric {
+  id: "zdr" | "content_safety" | "access_control" | "audit_logging" | "rate_limit_headroom";
+  label: string;
+  value_pct: number | null;
+  compliant_resources: number;
+  evaluated_resources: number;
+  total_resources: number;
+  evidence_note: string;
+}
+
+export interface ZdrAlert {
+  resource_id: string;
+  resource_name: string;
+  scope: string;
+  provider: string;
+  status: "disabled";
+  remediation: string;
+}
+
+export interface AiCompliancePosture {
+  metrics: ComplianceMetric[];
+  zdr_alerts: ZdrAlert[];
+  unverified_zdr_resources: number;
+  evaluated_resources: number;
+}
+
 export interface ChatResponse {
   message: string;
   proposals: Proposal[];
   citations?: AssistantCitation[];
   endpoint: string;
+  execution_trace?: AgentExecutionTrace;
 }
 
 export interface DashboardInfo {

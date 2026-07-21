@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { apiPost } from "./api";
-import type { AssistantCitation, ChatResponse, Proposal } from "./types";
+import type { AgentExecutionTrace, AssistantCitation, ChatResponse, Proposal } from "./types";
 
 export interface ChatFocus {
   actionId: string;
@@ -15,6 +15,7 @@ export interface Turn {
   proposals?: Proposal[];
   citations?: AssistantCitation[];
   focusActionId?: string;
+  executionTrace?: AgentExecutionTrace;
 }
 
 interface ChatState {
@@ -46,11 +47,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       requestFocus: ChatFocus | null;
     }) => {
       const search = new URLSearchParams(location.search);
-      const filters = Object.fromEntries(
-        Array.from(search.entries()).slice(0, 30),
-      );
+      const filters = Object.fromEntries(Array.from(search.entries()).slice(0, 30));
       return apiPost<ChatResponse>("/api/chat", {
-        messages: history.map(({ role, content }) => ({ role, content })),
+        // Match the backend's bounded memory contract: the visible transcript
+        // can remain longer, but only the newest 50 turns enter model context.
+        messages: history.slice(-50).map(({ role, content }) => ({ role, content })),
         context: {
           route: location.pathname,
           query: location.search,
@@ -69,6 +70,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           proposals: resp.proposals,
           citations: resp.citations ?? [],
           focusActionId: variables.requestFocus?.actionId,
+          executionTrace: resp.execution_trace,
         },
       ]),
   });

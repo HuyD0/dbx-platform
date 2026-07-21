@@ -49,12 +49,22 @@ SOURCES = ("databricks_uc", "databricks_serving", "azure_openai")
 # Which findings key is evidenced by which source. The sync command drops the
 # keys of sources that failed to refresh so store_findings cannot resolve
 # findings on stale evidence.
-CHECK_SOURCES = {
-    "ai-catalog/azure-key-auth": "azure_openai",
-    "ai-catalog/azure-broad-scope-role": "azure_openai",
-    "ai-catalog/uc-model-broad-grant": "databricks_uc",
-    "ai-catalog/endpoint-open-acl": "databricks_serving",
+CHECK_SOURCES: dict[str, tuple[str, ...]] = {
+    "ai-catalog/azure-key-auth": ("azure_openai",),
+    "ai-catalog/azure-broad-scope-role": ("azure_openai",),
+    "ai-catalog/uc-model-broad-grant": ("databricks_uc",),
+    "ai-catalog/endpoint-open-acl": ("databricks_serving",),
+    # One canonical check spans the two endpoint/workspace inventories.  It
+    # is only reconciled when both sources refreshed, so an outage in either
+    # source can never resolve a previously observed ZDR failure.
+    "ai-catalog/zdr-disabled": ("databricks_serving", "azure_openai"),
 }
+
+
+def check_sources_refreshed(check: str, refreshed: list[str]) -> bool:
+    """Whether every source required to reconcile ``check`` refreshed."""
+
+    return all(source in refreshed for source in CHECK_SOURCES[check])
 
 # Columns of the two tables; the normalizers emit dicts with exactly these
 # keys (workspace/environment/timestamps are bound at store time).
@@ -429,6 +439,9 @@ def normalize_azure_deployments(
                         "deployment": d.get("name") or "",
                         "sku": d.get("skuName") or "",
                         "capacity": d.get("skuCapacity"),
+                        # Governance attestations are account-scoped tags and
+                        # must follow each deployment into the catalog snapshot.
+                        "account_tags": account.get("tags") or {},
                     }
                 ),
             }
@@ -504,6 +517,14 @@ def normalize_serving_entities(endpoints: list[dict]) -> list[dict]:
                             "task": e.get("task") or "",
                             "workload_size": se.get("workload_size") or "",
                             "scale_to_zero": bool(se.get("scale_to_zero")),
+                            "has_rate_limits": bool(e.get("has_rate_limits")),
+                            "content_safety_enabled": e.get(
+                                "content_safety_enabled"
+                            ),
+                            # Preserve explicit endpoint governance tags.  In
+                            # particular, ZDR is never guessed from provider or
+                            # workload type: a missing tag remains unverified.
+                            "tags": e.get("tags") or {},
                         }
                     ),
                 }
@@ -660,6 +681,279 @@ def normalize_endpoint_acls(acls: list[dict]) -> list[dict]:
     return rows
 
 
+# --- compliance posture (pure) -------------------------------------------------
+
+_AI_COMPLIANCE_TYPES = {
+    "ACCOUNT",
+    "DEPLOYMENT",
+    "CUSTOM_MODEL",
+    "EXTERNAL_OR_FOUNDATION_MODEL",
+}
+_COMPLIANCE_BROAD_PRINCIPALS = {
+    "account users",
+    "all account users",
+    "all users",
+    "users",
+}
+_COMPLIANCE_BROAD_LEVELS = {"ADMIN", "INVOKE", "CAN_MANAGE", "CAN_QUERY"}
+_ZDR_KEYS = (
+    "zdr",
+    "zdr_enabled",
+    "zero_data_retention",
+    "zero_data_retention_enabled",
+)
+
+
+def _bool_attestation(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on", "enabled", "enforced", "zdr"}:
+            return True
+        if normalized in {"false", "0", "no", "off", "disabled", "not_enforced"}:
+            return False
+    return None
+
+
+def _parsed_details(row: dict) -> dict:
+    value = row.get("details_json")
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _attestation_lookup(row: dict, *keys: str) -> object | None:
+    """Read normalized fields and explicitly persisted governance metadata."""
+
+    detail = _parsed_details(row)
+    sources = [row, detail]
+    for nested_key in ("tags", "account_tags", "governance"):
+        nested = detail.get(nested_key)
+        if isinstance(nested, dict):
+            sources.append(nested)
+    lowered_keys = {key.lower() for key in keys}
+    for source in sources:
+        for key, value in source.items():
+            if str(key).lower() in lowered_keys and value not in (None, ""):
+                return value
+    return None
+
+
+def _is_current(row: dict) -> bool:
+    value = row.get("is_current", True)
+    parsed = _bool_attestation(value)
+    return True if parsed is None else parsed
+
+
+def zdr_attestation(row: dict) -> bool | None:
+    """Return only explicit ZDR evidence; missing evidence remains ``None``."""
+
+    return _bool_attestation(_attestation_lookup(row, *_ZDR_KEYS))
+
+
+def _compliance_resources(catalog_rows: list[dict]) -> list[dict]:
+    """Current endpoint/workspace resources, de-duplicated at control scope."""
+
+    resources: dict[str, dict] = {}
+    for row in catalog_rows:
+        if not _is_current(row):
+            continue
+        if str(row.get("entity_type") or "") not in _AI_COMPLIANCE_TYPES:
+            continue
+        if row.get("source") == "databricks_serving":
+            endpoint = str(row.get("endpoint_name") or row.get("resource_id") or "unknown")
+            key = f"databricks_serving:{endpoint}"
+        else:
+            key = f"{row.get('source')}:{row.get('model_key') or row.get('resource_id')}"
+        resources.setdefault(key, row)
+    return list(resources.values())
+
+
+def _compliance_metric(
+    metric_id: str,
+    label: str,
+    results: list[bool],
+    total: int,
+    evidence_note: str,
+    *,
+    score: float | None = None,
+) -> dict:
+    compliant = sum(1 for result in results if result)
+    value = score
+    if value is None and results:
+        value = round(compliant / len(results) * 100, 1)
+    return {
+        "id": metric_id,
+        "label": label,
+        "value_pct": value,
+        "compliant_resources": compliant,
+        "evaluated_resources": len(results),
+        "total_resources": total,
+        "evidence_note": evidence_note,
+    }
+
+
+def build_compliance_posture(catalog_rows: list[dict], access_rows: list[dict]) -> dict:
+    """Aggregate conservative cross-provider AI control posture.
+
+    This package function is shared by the scheduled catalog classifier, API,
+    digest, and assistant evidence path.  A missing attestation is reported as
+    unknown and never silently contributes to a passing score.
+    """
+
+    resources = _compliance_resources(catalog_rows)
+    current_access = [row for row in access_rows if _is_current(row)]
+    total = len(resources)
+    zdr_results: list[bool] = []
+    content_safety_results: list[bool] = []
+    access_results: list[bool] = []
+    audit_results: list[bool] = []
+    rate_headroom: list[float] = []
+    alerts: list[dict] = []
+
+    for row in resources:
+        zdr = zdr_attestation(row)
+        if zdr is not None:
+            zdr_results.append(zdr)
+            if not zdr:
+                scope = "workspace" if row.get("entity_type") == "ACCOUNT" else "endpoint"
+                resource_id = str(row.get("resource_id") or row.get("model_key") or "unknown")
+                resource_name = str(
+                    row.get("endpoint_name")
+                    or row.get("model_name")
+                    or resource_id.rsplit("/", 1)[-1]
+                )
+                alerts.append(
+                    {
+                        "resource_id": resource_id,
+                        "resource_name": resource_name,
+                        "scope": scope,
+                        "provider": str(row.get("provider") or row.get("source") or "unknown"),
+                        "status": "disabled",
+                        "remediation": (
+                            "Move traffic to an attested ZDR deployment, submit the provider "
+                            "ZDR enablement request, and rerun the catalog sync before an "
+                            "approved rollout."
+                        ),
+                    }
+                )
+
+        content_safety = _bool_attestation(
+            _attestation_lookup(
+                row,
+                "content_safety",
+                "content_safety_enabled",
+                "rai_policy_enabled",
+            )
+        )
+        if content_safety is None:
+            policy_name = _attestation_lookup(
+                row, "rai_policy_name", "content_filter_policy"
+            )
+            if policy_name not in (None, ""):
+                content_safety = True
+        if content_safety is not None:
+            content_safety_results.append(content_safety)
+
+        model_key = str(row.get("model_key") or "")
+        related_access = [
+            access
+            for access in current_access
+            if model_key == str(access.get("model_key") or "")
+            or model_key.startswith(f"{access.get('model_key')}/")
+        ]
+        broad_access = any(
+            str(access.get("principal_name") or access.get("principal_id") or "")
+            .strip()
+            .lower()
+            in _COMPLIANCE_BROAD_PRINCIPALS
+            and str(access.get("access_level") or "").upper()
+            in _COMPLIANCE_BROAD_LEVELS
+            for access in related_access
+        )
+        key_auth = _bool_attestation(row.get("key_auth_enabled"))
+        if key_auth is not None or related_access:
+            access_results.append(not bool(key_auth) and not broad_access)
+
+        audit_logging = _bool_attestation(
+            _attestation_lookup(row, "audit_logging", "audit_logging_enabled")
+        )
+        if audit_logging is None and row.get("source") == "databricks_serving":
+            audit_logging = _bool_attestation(row.get("usage_tracking"))
+        if audit_logging is not None:
+            audit_results.append(audit_logging)
+
+        headroom_value = _attestation_lookup(
+            row,
+            "rate_limit_headroom_pct",
+            "rate_limit_headroom_percent",
+            "rate_limit_headroom",
+        )
+        try:
+            numeric_headroom = float(headroom_value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            numeric_headroom = None
+        if numeric_headroom is not None:
+            rate_headroom.append(max(0.0, min(100.0, numeric_headroom)))
+
+    rate_score = (
+        round(sum(rate_headroom) / len(rate_headroom), 1) if rate_headroom else None
+    )
+    rate_results = [value >= 20 for value in rate_headroom]
+    return {
+        "metrics": [
+            _compliance_metric(
+                "zdr",
+                "ZDR Enforced Ratio",
+                zdr_results,
+                total,
+                "Explicit ZDR resource attestations; missing evidence stays unverified.",
+            ),
+            _compliance_metric(
+                "content_safety",
+                "Content Safety Mitigation",
+                content_safety_results,
+                total,
+                "Explicit content-filter or RAI policy attestations.",
+            ),
+            _compliance_metric(
+                "access_control",
+                "Access Control Consistency",
+                access_results,
+                total,
+                "Keyless access and absence of broad invoke/admin grants.",
+            ),
+            _compliance_metric(
+                "audit_logging",
+                "Audit Logging",
+                audit_results,
+                total,
+                "Usage tracking or explicit audit-log enablement.",
+            ),
+            _compliance_metric(
+                "rate_limit_headroom",
+                "Rate Limit Headroom",
+                rate_results,
+                total,
+                "Average attested capacity remaining; 20% is the healthy floor.",
+                score=rate_score,
+            ),
+        ],
+        "zdr_alerts": alerts,
+        "unverified_zdr_resources": max(0, total - len(zdr_results)),
+        "evaluated_resources": total,
+    }
+
+
 # --- findings (pure) ------------------------------------------------------------
 
 _BROAD_GROUPS = {"account users", "users", "all users", "all account users"}
@@ -703,6 +997,30 @@ def classify_ai_catalog(
                     "severity": "HIGH",
                 }
             )
+
+    for row in _compliance_resources(catalog_rows):
+        if zdr_attestation(row) is not False:
+            continue
+        resource_id = str(row.get("resource_id") or row.get("model_key") or "unknown")
+        resource_name = str(
+            row.get("endpoint_name")
+            or row.get("model_name")
+            or resource_id.rsplit("/", 1)[-1]
+        )
+        scope = "workspace" if row.get("entity_type") == "ACCOUNT" else "endpoint"
+        findings["ai-catalog/zdr-disabled"].append(
+            {
+                "name": resource_name,
+                "resource_id": resource_id,
+                "resource_type": "AI_WORKSPACE" if scope == "workspace" else "AI_ENDPOINT",
+                "reason": (
+                    f"Zero Data Retention is explicitly disabled for this {scope}; "
+                    "request content may be retained by the serving provider"
+                ),
+                "action": "enable-zdr (manual)",
+                "severity": "CRITICAL",
+            }
+        )
 
     seen_assignments: set[str] = set()
     for row in access_rows:

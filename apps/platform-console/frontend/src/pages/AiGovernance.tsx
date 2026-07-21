@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ZdrEnforcer } from "../components/CompliancePosture";
 import { FindingsSection } from "../components/FindingsSection";
-import { PageHeader, Tabs } from "../components/ui";
+import { Card, PageHeader, SectionTitle, Tabs } from "../components/ui";
 import { AiMl } from "./AiMl";
 
 const AI_TABS = [
@@ -15,6 +16,13 @@ const WINDOWS = [7, 30, 90];
 function InventoryAccess() {
   return (
     <div className="space-y-4">
+      <Card>
+        <SectionTitle
+          title="Zero Data Retention enforcer"
+          subtitle="Fails closed on explicit ZDR gaps and keeps missing attestations visible"
+        />
+        <ZdrEnforcer />
+      </Card>
       <FindingsSection
         title="Model inventory"
         subtitle="Unity Catalog models, serving endpoints and Azure OpenAI/Foundry deployments in one register, with key-auth exposure flags"

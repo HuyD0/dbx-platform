@@ -1570,13 +1570,28 @@ def cmd_ai_catalog_sync(args) -> int:
     try:
         endpoints = ml.fetch_serving_endpoints(w)
         acls, acl_errors = ai_catalog.fetch_endpoint_acls(w, endpoints)
-        catalog_rows.extend(ai_catalog.normalize_serving_entities(endpoints))
+        serving_catalog_rows = ai_catalog.normalize_serving_entities(endpoints)
+        catalog_rows.extend(serving_catalog_rows)
         access_rows.extend(ai_catalog.normalize_endpoint_acls(acls))
         refreshed.append("databricks_serving")
         serving_status = "partial" if acl_errors else "available"
         serving_note = "Serving endpoints, served entities and workspace ACLs"
         if acl_errors:
             serving_note += f"; {acl_errors} endpoints had unreadable ACLs"
+        customer_endpoints = {
+            str(row.get("endpoint_name") or "") for row in serving_catalog_rows
+        }
+        zdr_attested_endpoints = {
+            str(row.get("endpoint_name") or "")
+            for row in serving_catalog_rows
+            if ai_catalog.zdr_attestation(row) is not None
+        }
+        if len(zdr_attested_endpoints) < len(customer_endpoints):
+            serving_status = "partial"
+        serving_note += (
+            f"; explicit ZDR endpoint tags cover {len(zdr_attested_endpoints)}/"
+            f"{len(customer_endpoints)} endpoints (missing tags are unverified)"
+        )
         serving_rows = len(endpoints)
     except Exception as error:  # noqa: BLE001 - one surface never kills the sync
         serving_status, serving_rows = "unavailable", 0
@@ -1591,7 +1606,12 @@ def cmd_ai_catalog_sync(args) -> int:
             freshness="on sync",
             retention_days=None,
             row_count=serving_rows,
-            available_metrics=["served_entities", "acls"],
+            available_metrics=[
+                "served_entities",
+                "acls",
+                "zdr_attestation_tags",
+                "content_safety_guardrails",
+            ],
             notes=serving_note,
         )
     )
@@ -1629,7 +1649,8 @@ def cmd_ai_catalog_sync(args) -> int:
             authorization_scoped=True,
         )
         accounts_by_id = {str(a.get("id") or "").lower(): a for a in accounts}
-        catalog_rows.extend(ai_catalog.normalize_azure_accounts(accounts))
+        azure_account_rows = ai_catalog.normalize_azure_accounts(accounts)
+        catalog_rows.extend(azure_account_rows)
         catalog_rows.extend(
             ai_catalog.normalize_azure_deployments(deployments, accounts_by_id)
         )
@@ -1637,6 +1658,15 @@ def cmd_ai_catalog_sync(args) -> int:
             ai_catalog.match_assignments_to_accounts(assignments, accounts)
         )
         refreshed.append("azure_openai")
+        azure_zdr_attested = sum(
+            ai_catalog.zdr_attestation(row) is not None for row in azure_account_rows
+        )
+        if azure_zdr_attested < len(azure_account_rows):
+            azure_status = "partial"
+        azure_note += (
+            f"; explicit ZDR account tags cover {azure_zdr_attested}/"
+            f"{len(azure_account_rows)} accounts (missing tags are unverified)"
+        )
         azure_rows = len(accounts) + len(deployments)
     except Exception as error:  # noqa: BLE001 - Azure integration is optional
         azure_status, azure_rows = "unavailable", 0
@@ -1653,7 +1683,12 @@ def cmd_ai_catalog_sync(args) -> int:
             freshness="on sync",
             retention_days=None,
             row_count=azure_rows,
-            available_metrics=["accounts", "deployments", "role_assignments"],
+            available_metrics=[
+                "accounts",
+                "deployments",
+                "role_assignments",
+                "zdr_attestation_tags",
+            ],
             notes=azure_note,
         )
     )
@@ -1661,7 +1696,7 @@ def cmd_ai_catalog_sync(args) -> int:
     findings = {
         key: rows
         for key, rows in ai_catalog.classify_ai_catalog(catalog_rows, access_rows).items()
-        if ai_catalog.CHECK_SOURCES[key] in refreshed
+        if ai_catalog.check_sources_refreshed(key, refreshed)
     }
     counts = [{"check": k, "findings": len(v)} for k, v in sorted(findings.items())]
 

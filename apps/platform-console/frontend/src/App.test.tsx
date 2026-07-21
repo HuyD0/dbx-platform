@@ -309,6 +309,7 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
 
   const nav = screen.getByRole("navigation", { name: "Primary" });
   for (const label of [
+    "Command Center",
     "Cost",
     "Data Governance",
     "AI Governance",
@@ -319,6 +320,139 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
     expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
   expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
+});
+
+test("Command Center is a real route while Mission Control remains the root safety surface", async () => {
+  const user = userEvent.setup();
+  const now = new Date();
+  const observedAt = now.toISOString();
+  const usageDate = observedAt.slice(0, 10);
+  const mission = {
+    data: {
+      scope: {
+        workspace: "workspace-1",
+        workspace_name: "Production analytics",
+        environment: "production",
+      },
+      outcomes: {
+        cost: { open_findings: 0, value: 0, status: "unknown" },
+        security: { open_findings: 0, value: 0, status: "unknown" },
+        risk: { open_findings: 0, value: 0, status: "unknown" },
+        performance: { open_findings: 0, value: 0, status: "unknown" },
+      },
+      pending_approvals: 0,
+      decision_queue: {
+        evaluated_at: observedAt,
+        ranking: "risk-expiry-created-v1",
+        active_count: 0,
+        expiring_soon_count: 0,
+        expired_count: 0,
+        items: [],
+      },
+      decisions: [],
+      changes: [],
+      data_health: [],
+      findings: {
+        data: {
+          run_ts: observedAt,
+          total: 0,
+          by_area: {},
+          by_action: {},
+        },
+      },
+    },
+    count: null,
+    as_of: observedAt,
+    cached: false,
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/health")) {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          version: "test",
+          environment: "production",
+          actions_enabled: false,
+          workspace_id: "workspace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/overview")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            findings: {
+              data: { run_ts: observedAt, total: 0, by_area: {}, by_action: {} },
+            },
+            spend: { data: [] },
+            digest: { data: { latest_run_ts: null } },
+          },
+          count: null,
+          as_of: observedAt,
+          cached: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/dashboards")) {
+      return new Response(
+        JSON.stringify({ data: [], count: 0, as_of: observedAt, cached: false }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/performance/ai-gateway-telemetry")) {
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              usage_date: usageDate,
+              input_tokens: 100,
+              output_tokens: 25,
+              p95_latency_ms: 320,
+              source: "system.ai_gateway.usage",
+            },
+          ],
+          count: 1,
+          as_of: observedAt,
+          cached: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/mission-control")) {
+      return new Response(JSON.stringify(mission), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({ error: "not_found", message: `No test response for ${url}` }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/overview");
+
+  expect(await screen.findByRole("heading", { name: "Command center" })).toBeInTheDocument();
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  const commandCenter = within(nav).getByRole("link", { name: "Command Center" });
+  const missionControl = within(nav).getByRole("link", { name: "Mission Control" });
+  expect(commandCenter).toHaveAttribute("aria-current", "page");
+  expect(missionControl).not.toHaveAttribute("aria-current");
+  expect(document.title).toBe("Command Center · dbx-platform");
+  expect(
+    fetchMock.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/performance/ai-gateway-telemetry"),
+    ),
+  ).toHaveLength(1);
+
+  await user.click(missionControl);
+  expect(await screen.findByRole("heading", { name: "Operational posture" })).toBeInTheDocument();
+  expect(missionControl).toHaveAttribute("aria-current", "page");
+  expect(commandCenter).not.toHaveAttribute("aria-current");
+  expect(document.title).toBe("Mission Control · dbx-platform");
 });
 
 test("legacy governance and security URLs land on the split governance pages", async () => {

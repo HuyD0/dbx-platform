@@ -1,5 +1,6 @@
 import { KeyRound, Network, ScanSearch, ShieldCheck, UserRoundCog } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ComplianceRadarCard } from "../components/CompliancePosture";
 import { FindingsSection } from "../components/FindingsSection";
 import { Card, PageHeader, Tabs } from "../components/ui";
 import { Security } from "./Security";
@@ -105,6 +106,7 @@ export function SecurityRisk() {
                 </Card>
               </Link>
             ))}
+            <ComplianceRadarCard />
             <Card className="md:col-span-2">
               <div className="flex items-start gap-3">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-good" />

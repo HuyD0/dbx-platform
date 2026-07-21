@@ -9,7 +9,9 @@ from dbx_platform.ai_catalog import (
     AI_DEPLOYMENTS_QUERY,
     AI_ROLE_ASSIGNMENTS_QUERY,
     azure_access_level,
+    build_compliance_posture,
     build_resource_graph_body,
+    check_sources_refreshed,
     classify_ai_catalog,
     deployment_account_id,
     match_assignments_to_accounts,
@@ -114,6 +116,7 @@ def test_deployment_inherits_account_key_auth_and_region():
     assert row["region"] == "eastus2"
     assert row["endpoint_name"] == "foundry-prod"
     assert row["key_auth_enabled"] is True  # inherited: local auth NOT disabled
+    assert json.loads(row["details_json"])["account_tags"] == {"team": "ml"}
 
 
 def test_account_key_auth_flag_inverts_disable_local_auth():
@@ -228,6 +231,9 @@ def test_serving_entities_skip_system_endpoints():
             "ready": "READY",
             "task": "llm/v1/chat",
             "has_usage_tracking": True,
+            "has_rate_limits": True,
+            "content_safety_enabled": True,
+            "tags": {"zdr_enabled": "false"},
             "served_entities": [
                 {"entity_name": "prod.ml.churn", "entity_version": "3",
                  "is_external_or_fm": False, "workload_size": "Small",
@@ -240,6 +246,47 @@ def test_serving_entities_skip_system_endpoints():
     assert row["entity_type"] == "CUSTOM_MODEL"
     assert row["model_version"] == "3"
     assert row["usage_tracking"] is True
+    details = json.loads(row["details_json"])
+    assert details["has_rate_limits"] is True
+    assert details["content_safety_enabled"] is True
+    assert details["tags"] == {"zdr_enabled": "false"}
+
+
+def test_zdr_posture_and_finding_use_normalized_endpoint_tags():
+    rows = normalize_serving_entities(
+        [
+            {
+                "name": "assistant-api",
+                "is_system_endpoint": False,
+                "creator": "ml@example.com",
+                "ready": "READY",
+                "has_usage_tracking": True,
+                "has_rate_limits": True,
+                "content_safety_enabled": True,
+                "tags": {"zdr_enabled": "false"},
+                "served_entities": [
+                    {
+                        "entity_name": "prod.ml.assistant",
+                        "entity_version": "1",
+                        "is_external_or_fm": False,
+                    }
+                ],
+            }
+        ]
+    )
+
+    posture = build_compliance_posture(rows, [])
+    assert posture["metrics"][0]["value_pct"] == 0
+    assert posture["zdr_alerts"][0]["resource_name"] == "assistant-api"
+    findings = classify_ai_catalog(rows, [])
+    assert findings["ai-catalog/zdr-disabled"][0]["severity"] == "CRITICAL"
+
+
+def test_cross_source_zdr_check_reconciles_only_after_both_sources_refresh():
+    assert not check_sources_refreshed("ai-catalog/zdr-disabled", ["azure_openai"])
+    assert check_sources_refreshed(
+        "ai-catalog/zdr-disabled", ["azure_openai", "databricks_serving"]
+    )
 
 
 # --- findings ---------------------------------------------------------------------

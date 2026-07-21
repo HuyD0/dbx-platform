@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from functools import cached_property
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import tool
 
 from backend.agent_runtime import DatabricksChatModel, configure_mlflow_tracing
@@ -36,6 +38,106 @@ def _text_content(message: Any) -> str:
     return str(content or "").strip()
 
 
+class _ExecutionTimingHandler(BaseCallbackHandler):
+    """Collect bounded server timings without logging prompts or tool output."""
+
+    def __init__(self) -> None:
+        self.started = time.perf_counter()
+        self.active: dict[str, tuple[str, str, float]] = {}
+        self.stages: list[dict[str, Any]] = []
+
+    def _start(self, run_id: object, kind: str, label: str) -> None:
+        self.active[str(run_id)] = (kind, label[:200], time.perf_counter())
+
+    def _end(self, run_id: object) -> None:
+        active = self.active.pop(str(run_id), None)
+        if active is None or len(self.stages) >= 50:
+            return
+        kind, label, started = active
+        self.stages.append(
+            {
+                "id": f"stage-{len(self.stages) + 1}",
+                "label": label,
+                "category": kind,
+                "start_ms": round((started - self.started) * 1000, 1),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            }
+        )
+
+    def on_llm_start(self, serialized, prompts, *, run_id, **kwargs) -> None:
+        del serialized, prompts, kwargs
+        self._start(run_id, "llm_synthesis", "LLM response synthesis")
+
+    def on_chat_model_start(self, serialized, messages, *, run_id, **kwargs) -> None:
+        del serialized, messages, kwargs
+        self._start(run_id, "llm_synthesis", "LLM response synthesis")
+
+    def on_llm_end(self, response, *, run_id, **kwargs) -> None:
+        del response, kwargs
+        self._end(run_id)
+
+    def on_llm_error(self, error, *, run_id, **kwargs) -> None:
+        del error, kwargs
+        self._end(run_id)
+
+    def on_tool_start(
+        self,
+        serialized,
+        input_str,
+        *,
+        run_id,
+        name: str | None = None,
+        **kwargs,
+    ) -> None:
+        del input_str, kwargs
+        tool_name = name or (serialized or {}).get("name") or "evidence tool"
+        is_foundry_tool = any(
+            marker in str(tool_name).lower()
+            for marker in ("foundry", "azure_ai", "azure_openai")
+        )
+        self._start(
+            run_id,
+            "foundry_agent" if is_foundry_tool else "databricks_retrieval",
+            (
+                f"Microsoft Foundry Agent · {tool_name}"
+                if is_foundry_tool
+                else f"Databricks retrieval · {tool_name}"
+            ),
+        )
+
+    def on_tool_end(self, output, *, run_id, **kwargs) -> None:
+        del output, kwargs
+        self._end(run_id)
+
+    def on_tool_error(self, error, *, run_id, **kwargs) -> None:
+        del error, kwargs
+        self._end(run_id)
+
+    def trace(self) -> dict[str, Any]:
+        total_ms = round((time.perf_counter() - self.started) * 1000, 1)
+        stages = sorted(self.stages, key=lambda stage: stage["start_ms"])
+        if not stages:
+            stages = [
+                {
+                    "id": "stage-1",
+                    "label": "LLM response synthesis",
+                    "category": "llm_synthesis",
+                    "start_ms": 0,
+                    "duration_ms": total_ms,
+                    "detail": "Only end-to-end server timing was available.",
+                }
+            ]
+        return {
+            "total_ms": total_ms,
+            # The adapter is deliberately non-streaming, so reporting TTFT or
+            # time-per-token would manufacture precision that is not observed.
+            "ttft_ms": None,
+            "tpot_ms": None,
+            "timing_source": "server",
+            "stages": stages,
+        }
+
+
 class PlatformAgent:
     """Lazy, process-local LangGraph runtime with App-safe tool bindings."""
 
@@ -51,6 +153,8 @@ class PlatformAgent:
         self.workspace_client_factory = workspace_client_factory
         self.settings_factory = settings_factory
         self.repository_factory = repository_factory
+
+    supports_execution_trace = True
 
     def _canonical_findings_tool(self):
         repository_factory = self.repository_factory
@@ -177,12 +281,17 @@ class PlatformAgent:
         ]
         return create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
 
-    def invoke(self, messages: list[dict[str, str]]) -> str:
+    def invoke_with_trace(self, messages: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
+        timing = _ExecutionTimingHandler()
         result = self.graph.invoke(
             {"messages": messages},
-            config={"recursion_limit": 20},
+            config={"recursion_limit": 20, "callbacks": [timing]},
         )
         output = result.get("messages") if isinstance(result, dict) else None
         if not output:
-            return ""
-        return _text_content(output[-1])
+            return "", timing.trace()
+        return _text_content(output[-1]), timing.trace()
+
+    def invoke(self, messages: list[dict[str, str]]) -> str:
+        text, _trace = self.invoke_with_trace(messages)
+        return text
