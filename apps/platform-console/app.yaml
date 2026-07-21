@@ -20,5 +20,5 @@ env:
   # docs/runbook.md; source-only local runs never authorize execution.
   # - name: DBX_PLATFORM_CONSOLE_ACTIONS
   #   value: "false"
-  # Bundle deployments bind chat-model with CAN_QUERY. Source-only local runs
-  # fall back to DBX_PLATFORM_DIGEST_MODEL (or the Settings default).
+  # A bundle deployment binds chat-model with CAN_QUERY. Source-only local
+  # runs fall back to DBX_PLATFORM_DIGEST_MODEL (or the Settings default).

@@ -11,7 +11,11 @@ import json
 import sys
 from collections.abc import Sequence
 
-from dbx_platform.control_plane_procedures import procedure_statements
+from dbx_platform.control_plane_procedures import (
+    deployment_procedure_statements,
+    estimate_procedure_statements,
+    procedure_statements,
+)
 from dbx_platform.control_plane_schema import migrate_control_plane_with_spark
 from dbx_platform.dashboards import setup_statements
 
@@ -21,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--catalog", default="dbx_dev")
     parser.add_argument("--schema", default="dbx_platform")
     parser.add_argument("--team-tags", default="team,cost-center,environment")
+    parser.add_argument("--app-service-principal", required=True)
     parser.add_argument("--operator-group", default="dbx-platform-operators")
     parser.add_argument("--approver-group", default="dbx-platform-approvers")
     parser.add_argument(
@@ -36,6 +41,7 @@ def procedure_migration_statements(
     catalog: str,
     schema: str,
     *,
+    app_service_principal: str,
     operator_group: str,
     approver_group: str,
     actions_enabled: bool,
@@ -45,6 +51,7 @@ def procedure_migration_statements(
     statements = procedure_statements(
         catalog,
         schema,
+        app_service_principal=app_service_principal,
         operator_group=operator_group,
         approver_group=approver_group,
     )
@@ -63,6 +70,7 @@ def run_migrations(
     schema: str,
     team_tags: list[str],
     *,
+    app_service_principal: str,
     operator_group: str = "dbx-platform-operators",
     approver_group: str = "dbx-platform-approvers",
     actions_enabled: bool = False,
@@ -77,6 +85,7 @@ def run_migrations(
     for description, sql in procedure_migration_statements(
         catalog,
         schema,
+        app_service_principal=app_service_principal,
         operator_group=operator_group,
         approver_group=approver_group,
         actions_enabled=actions_enabled,
@@ -87,6 +96,21 @@ def run_migrations(
         completed.append(
             "procedure grants skipped: actions are disabled until RBAC groups exist"
         )
+    # The estimate-library and deployment-link append brokers are telemetry,
+    # not action machinery: their grants are deliberately NOT gated on
+    # actions_enabled, so saving estimates and linking deployments work in
+    # proposal-only deployments too.
+    for statements in (
+        estimate_procedure_statements(
+            catalog, schema, app_service_principal=app_service_principal
+        ),
+        deployment_procedure_statements(
+            catalog, schema, app_service_principal=app_service_principal
+        ),
+    ):
+        for description, sql in statements:
+            spark.sql(sql)
+            completed.append(description)
     return completed
 
 
@@ -101,6 +125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.catalog,
             args.schema,
             [value.strip() for value in args.team_tags.split(",") if value.strip()],
+            app_service_principal=args.app_service_principal,
             operator_group=args.operator_group,
             approver_group=args.approver_group,
             actions_enabled=args.actions_enabled == "true",

@@ -108,6 +108,26 @@ def _verify_governed_write(args, w, settings: Settings) -> bool:
         return False
 
 
+def _store_cost_findings(args, w, settings: Settings, check_key: str,
+                         findings: list[dict]) -> int:
+    """Persist a report command's findings inside a verified governed run.
+
+    The check key is stored even when ``findings`` is empty so previously OPEN
+    rows for the check auto-resolve once the condition clears.
+    """
+    from dbx_platform import digest
+
+    return digest.store_findings(
+        w,
+        _warehouse_id(args, settings),
+        settings.dashboard_catalog,
+        settings.dashboard_schema,
+        {check_key: findings},
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", settings.environment),
+    )
+
+
 def _warehouse_id(args, settings: Settings) -> str:
     return args.warehouse_id or settings.warehouse_id
 
@@ -140,16 +160,37 @@ def cmd_cost_top_jobs(args) -> int:
 def cmd_cost_cluster_utilization(args) -> int:
     s = Settings.from_env()
     w = get_client(args.profile)
+    store = getattr(args, "store_findings", False)
+    if store and not _verify_governed_write(args, w, s):
+        return 2
     days = args.days if args.days is not None else s.lookback_days
     cpu = args.cpu_threshold if args.cpu_threshold is not None else s.util_cpu_threshold_pct
     mem = args.mem_threshold if args.mem_threshold is not None else s.util_mem_threshold_pct
     rows = cost.cluster_utilization(w, _warehouse_id(args, s), days)
     findings = cost.classify_cluster_utilization(rows, cpu, mem)
+    notes = ["Report only — right-sizing is applied by the cluster owner (see docs/runbook.md)."]
+    if store:
+        stored = _store_cost_findings(args, w, s, "cost/cluster-underutilized", findings)
+        notes.append(f"{stored} finding rows stored; right-sized clusters auto-resolve")
     emit(
         args,
         f"Under-utilized clusters — last {days}d (ranked by cost)",
         findings,
-        ["Report only — right-sizing is applied by the cluster owner (see docs/runbook.md)."],
+        notes,
+    )
+    return 0
+
+
+def cmd_cost_attribution(args) -> int:
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = cost.attribution(w, _warehouse_id(args, s), args.dimension, days)
+    emit(
+        args,
+        f"List cost by {args.dimension} — last {days}d",
+        rows,
+        ["'unallocated' rows carry none of the tags the cluster policies enforce."],
     )
     return 0
 
@@ -166,16 +207,23 @@ def cmd_cost_failed_run_waste(args) -> int:
 def cmd_cost_warehouse_utilization(args) -> int:
     s = Settings.from_env()
     w = get_client(args.profile)
+    store = getattr(args, "store_findings", False)
+    if store and not _verify_governed_write(args, w, s):
+        return 2
     days = args.days if args.days is not None else s.lookback_days
     rows = cost.warehouse_utilization(w, _warehouse_id(args, s), days)
     findings = cost.classify_warehouse_utilization(
         rows, s.warehouse_min_queries, s.warehouse_queue_warn_seconds
     )
+    notes = ["Report only — includes both directions: idle spend and sustained queueing."]
+    if store:
+        stored = _store_cost_findings(args, w, s, "cost/warehouse-mis-sized", findings)
+        notes.append(f"{stored} finding rows stored; corrected warehouses auto-resolve")
     emit(
         args,
         f"Mis-sized SQL warehouses — last {days}d",
         findings,
-        ["Report only — includes both directions: idle spend and sustained queueing."],
+        notes,
     )
     return 0
 
@@ -199,7 +247,9 @@ def cmd_llm_cost_rollup(args) -> int:
     workspace_id = str(w.get_workspace_id())
     environment = getattr(args, "environment", s.environment)
     window_end = date.today()
-    window_start = window_end - timedelta(days=days)
+    if days < 1:
+        raise ValueError("--days must be positive")
+    window_start = window_end - timedelta(days=days - 1)
     notes: list[str] = []
     costs: list[dict] = []
     usage: list[dict] = []
@@ -257,7 +307,7 @@ def cmd_llm_cost_rollup(args) -> int:
             source_key="databricks-hosted-billing",
             source_type="cost",
             freshness="throughout the day",
-            retention_days=400,
+            retention_days=365,
             cost_basis="DATABRICKS_LIST",
             coverage_start=(window_start.isoformat() if billing_status != "unavailable" else None),
             coverage_end=(window_end.isoformat() if billing_status != "unavailable" else None),
@@ -332,20 +382,21 @@ def cmd_llm_cost_rollup(args) -> int:
         azure = azure_result.rows
         normalized_azure = llm_cost.normalize_cost_rows(
             azure,
-            "azure_costs",
+            azure_result.source,
             "AZURE_ACTUAL",
             environment=environment,
             workspace_id=workspace_id,
         )
         costs.extend(normalized_azure)
-        cost_scopes.append(
-            {
-                "workspace_id": workspace_id,
-                "environment": environment,
-                "source": "azure_costs",
-                "cost_basis": "AZURE_ACTUAL",
-            }
-        )
+        for source in ("azure_cost_details", "azure_costs"):
+            cost_scopes.append(
+                {
+                    "workspace_id": workspace_id,
+                    "environment": environment,
+                    "source": source,
+                    "cost_basis": "AZURE_ACTUAL",
+                }
+            )
         azure_status = azure_result.status
         azure_note = (
             f"{azure_result.notes}; late adjustments may restate prior days"
@@ -492,6 +543,34 @@ def cmd_llm_cost_rollup(args) -> int:
         workspace_id=workspace_id,
         environment=environment,
     )
+    # Budget breaches become canonical findings so Mission Control ranks and
+    # digests them, instead of the state existing only on console page load.
+    # The check key is always stored so cleared breaches auto-resolve.
+    try:
+        from dbx_platform import digest
+
+        month_days = date.today().day
+        evaluated = llm_cost.evaluate_budgets(
+            llm_cost.budget_rows(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema,
+                workspace_id, environment,
+            ),
+            llm_cost.read_llm_cost_daily(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema,
+                workspace_id, environment, month_days,
+            ),
+        )
+        stored["budget_breach_findings"] = digest.store_findings(
+            w,
+            warehouse,
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            {"cost/llm-budget-breach": llm_cost.classify_budget_findings(evaluated)},
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+    except Exception as error:  # noqa: BLE001 - budgets are optional
+        notes.append(f"budget-breach findings skipped ({error.__class__.__name__})")
     emit(
         args,
         f"LLM cost rollup — last {days}d",
@@ -511,7 +590,7 @@ def cmd_llm_cost_rollup(args) -> int:
 
 
 def cmd_azure_cost_pull(args) -> int:
-    from datetime import date, timedelta
+    from datetime import date
 
     s = Settings.from_env()
     w = get_client(args.profile)
@@ -522,49 +601,84 @@ def cmd_azure_cost_pull(args) -> int:
     sub = args.subscription_id or s.azure_subscription_id
     days = args.days if args.days is not None else 3
     end = date.today()
-    start = end - timedelta(days=days)
+    start, end = azure_cost.inclusive_date_window(end, days)
     cred = secrets.get_credential(args.service_credential or None)
-    pages = azure_cost.fetch_cost_query(cred, sub, start.isoformat(), end.isoformat())
-    rows = azure_cost.parse_query_result(pages)
+    resource_groups = azure_cost.parse_resource_groups(
+        args.resource_groups or s.azure_cost_resource_groups
+    )
+    scope_filter = azure_cost.resource_group_scope_filter(resource_groups)
     workspace_id = str(w.get_workspace_id())
     environment = getattr(args, "environment", s.environment)
-    n = azure_cost.store_costs(
-        w,
-        _warehouse_id(args, s),
-        s.dashboard_catalog,
-        s.dashboard_schema,
-        rows,
-        workspace_id=workspace_id,
-        environment=environment,
-        window_start=start.isoformat(),
-        window_end=end.isoformat(),
-    )
-    try:
-        detail_pages = azure_cost.fetch_cost_query(
+    warehouse = _warehouse_id(args, s)
+    rows: list[dict] = []
+    detail_count = 0
+    detail_failures: list[str] = []
+    for window_start, window_end in azure_cost.split_date_windows(
+        start.isoformat(), end.isoformat()
+    ):
+        pages = azure_cost.fetch_cost_query(
             cred,
             sub,
-            start.isoformat(),
-            end.isoformat(),
-            body=azure_cost.build_detail_query_body(start.isoformat(), end.isoformat()),
+            window_start,
+            window_end,
+            body=azure_cost.build_query_body(
+                window_start,
+                window_end,
+                resource_groups=resource_groups,
+            ),
         )
-        detail_rows = azure_cost.parse_detail_query_result(detail_pages)
-    except Exception as error:  # noqa: BLE001 - coarse actuals remain authoritative
-        detail_note = (
-            "resource/meter allocation unavailable; coarse actuals succeeded "
-            f"({error.__class__.__name__})"
-        )
-    else:
-        detail_count = azure_cost.store_detail_costs(
+        window_rows = azure_cost.parse_query_result(pages)
+        azure_cost.store_costs(
             w,
-            _warehouse_id(args, s),
+            warehouse,
             s.dashboard_catalog,
             s.dashboard_schema,
-            detail_rows,
+            window_rows,
             workspace_id=workspace_id,
             environment=environment,
-            window_start=start.isoformat(),
-            window_end=end.isoformat(),
+            subscription_id=sub,
+            scope_filter=scope_filter,
+            window_start=window_start,
+            window_end=window_end,
         )
+        rows.extend(window_rows)
+        try:
+            detail_pages = azure_cost.fetch_cost_query(
+                cred,
+                sub,
+                window_start,
+                window_end,
+                body=azure_cost.build_detail_query_body(
+                    window_start,
+                    window_end,
+                    resource_groups=resource_groups,
+                ),
+            )
+            detail_rows = azure_cost.parse_detail_query_result(detail_pages)
+            detail_count += azure_cost.store_detail_costs(
+                w,
+                warehouse,
+                s.dashboard_catalog,
+                s.dashboard_schema,
+                detail_rows,
+                workspace_id=workspace_id,
+                environment=environment,
+                subscription_id=sub,
+                scope_filter=scope_filter,
+                window_start=window_start,
+                window_end=window_end,
+            )
+        except Exception as error:  # noqa: BLE001 - report partial storage precisely
+            detail_failures.append(
+                f"{window_start}..{window_end}: {error.__class__.__name__}"
+            )
+    n = len(rows)
+    if detail_failures:
+        detail_note = (
+            f"resource/meter allocation failed for {len(detail_failures)} window(s); "
+            "coarse billed cost was stored"
+        )
+    else:
         detail_note = f"{detail_count} resource/meter rows merged for AI allocation"
     by_bucket: dict[str, float] = {}
     for r in rows:
@@ -578,8 +692,17 @@ def cmd_azure_cost_pull(args) -> int:
         f"Azure bill pull {start}..{end} — {n} rows merged into "
         f"{s.dashboard_catalog}.{s.dashboard_schema}.azure_costs",
         summary,
-        [detail_note],
+        [
+            f"Azure scope: {sub}; resource groups: {scope_filter}",
+            detail_note,
+            *detail_failures,
+        ],
     )
+    if detail_failures:
+        raise RuntimeError(
+            "Azure coarse billed cost was stored, but detail allocation was incomplete: "
+            + "; ".join(detail_failures)
+        )
     return 0
 
 
@@ -596,6 +719,8 @@ def cmd_azure_cost_report(args) -> int:
         s.dashboard_schema,
         args.by,
         days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
     )
     emit(args, f"Azure spend by {args.by} — last {days}d", rows)
     return 0
@@ -606,17 +731,330 @@ def cmd_azure_cost_spikes(args) -> int:
 
     s = Settings.from_env()
     w = get_client(args.profile)
+    store = getattr(args, "store_findings", False)
+    if store and not _verify_governed_write(args, w, s):
+        return 2
     days = args.days if args.days is not None else 14
     rows = azure_cost.fetch_daily_buckets(
-        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
     )
     findings = azure_cost.classify_azure_spend(rows, s.azure_spike_pct, s.azure_spike_min_cost)
+    notes = ["Report only — investigate the bucket's resources before acting."]
+    if store:
+        stored = _store_cost_findings(args, w, s, "cost/azure-spend-spike", findings)
+        notes.append(f"{stored} finding rows stored; cleared spikes auto-resolve")
     emit(
         args,
         "Azure spend spikes by service bucket "
         f"(day vs trailing 7d, threshold {s.azure_spike_pct}%)",
         findings,
-        ["Report only — investigate the bucket's resources before acting."],
+        notes,
+    )
+    return 0
+
+
+def cmd_azure_cost_detail(args) -> int:
+    from dbx_platform import azure_cost
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    days = args.days if args.days is not None else s.lookback_days
+    rows = azure_cost.report_detail(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        args.by,
+        days,
+        args.bucket or None,
+        workspace_id=str(w.get_workspace_id()),
+        environment=s.environment,
+    )
+    scope = f" ({args.bucket})" if args.bucket else ""
+    emit(args, f"Azure detail spend by {args.by}{scope} — last {days}d", rows)
+    return 0
+
+
+# --- estimator ----------------------------------------------------------------
+
+
+def cmd_estimator_prices_pull(args) -> int:
+    from datetime import date
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not _verify_governed_write(args, w, s):
+        return 2
+    from dbx_platform import digest, estimator, estimator_pricing
+
+    rate_card = estimator.load_rate_card()
+    snapshot_date = args.snapshot_date or date.today().isoformat()
+    region = args.region or "eastus"
+    currency = args.currency or "USD"
+    items_by_group: dict[str, list[dict]] = {}
+    for group, odata_filter in estimator_pricing.build_price_filters(
+        rate_card, region, currency
+    ):
+        items_by_group[group] = estimator_pricing.fetch_retail_prices(
+            odata_filter, currency=currency
+        )
+    rows = estimator_pricing.parse_retail_prices(items_by_group, rate_card, snapshot_date)
+    dbx_rows = estimator_pricing.parse_databricks_prices(
+        estimator_pricing.fetch_databricks_prices(w, _warehouse_id(args, s)),
+        rate_card,
+        snapshot_date,
+    )
+    rows.extend(dbx_rows)
+    environment = getattr(args, "environment", s.environment)
+    n = estimator_pricing.store_price_snapshot(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        rows,
+        snapshot_date=snapshot_date,
+        environment=environment,
+    )
+    findings, notes = estimator_pricing.classify_price_coverage(
+        rate_card, rows, snapshot_date
+    )
+    stored = digest.store_findings(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        {"cost/estimator-pricing-coverage": findings},
+        workspace_id=str(w.get_workspace_id()),
+        environment=environment,
+    )
+    notes.append(f"{stored} coverage finding rows stored; matched keys auto-resolve")
+    emit(
+        args,
+        f"Estimator price snapshot {snapshot_date} ({region}, {currency}) — {n} rows "
+        f"merged into {s.dashboard_catalog}.{s.dashboard_schema}.estimator_price_snapshots",
+        findings,
+        notes,
+    )
+    return 0
+
+
+def cmd_estimator_prices_status(args) -> int:
+    from dbx_platform import estimator_pricing
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    rows = estimator_pricing.read_snapshot_status(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        environment=getattr(args, "environment", s.environment),
+    )
+    emit(args, "Estimator price snapshot status", rows)
+    return 0
+
+
+def cmd_estimator_prompts_sync(args) -> int:
+    """Deployment-run prompt lineage: wheel texts -> UC prompt registry."""
+
+    from dbx_platform import estimator_prompts
+
+    s = Settings.from_env()
+    try:
+        results = estimator_prompts.register_prompts(
+            s.dashboard_catalog, s.dashboard_schema
+        )
+    except ImportError:
+        print(
+            "error: mlflow>=3 is required (the estimator_prompt_sync job "
+            "environment installs it).",
+            file=sys.stderr,
+        )
+        return 2
+    emit(args, "Estimator prompt registry sync", results)
+    return 0
+
+
+def cmd_estimator_eval_extraction(args) -> int:
+    """Run the golden extraction dataset against a real endpoint; log to MLflow.
+
+    Code scorers only (pattern accuracy, field tolerance, validation pass
+    rate) — the same near-free checks the estimator recommends for its own
+    users' prototype tier.
+    """
+    from dbx_platform import estimator, estimator_extract, estimator_prompts
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    endpoint = args.endpoint or s.digest_model
+    dataset = estimator_extract.load_eval_dataset()
+    model = estimator_extract.EndpointToolCaller(w, endpoint)
+    scores = []
+    rows = []
+    for case in dataset:
+        try:
+            actual, _warnings = estimator_extract.extract_requirements(
+                model, case["text"]
+            )
+        except Exception as error:  # noqa: BLE001 - a failed case scores zero
+            actual = None
+            rows.append({"case_id": case["case_id"], "error": error.__class__.__name__})
+        score = estimator_extract.score_extraction(case["expected"], actual)
+        scores.append(score)
+        rows.append({"case_id": case["case_id"], **score})
+    metrics = estimator_extract.aggregate_scores(scores)
+    notes = [f"endpoint {endpoint}, {metrics['cases']} golden cases"]
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri("databricks")
+        mlflow.set_experiment(args.experiment)
+        with mlflow.start_run(run_name="extraction-eval"):
+            mlflow.log_params(
+                {
+                    "endpoint": endpoint,
+                    "engine_version": estimator.ENGINE_VERSION,
+                    **{
+                        f"prompt_{spec['prompt']}": spec["content_hash"]
+                        for spec in estimator_prompts.prompt_specs(
+                            s.dashboard_catalog, s.dashboard_schema
+                        )
+                    },
+                }
+            )
+            mlflow.log_metrics(metrics)
+            mlflow.log_dict({"cases": dataset}, "extraction_eval_dataset.json")
+        notes.append(f"logged to MLflow experiment {args.experiment}")
+    except ImportError:
+        notes.append("mlflow not installed; metrics reported only to stdout")
+    emit(args, "Extraction eval (code scorers)", [metrics], notes)
+    return 0 if metrics["pattern_accuracy"] >= args.min_pattern_accuracy else 1
+
+
+def cmd_estimator_patterns(args) -> int:
+    from dbx_platform import estimator
+
+    patterns = estimator.load_patterns()["patterns"]
+    rows = [
+        {"pattern": key, "label": p["label"], "description": p["description"]}
+        for key, p in sorted(patterns.items())
+    ]
+    emit(args, "AI solution patterns", rows)
+    return 0
+
+
+def cmd_estimator_drift_check(args) -> int:
+    """Compare saved estimates against current prices and linked actuals.
+
+    Two checks, both storing findings and (unless --no-store) failing the run
+    on material drift so the job-failure email is the alert — the
+    forecast-monitor pattern.
+    """
+    from dbx_platform import estimator_monitor
+
+    s = Settings.from_env()
+    w = get_client(args.profile)
+    if not _verify_governed_write(args, w, s):
+        return 2
+    warehouse = _warehouse_id(args, s)
+    workspace_id = str(w.get_workspace_id())
+    environment = getattr(args, "environment", s.environment)
+    findings = estimator_monitor.run_drift_check(
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        workspace_id=workspace_id,
+        environment=environment,
+        days=args.days,
+        reprice_threshold_pct=args.reprice_threshold,
+        actuals_threshold_pct=args.actuals_threshold,
+    )
+    emit(args, "Estimate re-price drift", findings[estimator_monitor.REPRICING_CHECK])
+    emit(args, "Estimate vs. actuals drift", findings[estimator_monitor.ACTUALS_CHECK])
+    notes = ["Report only — re-estimate or reconcile before acting."]
+    if not args.no_store:
+        try:
+            stored = estimator_monitor.store_findings(
+                w, warehouse, s.dashboard_catalog, s.dashboard_schema, findings,
+                workspace_id=workspace_id, environment=environment,
+            )
+            notes.append(f"{stored} finding rows stored; cleared drift auto-resolves")
+        except (SystemTablesUnavailableError, RuntimeError, ValueError) as error:
+            notes.append(f"findings not stored ({error.__class__.__name__})")
+    emit(args, "Estimate drift check complete", [], notes)
+    total = sum(len(v) for v in findings.values())
+    if total:
+        print(
+            f"estimate drift detected ({total} findings) — failing so the job "
+            "notification fires.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def cmd_estimator_estimate(args) -> int:
+    """Compute one estimate from the latest stored price snapshot.
+
+    Reads requirements from a JSON file so the same input document can be
+    replayed byte-for-byte later — the CLI twin of the app's estimate API.
+    """
+    from dbx_platform import estimator, estimator_pricing
+
+    s = Settings.from_env()
+    with open(args.requirements_file, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    try:
+        req = estimator.validate_requirements(raw)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    w = get_client(args.profile)
+    snapshot_rows = estimator_pricing.read_latest_snapshot(
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        environment=getattr(args, "environment", s.environment),
+        currency=req.currency,
+    )
+    if not snapshot_rows:
+        print(
+            "error: no price snapshot found. Run the estimator-prices-pull job "
+            "(or `estimator prices-pull` in a governed context) first.",
+            file=sys.stderr,
+        )
+        return 2
+    book = estimator.build_price_book(snapshot_rows, estimator.load_rate_card())
+    matrix = estimator.compute_matrix(req, rigor_pct=args.rigor, price_book=book)
+    if args.output == "json":
+        print(json.dumps(matrix, default=str))
+        return 0
+    rows = []
+    for tier, tier_data in matrix["tiers"].items():
+        for scenario, est in tier_data["scenarios"].items():
+            rows.append(
+                {
+                    "tier": tier,
+                    "scenario": scenario,
+                    **{f"{env}_monthly": est["totals_by_env"][env] for env in estimator.ENVS},
+                    "eval_tax_prod": est["eval_tax_by_env"]["prod"],
+                    "missing_prices": len(est["missing_prices"]),
+                }
+            )
+    emit(
+        args,
+        f"TCO estimate — {req.pattern}, {req.monthly_requests:,} req/mo, "
+        f"rigor {matrix['rigor_pct']}%, prices {matrix['snapshot_date']}",
+        rows,
+        [f"engine v{matrix['engine_version']}, rate card {matrix['rate_card_version']}"],
     )
     return 0
 
@@ -633,7 +1071,13 @@ def cmd_forecast_build_features(args) -> int:
 
     days = args.days if args.days is not None else 365
     rows = azure_cost.fetch_daily_buckets(
-        w, _warehouse_id(args, s), s.dashboard_catalog, s.dashboard_schema, days
+        w,
+        _warehouse_id(args, s),
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        days,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     feats = forecast_features.build_features(rows)
     n = forecast_features.store_features(
@@ -710,6 +1154,8 @@ def cmd_forecast_predict(args) -> int:
         s.dashboard_schema,
         args.model_name or s.forecast_model_name,
         horizon,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     emit(args, f"Azure cost forecast — next {horizon}d (P10/P50/P90)", rows)
     return 0
@@ -724,7 +1170,12 @@ def cmd_forecast_monitor(args) -> int:
 
     warehouse = _warehouse_id(args, s)
     drift, errors, findings = forecast_monitor.run_monitoring(
-        w, warehouse, s.dashboard_catalog, s.dashboard_schema
+        w,
+        warehouse,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        workspace_id=str(w.get_workspace_id()),
+        environment=getattr(args, "environment", s.environment),
     )
     emit(args, "Feature drift (PSI vs reference window)", drift)
     emit(args, "Matured forecast accuracy by series", errors)
@@ -1751,13 +2202,28 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--limit", type=int, default=20)
     x.set_defaults(func=cmd_cost_top_jobs)
     x = pc.add_parser(
-        "cluster-utilization",
+        "attribution",
         parents=[common],
+        help="List cost by enforced team/project tag (or whole workspace)",
+    )
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument(
+        "--dimension", choices=sorted(cost.ATTRIBUTION_DIMENSIONS), default="team"
+    )
+    x.set_defaults(func=cmd_cost_attribution)
+    x = pc.add_parser(
+        "cluster-utilization",
+        parents=[common, governed_write],
         help="Under-utilized clusters (CPU/memory vs size, by cost)",
     )
     x.add_argument("--days", type=int, default=None)
     x.add_argument("--cpu-threshold", type=int, default=None, help="p95 CPU %% floor")
     x.add_argument("--mem-threshold", type=int, default=None, help="avg memory %% floor")
+    x.add_argument(
+        "--store-findings",
+        action="store_true",
+        help="Persist findings to platform_findings (requires a governed Job context)",
+    )
     x.set_defaults(func=cmd_cost_cluster_utilization)
     x = pc.add_parser(
         "failed-run-waste", parents=[common], help="$ burned on failed/timed-out job runs"
@@ -1767,10 +2233,15 @@ def build_parser() -> argparse.ArgumentParser:
     x.set_defaults(func=cmd_cost_failed_run_waste)
     x = pc.add_parser(
         "warehouse-utilization",
-        parents=[common],
+        parents=[common, governed_write],
         help="SQL warehouses: idle spend or sustained queueing",
     )
     x.add_argument("--days", type=int, default=None)
+    x.add_argument(
+        "--store-findings",
+        action="store_true",
+        help="Persist findings to platform_findings (requires a governed Job context)",
+    )
     x.set_defaults(func=cmd_cost_warehouse_utilization)
 
     # llm-cost
@@ -1812,6 +2283,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Azure subscription (default: DBX_PLATFORM_AZURE_SUBSCRIPTION_ID)",
     )
     x.add_argument(
+        "--resource-groups",
+        default=None,
+        help=(
+            "Comma-separated Azure resource groups allocated to this workspace "
+            "(required; defaults to DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS)"
+        ),
+    )
+    x.add_argument(
         "--service-credential",
         default=None,
         help="UC service credential name for keyless Azure auth",
@@ -1822,10 +2301,111 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--by", choices=["bucket", "service", "resource-group"], default="bucket")
     x.set_defaults(func=cmd_azure_cost_report)
     x = pa.add_parser(
-        "spikes", parents=[common], help="Per-bucket day-over-trailing-week spend spikes"
+        "spikes",
+        parents=[common, governed_write],
+        help="Per-bucket day-over-trailing-week spend spikes",
     )
     x.add_argument("--days", type=int, default=None)
+    x.add_argument(
+        "--store-findings",
+        action="store_true",
+        help="Persist findings to platform_findings (requires a governed Job context)",
+    )
     x.set_defaults(func=cmd_azure_cost_spikes)
+    x = pa.add_parser(
+        "detail",
+        parents=[common],
+        help="Detail-grain Azure spend (per resource/meter) from azure_cost_details",
+    )
+    x.add_argument("--days", type=int, default=None)
+    x.add_argument("--by", choices=["resource", "meter", "resource-group"], default="meter")
+    x.add_argument(
+        "--bucket",
+        choices=["databricks", "foundry_ai", "search", "storage", "other"],
+        default=None,
+        help="Restrict to one allocation bucket (e.g. foundry_ai)",
+    )
+    x.set_defaults(func=cmd_azure_cost_detail)
+
+    # estimator
+    pe = sub.add_parser(
+        "estimator", help="AI solution cost & TCO estimates from versioned price snapshots"
+    ).add_subparsers(dest="command")
+    x = pe.add_parser(
+        "prices-pull",
+        parents=[common, governed_write],
+        help="Snapshot Azure Retail Prices + $/DBU list prices into "
+        "estimator_price_snapshots",
+    )
+    x.add_argument("--region", default=None, help="Azure region (default eastus)")
+    x.add_argument("--currency", default=None, help="Currency code (default USD)")
+    x.add_argument(
+        "--snapshot-date", default=None, help="Snapshot date override (default today)"
+    )
+    x.set_defaults(func=cmd_estimator_prices_pull)
+    x = pe.add_parser(
+        "prices-status", parents=[common, governed_write],
+        help="Freshness and coverage of the stored price snapshot",
+    )
+    x.set_defaults(func=cmd_estimator_prices_status)
+    x = pe.add_parser(
+        "patterns", parents=[common], help="List the plain-English solution patterns"
+    )
+    x.set_defaults(func=cmd_estimator_patterns)
+    x = pe.add_parser(
+        "prompts-sync",
+        parents=[common],
+        help="Register the wheel's extraction prompts in the UC prompt registry "
+        "(deployment-run; skips unchanged content hashes)",
+    )
+    x.set_defaults(func=cmd_estimator_prompts_sync)
+    x = pe.add_parser(
+        "eval-extraction",
+        parents=[common],
+        help="Run the golden extraction dataset against a serving endpoint and "
+        "log code-scorer metrics to MLflow",
+    )
+    x.add_argument("--endpoint", default=None, help="Serving endpoint (default digest model)")
+    x.add_argument(
+        "--experiment",
+        default="/Shared/dbx-platform/estimator-extraction-eval",
+        help="MLflow experiment path or ID",
+    )
+    x.add_argument(
+        "--min-pattern-accuracy",
+        type=float,
+        default=0.8,
+        help="Exit nonzero below this pattern accuracy (the prompt-change gate)",
+    )
+    x.set_defaults(func=cmd_estimator_eval_extraction)
+    x = pe.add_parser(
+        "estimate",
+        parents=[common, governed_write],
+        help="Compute a 3-tier TCO matrix from a requirements JSON file",
+    )
+    x.add_argument(
+        "--requirements-file", required=True, help="Path to a requirements JSON document"
+    )
+    x.add_argument(
+        "--rigor", type=int, default=10, help="Production review coverage %% (0-100)"
+    )
+    x.set_defaults(func=cmd_estimator_estimate)
+    x = pe.add_parser(
+        "drift-check",
+        parents=[common, governed_write],
+        help="Flag saved estimates that drifted vs current prices or linked actuals",
+    )
+    x.add_argument("--no-store", action="store_true", help="Report without persisting findings")
+    x.add_argument("--days", type=int, default=30, help="Actuals lookback window")
+    x.add_argument(
+        "--reprice-threshold", type=float, default=15.0,
+        help="Re-price drift threshold %% (default 15)",
+    )
+    x.add_argument(
+        "--actuals-threshold", type=float, default=25.0,
+        help="Estimate-vs-actuals drift threshold %% (default 25)",
+    )
+    x.set_defaults(func=cmd_estimator_drift_check)
 
     # forecast
     pf = sub.add_parser(

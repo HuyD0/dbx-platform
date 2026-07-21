@@ -41,3 +41,20 @@ export function apiPost<T>(path: string, body?: unknown) {
 export function isUnavailable(error: unknown): boolean {
   return error instanceof ApiError && [404, 405, 501].includes(error.status);
 }
+
+/** Multipart upload — no JSON content-type; the browser sets the boundary. */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const resp = await fetch(path, { method: "POST", body: form });
+  if (!resp.ok) {
+    let payload: ApiErrorPayload;
+    try {
+      payload = (await resp.json()) as ApiErrorPayload;
+    } catch {
+      payload = { error: "http_error", message: `${resp.status} ${resp.statusText}` };
+    }
+    throw new ApiError(resp.status, payload);
+  }
+  return (await resp.json()) as T;
+}

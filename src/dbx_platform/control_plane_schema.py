@@ -121,10 +121,14 @@ MIGRATION_COLUMNS: dict[str, dict[str, str]] = {
     "azure_costs": {
         "workspace_id": "STRING",
         "environment": "STRING",
+        "subscription_id": "STRING",
+        "scope_filter": "STRING",
     },
     "azure_cost_details": {
         "workspace_id": "STRING",
         "environment": "STRING",
+        "subscription_id": "STRING",
+        "scope_filter": "STRING",
     },
     "action_approvals": {
         "workspace_id": "STRING",
@@ -141,6 +145,7 @@ MIGRATION_COLUMNS: dict[str, dict[str, str]] = {
     },
 }
 APPEND_ONLY_TABLES = ("action_approvals", "action_events")
+TRANSACTIONAL_TABLES = ("action_requests", "action_approvals", "action_events")
 
 
 def _safe_identifier(value: str) -> str:
@@ -165,12 +170,36 @@ def create_table_statements(catalog: str, schema: str) -> list[tuple[str, str]]:
             f"`{name}` {data_type}" for name, data_type in FINDING_COLUMNS.items()
         ),
     }
+    statements = []
+    for name, columns in tables.items():
+        catalog_commits = (
+            " TBLPROPERTIES ('delta.feature.catalogManaged' = 'supported')"
+            if name in TRANSACTIONAL_TABLES
+            else ""
+        )
+        statements.append(
+            (
+                f"table {catalog}.{schema}.{name}",
+                f"CREATE TABLE IF NOT EXISTS {fq}.`{name}` ({columns}) "
+                f"USING DELTA{catalog_commits}",
+            )
+        )
+    return statements
+
+
+def catalog_commit_statements(catalog: str, schema: str) -> list[tuple[str, str]]:
+    """Enable catalog commits required by multi-table atomic procedures."""
+
+    catalog = _safe_identifier(catalog)
+    schema = _safe_identifier(schema)
+    fq = f"`{catalog}`.`{schema}`"
     return [
         (
-            f"table {catalog}.{schema}.{name}",
-            f"CREATE TABLE IF NOT EXISTS {fq}.`{name}` ({columns}) USING DELTA",
+            f"enabled catalog commits on {catalog}.{schema}.{table}",
+            f"ALTER TABLE {fq}.`{table}` SET TBLPROPERTIES "
+            "('delta.feature.catalogManaged' = 'supported')",
         )
-        for name, columns in tables.items()
+        for table in TRANSACTIONAL_TABLES
     ]
 
 
@@ -221,6 +250,9 @@ def migrate_control_plane_tables(
             warehouse_id,
         )
         done.append(f"protected append-only table {catalog}.{schema}.{table}")
+    for description, sql in catalog_commit_statements(catalog, schema):
+        run_query(w, sql, warehouse_id)
+        done.append(description)
     return done
 
 
@@ -268,6 +300,9 @@ def migrate_control_plane_with_spark(
             "('delta.appendOnly' = 'true')"
         )
         done.append(f"protected append-only table {catalog}.{schema}.{table}")
+    for description, sql in catalog_commit_statements(catalog, schema):
+        spark.sql(sql)
+        done.append(description)
     return done
 
 

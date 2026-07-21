@@ -31,6 +31,10 @@ resources:
           # CAN_MANAGE is the minimum SQL warehouse ACL that can both inspect
           # all active queries and stop the warehouse. The app remains CAN_USE.
           level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          # Approved forecast and evidence Jobs query through this dedicated
+          # warehouse; they do not need permission to start, stop, or edit it.
+          level: CAN_USE
         - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
           level: CAN_USE
 
@@ -40,7 +44,7 @@ resources:
       description: >
         Unscheduled, serverless recovery path for exact-plan Hibernate/Wake.
         Planning is read-only. Execution requires a 15-minute canonical plan,
-        matching SHA-256 hash, exact confirmation phrase, and membership in
+        matching SHA-256 hash and current membership in
         dbx-platform-approvers. This job is excluded from its managed inventory.
       max_concurrent_runs: 1
       timeout_seconds: 3600
@@ -66,8 +70,6 @@ resources:
           default: ""
         - name: plan_hash
           default: ""
-        - name: confirmation
-          default: ""
       environments:
         - environment_key: default
           spec:
@@ -86,8 +88,6 @@ resources:
               - "{{job.parameters.plan_id}}"
               - --plan-hash
               - "{{job.parameters.plan_hash}}"
-              - --confirmation
-              - "{{job.parameters.confirmation}}"
               - --run-id
               - "{{job.run_id}}"
               - --environment

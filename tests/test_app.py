@@ -16,18 +16,25 @@ import ast
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 APP_DIR = Path(__file__).resolve().parent.parent / "apps" / "platform-console"
-APP_FILES = sorted(p for p in APP_DIR.rglob("*.py") if "frontend" not in p.parts)
+APP_FILES = sorted(
+    p
+    for p in APP_DIR.rglob("*.py")
+    if "frontend" not in p.parts and ".venv" not in p.parts
+)
 
 sys.path.insert(0, str(APP_DIR))
 
 from backend import cache, deps  # noqa: E402
-from backend.proposals import parse_proposals  # noqa: E402
+from backend.control_plane import ActionRequest, Actor, RiskLevel  # noqa: E402
+from backend.control_plane_repository import InMemoryControlPlaneRepository  # noqa: E402
+from backend.proposals import parse_evidence_citations, parse_proposals  # noqa: E402
 from backend.routers import actions  # noqa: E402
 
 from dbx_platform.config import Settings  # noqa: E402
@@ -60,7 +67,9 @@ def _top_level_calls(tree: ast.Module) -> set[str]:
 
 def test_app_source_exists():
     assert (APP_DIR / "app.yaml").exists()
-    assert (APP_DIR / "requirements.txt").exists()
+    assert (APP_DIR / "pyproject.toml").exists()
+    assert (APP_DIR / "uv.lock").exists()
+    assert not (APP_DIR / "requirements.txt").exists()
     assert len(APP_FILES) >= 4
 
 
@@ -99,14 +108,32 @@ def test_app_yaml_launches_the_backend():
     assert bundle_config["resources"]["apps"]["platform_console"][
         "user_api_scopes"
     ] == ["sql"]
-    requirements = (APP_DIR / "requirements.txt").read_text()
-    assert "--find-links wheels" in requirements
-    assert "fastapi" in requirements
-    assert "databricks-langchain" in requirements
-    assert "langgraph" in requirements
-    resources = bundle_config["resources"]["apps"]["platform_console"]["resources"]
-    chat_model = next(resource for resource in resources if resource["name"] == "chat-model")
-    assert chat_model["serving_endpoint"]["permission"] == "CAN_QUERY"
+    project = (APP_DIR / "pyproject.toml").read_text()
+    assert '"fastapi==0.139.2"' in project
+    assert '"langgraph==1.2.9"' in project
+    assert '"mlflow-tracing==3.14.0"' in project
+    assert "databricks-langchain" not in project
+    assert '"mlflow==' not in project
+    assert 'dbx-platform = { path = "wheels/' in project
+
+    experiment = bundle_config["resources"]["experiments"][
+        "platform_console_traces"
+    ]
+    assert experiment["name"] == (
+        "/Shared/dbx-platform-${bundle.target}-platform-console-traces"
+    )
+    assert experiment["lifecycle"]["prevent_destroy"] is True
+    app = bundle_config["resources"]["apps"]["platform_console"]
+    trace_resource = next(
+        resource
+        for resource in app["resources"]
+        if resource["name"] == "agent-traces"
+    )
+    assert trace_resource["experiment"]["permission"] == "CAN_EDIT"
+    assert {
+        item["name"]: item.get("value_from")
+        for item in app["config"]["env"]
+    }["MLFLOW_EXPERIMENT_ID"] == "agent-traces"
 
 
 def test_bundle_artifact_build_uses_managed_environment():
@@ -129,6 +156,26 @@ def test_app_and_controller_share_name_without_resource_cycle():
     app_name_index = parameters.index("--app-name") + 1
     assert parameters[app_name_index] == "${var.platform_console_name}"
     assert "${resources.apps.platform_console.name}" not in parameters
+
+
+def test_chat_model_is_bound_to_the_app_with_query_only_access():
+    root = APP_DIR.parent.parent
+    bundle = yaml.safe_load((root / "databricks.yml").read_text())
+    resource = yaml.safe_load(
+        (root / "resources" / "app.yml").read_text()
+    )["resources"]["apps"]["platform_console"]
+    assert bundle["variables"]["chat_model"]["default"].startswith("databricks-")
+    assert {
+        "name": "DBX_PLATFORM_CHAT_ENDPOINT",
+        "value_from": "chat-model",
+    } in resource["config"]["env"]
+    chat_resource = next(
+        item for item in resource["resources"] if item["name"] == "chat-model"
+    )
+    assert chat_resource["serving_endpoint"] == {
+        "name": "${var.chat_model}",
+        "permission": "CAN_QUERY",
+    }
 
 
 # --- TestClient behavior ----------------------------------------------------
@@ -166,11 +213,12 @@ def test_app_construction_never_touches_the_workspace(monkeypatch):
     assert not mock.method_calls
 
 
-def test_llm_cost_routes_are_registered(client):
+def test_cost_routes_are_registered(client):
     paths = {
         getattr(route, "path", "")
         for route in _iter_routes(client.app)
     }
+    assert "/api/cost/products" in paths
     assert {
         "/api/llm-cost/summary",
         "/api/llm-cost/timeseries",
@@ -207,6 +255,18 @@ def test_every_mutating_route_is_post_only(client):
         "/api/jobs/{job_id}/run_now",
         "/api/digest/generate",
         "/api/chat",
+        # Estimator routes POST a requirements/description body but never
+        # mutate workspace state: estimate is pure math over the stored price
+        # snapshot; extract only feeds the human review screen.
+        "/api/estimator/estimate",
+        # Saving an estimate is telemetry append through the cp_record_estimate
+        # security-definer procedure — no target mutation, no approval flow.
+        "/api/estimator/estimates/record",
+        "/api/estimator/extract",
+        "/api/estimator/extract-document",
+        # Linking a deployment is telemetry append through the
+        # cp_link_deployment security-definer procedure — no target mutation.
+        "/api/estimator/deployments/link",
     }
     assert (get_paths & post_paths) <= {
         "/api/{path:path}"
@@ -316,6 +376,9 @@ def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
     job = MagicMock()
     job.job_id = 7
     job.settings.name = "[dbx-platform] cost-usage-report"
+    job.settings.schedule = SimpleNamespace(
+        pause_status=SimpleNamespace(value="PAUSED")
+    )
     job.settings.as_dict.return_value = {
         "name": job.settings.name,
         "tasks": [{"task_key": "report"}],
@@ -326,6 +389,16 @@ def test_run_now_refuses_jobs_outside_the_platform_filter(client, ws):
     other.settings.name = "someone-elses-etl"
     ws.jobs.list.return_value = [job, other]
     ws.jobs.get.return_value = job
+    visible = client.get("/api/jobs", params={"refresh": "true"})
+    assert visible.status_code == 200
+    assert visible.json()["data"] == [
+        {
+            "job_id": 7,
+            "name": "[dbx-platform] cost-usage-report",
+            "schedule_status": "PAUSED",
+            "schedule_type": "CRON",
+        }
+    ]
     assert client.post("/api/jobs/8/run_now").status_code == 404
     ws.jobs.run_now.assert_not_called()
     resp = client.post("/api/jobs/7/run_now")
@@ -392,7 +465,7 @@ def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
     assert resp.json()["error"] == "warehouse_not_configured"
 
 
-def test_chat_degrades_when_the_agent_endpoint_is_missing(client, monkeypatch):
+def test_chat_degrades_when_the_backend_agent_is_unavailable(client, monkeypatch):
     agent = MagicMock()
     agent.invoke.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
     monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
@@ -403,12 +476,11 @@ def test_chat_degrades_when_the_agent_endpoint_is_missing(client, monkeypatch):
 
 def test_chat_denies_viewers_before_invoking_app_sp_agent(
     client,
-    ws,
     monkeypatch,
 ):
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
-    agent_factory = MagicMock()
-    monkeypatch.setattr(deps, "get_platform_agent", agent_factory)
     deps.get_identity_verifier.cache_clear()
     resp = client.post(
         "/api/chat",
@@ -416,14 +488,17 @@ def test_chat_denies_viewers_before_invoking_app_sp_agent(
     )
     assert resp.status_code == 403
     assert resp.json()["error"] == "unauthorized"
-    agent_factory.assert_not_called()
+    agent.invoke.assert_not_called()
 
 
-def test_chat_parses_agent_proposals(client, monkeypatch):
+def test_chat_parses_backend_agent_proposals(client, monkeypatch):
     agent = MagicMock()
     agent.invoke.return_value = (
         "Two stale clusters are burning money.\n"
         'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
+        "EVIDENCE:tool=get_canonical_findings;"
+        "source=canonical platform_findings;"
+        "observed_at=2026-07-18T12:00:00+00:00\n"
     )
     monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post(
@@ -442,13 +517,138 @@ def test_chat_parses_agent_proposals(client, monkeypatch):
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
+    assert body["citations"] == [
+        {
+            "citation_id": body["citations"][0]["citation_id"],
+            "tool": "get_canonical_findings",
+            "source": "canonical platform_findings",
+            "observed_at": "2026-07-18T12:00:00+00:00",
+        }
+    ]
     invocation = agent.invoke.call_args.args[0]
     assert invocation[0]["role"] == "system"
     assert "Every factual claim must cite" in invocation[0]["content"]
-    assert invocation[1]["role"] == "system"
-    assert "PAGE_CONTEXT" in invocation[1]["content"]
-    assert "/security-risk" in invocation[1]["content"]
+    assert "PAGE_CONTEXT" in invocation[0]["content"]
+    assert "/security-risk" in invocation[0]["content"]
     assert invocation[-1] == {"role": "user", "content": "clean up"}
+
+
+def test_chat_resolves_focused_action_server_side(client, monkeypatch):
+    workspace_id, environment = deps.control_plane_scope()
+    action = ActionRequest.create(
+        action_type="policy-sync",
+        workspace_id=workspace_id,
+        environment=environment,
+        targets=[
+            {
+                "resource_type": "POLICY",
+                "resource_id": "policy-1",
+                "owner_email": "operator@example.com",
+                "notes": ("x" * 2_000) + "TARGET_SENTINEL_END",
+                "confirm_phrase": "DO NOT SEND THIS PHRASE",
+                "execution_payload": {"operation": "DO_NOT_SEND"},
+            }
+        ],
+        parameters={},
+        preconditions={"state_sha256": "abc"},
+        before_state={},
+        after_state={},
+        impact={
+            "target_count": 1,
+            "analysis": ("y" * 2_000) + "IMPACT_SENTINEL_END",
+        },
+        rollback={"supported": False},
+        verification={"strategy": "re-read"},
+        risk=RiskLevel.MEDIUM,
+        proposer=Actor(
+            actor_id="test-operator",
+            roles=frozenset({"operator", "proposer"}),
+        ),
+    )
+    deps.get_control_plane_repository().create_action(action)
+    agent = MagicMock()
+    agent.invoke.return_value = "This exact plan remains read-only."
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": action.action_id},
+        },
+    )
+
+    assert response.status_code == 200
+    trusted = agent.invoke.call_args.args[0][0]["content"]
+    assert "TRUSTED_ACTION_CONTEXT" in trusted
+    assert action.action_id in trusted
+    assert "policy-sync" in trusted
+    assert action.confirm_phrase not in trusted
+    assert "DO NOT SEND THIS PHRASE" not in trusted
+    assert "DO_NOT_SEND" not in trusted
+    assert "operator@example.com" not in trusted
+    assert "[redacted]" in trusted
+    assert "TARGET_SENTINEL_END" not in trusted
+    assert "IMPACT_SENTINEL_END" not in trusted
+    assert "[truncated]" in trusted
+
+
+def test_chat_rejects_unknown_focused_action(client, monkeypatch):
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": "missing-action"},
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "action_not_found"
+    agent.invoke.assert_not_called()
+
+
+def test_chat_rejects_out_of_scope_focused_action(client, monkeypatch):
+    workspace_id, environment = deps.control_plane_scope()
+    repository = InMemoryControlPlaneRepository()
+    foreign = ActionRequest.create(
+        action_type="policy-sync",
+        workspace_id=f"{workspace_id}-foreign",
+        environment=environment,
+        targets=[{"resource_type": "POLICY", "resource_id": "policy-foreign"}],
+        parameters={},
+        preconditions={"state_sha256": "foreign"},
+        before_state={},
+        after_state={},
+        impact={"target_count": 1},
+        rollback={"supported": False},
+        verification={"strategy": "re-read"},
+        risk=RiskLevel.MEDIUM,
+        proposer=Actor(
+            actor_id="foreign-operator",
+            roles=frozenset({"operator", "proposer"}),
+        ),
+    )
+    repository.create_action(foreign)
+    repository.workspace_id = workspace_id
+    repository.environment = environment
+    agent = MagicMock()
+    monkeypatch.setattr(deps, "get_control_plane_repository", lambda: repository)
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "explain this plan"}],
+            "context": {"route": "/", "focus_action_id": foreign.action_id},
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "action_not_found"
+    agent.invoke.assert_not_called()
 
 
 # --- proposal marker parsing (pure) ----------------------------------------
@@ -476,3 +676,221 @@ def test_parse_proposals_leaves_malformed_markers_visible():
     clean, proposals = parse_proposals(text)
     assert clean == text
     assert proposals == []
+
+
+def test_parse_evidence_citations_deduplicates_and_preserves_malformed_markers():
+    valid = (
+        "EVIDENCE:tool=security-audit;source=platform_findings;"
+        "observed_at=2026-07-18T12:00:00+00:00"
+    )
+    malformed = "EVIDENCE:tool=security-audit;source=platform_findings"
+    invalid_time = (
+        "EVIDENCE:tool=security-audit;source=platform_findings;"
+        "observed_at=recently"
+    )
+    clean, citations = parse_evidence_citations(
+        f"Grounded answer.\n{valid}\n{valid}\n{malformed}\n{invalid_time}"
+    )
+
+    assert clean == f"Grounded answer.\n\n{malformed}\n{invalid_time}"
+    assert len(citations) == 1
+    assert citations[0]["tool"] == "security-audit"
+    assert citations[0]["source"] == "platform_findings"
+
+
+# --- Phase 1 wiring: workspace scope, Azure by=, AI governance ----------------
+
+def test_health_reports_workspace_scope(client):
+    from backend.routers import meta as meta_router
+
+    meta_router._workspace_id_cache = None
+    body = client.get("/api/health").json()
+    assert body["workspace_id"] == "local"
+
+
+def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_report(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(by=by, workspace_id=workspace_id, environment=environment)
+        return [{"service_bucket": "foundry_ai", "cost": 42.0}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report", fake_report)
+    body = client.get("/api/cost/azure?by=bucket").json()
+    assert captured["by"] == "bucket"
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_cost_reconciliation_is_workspace_scoped(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_reconciliation(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        days,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            days=days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return [{"comparison_status": "CURRENCY_MISMATCH", "variance": None}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(
+        cost_router.azure_cost,
+        "reconciliation",
+        fake_reconciliation,
+    )
+    body = client.get("/api/cost/reconciliation?days=30").json()
+
+    assert captured["days"] == 30
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["variance"] is None
+
+
+def test_azure_cost_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/azure?by=meter")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_catalog_serves_persisted_inventory(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "azure:acct/gpt-4o",
+            "source": "azure_openai",
+            "entity_type": "DEPLOYMENT",
+            "key_auth_enabled": True,
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_catalog", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/catalog").json()
+    assert body["data"] == rows
+    assert body["count"] == 1
+
+
+def test_ai_governance_catalog_rejects_unknown_source(client):
+    response = client.get("/api/ai-governance/catalog?source=aws_bedrock")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_ai_governance_access_masks_principals_for_viewers(client, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+    from backend.routers import ai_governance as aig
+
+    rows = [
+        {
+            "model_key": "uc:models.prod.churn",
+            "principal_name": "alice@example.com",
+            "access_level": "INVOKE",
+        }
+    ]
+    monkeypatch.setattr(aig.ai_catalog, "read_access", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/access").json()
+    assert body["data"][0]["principal_name"] == "[redacted]"
+    assert body["data"][0]["access_level"] == "INVOKE"
+
+
+def test_ai_governance_monitor_serves_per_app_rollup(client, monkeypatch):
+    from backend.routers import ai_governance as aig
+
+    rows = [{"app": "support-bot", "requests": 120, "errors": 3}]
+    monkeypatch.setattr(aig.ai_monitor, "report", lambda *a, **k: rows)
+    body = client.get("/api/ai-governance/monitor?days=7").json()
+    assert body["data"] == rows
+
+
+# --- Phase 2 wiring: attribution + Azure detail -------------------------------
+
+def test_cost_attribution_serves_tag_dimension(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_attribution(w, warehouse, dimension, days):
+        captured.update(dimension=dimension, days=days)
+        return [
+            {
+                "sub_account_id": "local",
+                "x_team": "search",
+                "x_dbus": 120.5,
+                "list_cost": 88.25,
+                "currency": "USD",
+            }
+        ]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.cost, "attribution", fake_attribution)
+    body = client.get("/api/cost/attribution?dimension=team&days=30").json()
+    assert captured["dimension"] == "team"
+    assert body["data"][0]["x_team"] == "search"
+
+
+def test_cost_attribution_rejects_unknown_dimension(client):
+    response = client.get("/api/cost/attribution?dimension=cost_center")
+    assert response.status_code == 400
+    assert response.json()["error"] == "bad_request"
+
+
+def test_azure_detail_passes_validated_bucket(client, monkeypatch):
+    captured: dict = {}
+
+    def fake_detail(
+        w,
+        warehouse,
+        catalog,
+        schema,
+        by,
+        days,
+        bucket=None,
+        *,
+        workspace_id,
+        environment,
+    ):
+        captured.update(
+            by=by,
+            bucket=bucket,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        return [{"meter_name": "gpt-4o input", "service_bucket": "foundry_ai", "cost": 12.5}]
+
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setattr(cost_router.azure_cost, "report_detail", fake_detail)
+    body = client.get("/api/cost/azure-detail?by=meter&bucket=foundry_ai").json()
+    assert captured["by"] == "meter"
+    assert captured["bucket"] == "foundry_ai"
+    assert captured["workspace_id"]
+    assert captured["environment"]
+    assert body["data"][0]["service_bucket"] == "foundry_ai"
+
+
+def test_azure_detail_rejects_unknown_dimension_or_bucket(client):
+    assert client.get("/api/cost/azure-detail?by=owner").status_code == 400
+    assert client.get("/api/cost/azure-detail?bucket=aws").status_code == 400

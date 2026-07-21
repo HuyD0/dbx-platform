@@ -1,7 +1,7 @@
 name: Platform triage
 
-# Human-dispatched findings -> rolling GitHub issue -> @claude proposes fixes
-# as PRs. This workflow is deliberately unscheduled: Hibernate must not have
+# Human-dispatched findings -> rolling GitHub issue for human review.
+# This workflow is deliberately unscheduled: Hibernate must not have
 # any out-of-band timer capable of starting SQL compute.
 # The agent never touches the workspace: remediation lands as reviewable git
 # changes (policies/*.json, job specs), humans merge, CI deploys. Any resulting
@@ -29,6 +29,7 @@ jobs:
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -69,5 +70,5 @@ jobs:
           dbx-platform housekeeping jobs-on-all-purpose --output json > findings/all-purpose.ndjson
           dbx-platform cost cluster-utilization --output json > findings/cluster-util.ndjson
           dbx-platform ml endpoint-audit --output json > findings/endpoint-audit.ndjson
-      - name: Upsert triage issue (@claude remediation loop)
+      - name: Upsert triage issue
         run: python scripts/upsert_triage_issue.py findings/*.ndjson

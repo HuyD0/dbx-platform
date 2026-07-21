@@ -64,9 +64,12 @@ affected resources, evidence, freshness, first/last seen, blast radius, and
 lifecycle state. Ranking is deterministic: critical security/SLO impact,
 estimated financial impact, then age.
 
-The contextual assistant receives the current page/filter/resource context. It
-can explain evidence and draft structured proposals, but cannot call an
-executor. Responses must cite a source table/query, timestamp, or resource.
+The contextual assistant receives the current page/filter/resource context and
+runs as a LangGraph agent inside the FastAPI backend. Its allowlisted tools
+reuse the package's read-only checks and canonical findings; its LLM uses a
+least-privileged `CAN_QUERY` binding to a Databricks-hosted foundation model.
+The graph has no executor tool. Responses must cite a source table/query,
+timestamp, or resource.
 
 ## LLM Cost & Value
 
@@ -119,10 +122,16 @@ Read-only/advisory CLI examples:
 
 ```bash
 dbx-platform cost report --days 30
+dbx-platform cost attribution --dimension team     # spend by enforced tag
+dbx-platform azure-cost detail --by meter --bucket foundry_ai
 dbx-platform security token-audit
 dbx-platform governance policy-sync
 dbx-platform dashboards health
 ```
+
+The utilization and Azure-spike checks accept `--store-findings` to persist
+their results to `platform_findings`; that path verifies the governed Job
+context first, so ad-hoc local runs stay report-only.
 
 The legacy mutator flags remain parseable only to fail with a migration
 message:
@@ -186,9 +195,10 @@ grants, and validate one complete scheduled reporting cycle. Full setup:
 ## Repository layout
 
 ```text
-apps/platform-console/     React/FastAPI Mission Control + LangGraph runtime
-agents/platform_agent/     disabled standalone agent deployment artifact
-src/dbx_platform/          evidence packs, assistant tools, ledger, executors
+apps/platform-console/     React/FastAPI Mission Control
+agents/platform_agent/     optional MLflow-serving compatibility wrapper
+src/dbx_platform/platform_agent/ shared read-only LangGraph tools and formatting
+src/dbx_platform/          evidence packs, ledger, migrations, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
 dashboards/                AI/BI templates and rendered definitions
 policies/                  reviewable policy source

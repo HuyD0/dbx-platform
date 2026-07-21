@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -378,7 +379,114 @@ def test_executor_revalidates_current_approver_membership():
     assert applied == []
 
 
-def test_executor_rejects_missing_typed_confirmation():
+def test_workspace_approver_revalidation_uses_exact_account_group():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.api_client.do.return_value = {
+        "id": "group-1",
+        "displayName": "dbx-platform-approvers",
+        "members": [
+            {"value": "approver-1"},
+            {"value": "approver-2", "display": "other@example.com"},
+        ],
+    }
+
+    assert action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "group-1",
+    )
+    workspace.users.get.assert_not_called()
+    workspace.api_client.do.assert_called_once_with(
+        "GET",
+        "/api/2.0/account/scim/v2/Groups/group-1",
+        headers={"Accept": "application/scim+json"},
+    )
+    workspace.groups.list.assert_not_called()
+    workspace.groups.get.assert_not_called()
+
+
+def test_workspace_approver_revalidation_rejects_absent_group_or_identity_drift():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.api_client.do.return_value = {
+        "id": "group-1",
+        "displayName": "dbx-platform-approvers",
+        "members": [{"value": "approver-2", "display": "other@example.com"}]
+    }
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "group-1",
+    )
+
+    workspace.api_client.do.return_value = {
+        "id": "group-1",
+        "displayName": "dbx-platform-approvers",
+        "members": [{"value": "approver-2", "display": "approver@example.com"}]
+    }
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "group-1",
+    )
+
+
+def test_workspace_approver_revalidation_rejects_group_lookup_failure():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+    workspace.api_client.do.side_effect = PermissionError("forbidden")
+
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "group-1",
+    )
+
+
+def test_workspace_approver_revalidation_rejects_empty_group_id():
+    approval = StoredApproval(
+        approval_id="approval-1",
+        approver_id="approver-1",
+        approver_email="approver@example.com",
+        approver_role="approver",
+        confirmation="apply run-job 1",
+    )
+    workspace = MagicMock()
+
+    assert not action_executor._approver_is_current_member(
+        workspace,
+        approval,
+        "dbx-platform-approvers",
+        "",
+    )
+    workspace.api_client.do.assert_not_called()
+    workspace.users.get.assert_not_called()
+
+
+def test_executor_accepts_approval_without_typed_confirmation():
     current = TrustedPlan([], [])
     store = FakeStore(make_action(current))
     original = store.get_matching_approval
@@ -388,9 +496,9 @@ def test_executor_rejects_missing_typed_confirmation():
     )
     applied: list = []
     executor = build_executor(store, current, applied)
-    with pytest.raises(ActionExecutionError, match="typed confirmation"):
-        executor.execute("action-1")
-    assert applied == []
+    result = executor.execute("action-1")
+    assert result["status"] == STATUS_SUCCEEDED
+    assert len(applied) == 1
 
 
 def test_executor_fails_closed_instead_of_reapplying_interrupted_mutation():
@@ -528,6 +636,11 @@ def test_run_job_succeeds_only_after_exact_child_run_terminates_successfully():
     assert result["verification"]["result_state"] == "SUCCESS"
     assert store.transitions[-1] == ("VERIFYING", "SUCCEEDED")
     workspace.jobs.wait_get_run_job_terminated_or_skipped.assert_called_once()
+    run_call = workspace.jobs.run_now.call_args.kwargs
+    assert run_call["idempotency_token"] == hashlib.sha256(
+        b"run-job:key-1:91"
+    ).hexdigest()
+    assert run_call["idempotency_token"] != "key-1"
 
 
 def test_run_job_failure_is_recorded_as_failed_action():

@@ -72,8 +72,26 @@ def test_distinct_executor_identities_need_no_bootstrap_exception():
         BUNDLE_VAR_runtime_executor_service_principal_name="runtime",
         BUNDLE_VAR_action_executor_service_principal_name="action",
         BUNDLE_VAR_actions_enabled="true",
+        BUNDLE_VAR_approver_group_id="152821564284515",
     )
     assert result.returncode == 0
+
+
+def test_enabled_actions_require_exact_numeric_approver_group_id():
+    common = {
+        "BUNDLE_VAR_runtime_executor_service_principal_name": "runtime",
+        "BUNDLE_VAR_action_executor_service_principal_name": "action",
+        "BUNDLE_VAR_actions_enabled": "true",
+    }
+
+    assert _executor_policy(**common).returncode == 1
+    assert (
+        _executor_policy(
+            **common,
+            BUNDLE_VAR_approver_group_id="dbx-platform-approvers",
+        ).returncode
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -245,3 +263,60 @@ def test_direct_stateful_or_costly_cli_run_requires_governed_job_context(
     assert main(argv) == 2
     workspace.jobs.get_run.assert_not_called()
     workspace.statement_execution.execute_statement.assert_not_called()
+
+
+def test_store_findings_flag_fails_closed_without_governed_context(monkeypatch):
+    from dbx_platform import cli
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+    monkeypatch.setattr(cli, "_verify_governed_write", lambda args, w, s: False)
+    stored = MagicMock()
+    monkeypatch.setattr("dbx_platform.digest.store_findings", stored)
+    fetched = MagicMock()
+    monkeypatch.setattr(azure_cost, "fetch_daily_buckets", fetched)
+    args = SimpleNamespace(
+        profile=None, warehouse_id="wh", days=7, output="json",
+        store_findings=True, environment="prod",
+    )
+    assert cli.cmd_azure_cost_spikes(args) == 2
+    stored.assert_not_called()
+    fetched.assert_not_called()
+
+
+def test_spikes_store_persists_check_key_even_when_clean(monkeypatch):
+    from dbx_platform import cli
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+    monkeypatch.setattr(cli, "_verify_governed_write", lambda args, w, s: True)
+    monkeypatch.setattr(azure_cost, "fetch_daily_buckets", lambda *a, **k: [])
+    captured = {}
+
+    def fake_store(w, warehouse, catalog, schema, findings, **kwargs):
+        captured.update(findings=findings, **kwargs)
+        return 0
+
+    monkeypatch.setattr("dbx_platform.digest.store_findings", fake_store)
+    args = SimpleNamespace(
+        profile=None, warehouse_id="wh", days=7, output="json",
+        store_findings=True, environment="dev",
+    )
+    assert cli.cmd_azure_cost_spikes(args) == 0
+    # The key is stored with zero rows so cleared spikes auto-resolve.
+    assert captured["findings"] == {"cost/azure-spend-spike": []}
+    assert captured["environment"] == "dev"
+
+
+def test_report_commands_without_store_flag_never_write(monkeypatch):
+    from dbx_platform import cli
+    from dbx_platform import cost as cost_module
+
+    monkeypatch.setattr(cli, "get_client", lambda profile: MagicMock())
+    monkeypatch.setattr(cost_module, "cluster_utilization", lambda *a, **k: [])
+    stored = MagicMock()
+    monkeypatch.setattr("dbx_platform.digest.store_findings", stored)
+    args = SimpleNamespace(
+        profile=None, warehouse_id="wh", days=7, output="json",
+        cpu_threshold=None, mem_threshold=None, store_findings=False,
+    )
+    assert cli.cmd_cost_cluster_utilization(args) == 0
+    stored.assert_not_called()

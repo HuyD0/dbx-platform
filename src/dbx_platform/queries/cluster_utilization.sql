@@ -11,6 +11,7 @@ WITH worker_minutes AS (
     AVG(mem_used_percent)                          AS mem_pct
   FROM system.compute.node_timeline
   WHERE start_time >= DATE_SUB(CURRENT_DATE(), :days)
+    AND workspace_id = :workspace_id
     AND NOT COALESCE(driver, false)
   GROUP BY workspace_id, cluster_id, start_time
 ),
@@ -28,6 +29,7 @@ util AS (
 latest_cluster AS (
   SELECT *
   FROM system.compute.clusters
+  WHERE workspace_id = :workspace_id
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY workspace_id, cluster_id ORDER BY change_time DESC
   ) = 1
@@ -45,6 +47,7 @@ spend AS (
     AND u.usage_start_time >= p.price_start_time
     AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
   WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+    AND u.workspace_id = :workspace_id
     AND u.usage_metadata.cluster_id IS NOT NULL
   GROUP BY u.workspace_id, u.usage_metadata.cluster_id
 )

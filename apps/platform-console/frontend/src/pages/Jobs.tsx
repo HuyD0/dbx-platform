@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ActionPlanDialog } from "../components/ActionPlanDialog";
 import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
@@ -31,6 +33,11 @@ function RunHistory({ jobId }: { jobId: number }) {
           {r.duration_ms != null && (
             <span className="text-muted">· {Math.round(r.duration_ms / 1000)}s</span>
           )}
+          {r.state_message && (
+            <span className="min-w-0 truncate text-muted" title={r.state_message}>
+              · {r.state_message}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -46,13 +53,36 @@ export function Jobs() {
   });
   const [expanded, setExpanded] = useState<number | null>(null);
   const [plannedJob, setPlannedJob] = useState<JobInfo | null>(null);
+  const allScheduledPaused =
+    query.data?.data.some((job) => job.schedule_type === "CRON") &&
+    query.data.data
+      .filter((job) => job.schedule_type === "CRON")
+      .every((job) => job.schedule_status === "PAUSED");
 
   return (
     <div className="space-y-4">
+      <div className="flex items-start gap-2 rounded-xl border border-status-warning/30 bg-status-warning/5 p-3 text-xs leading-5 text-ink-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
+        <div>
+          Scheduled runs are autonomous when their schedule is active. For an on-demand run,
+          use <strong className="font-semibold text-ink">Plan run</strong> below. Databricks
+          <strong className="font-semibold text-ink"> Run now</strong> and repair launches do
+          not carry an approved action ID and are rejected intentionally.
+          {allScheduledPaused && (
+            <span>
+              {" "}All managed schedules are paused; use{" "}
+              <Link className="font-semibold text-accent hover:underline" to="/runtime">
+                Resources & Runtime → Plan wake
+              </Link>{" "}
+              to resume the previously active schedules.
+            </span>
+          )}
+        </div>
+      </div>
       <Card>
         <SectionTitle
-          title="Report jobs"
-          subtitle="Owned schedules and run history. Every manual run requires exact-plan approval."
+          title="Jobs & schedules"
+          subtitle="Owned schedules, current pause state and governed run history"
           right={
             query.data && (
               <AsOf
@@ -86,6 +116,21 @@ export function Jobs() {
                     {job.name}
                   </button>
                   <div className="flex shrink-0 items-center gap-2">
+                    <Badge
+                      tone={
+                        job.schedule_status === "UNPAUSED"
+                          ? "good"
+                          : job.schedule_status === "PAUSED"
+                            ? "warning"
+                            : "info"
+                      }
+                    >
+                      {job.schedule_status === "UNPAUSED"
+                        ? "scheduled"
+                        : job.schedule_status === "PAUSED"
+                          ? "paused"
+                          : "manual only"}
+                    </Badge>
                     <button
                       type="button"
                       onClick={() => setPlannedJob(job)}

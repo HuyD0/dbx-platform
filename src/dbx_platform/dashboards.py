@@ -155,6 +155,11 @@ def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tup
         create_detail_table_sql as azure_cost_details_ddl,
     )
     from dbx_platform.azure_cost import create_table_sql as azure_costs_ddl
+    from dbx_platform.estimator import (
+        create_deployments_table_sql,
+        create_estimates_table_sql,
+    )
+    from dbx_platform.estimator_pricing import create_price_snapshot_table_sql
     from dbx_platform.forecast_features import create_features_table_sql
     from dbx_platform.forecast_infer import create_forecasts_table_sql
     from dbx_platform.llm_cost import create_ledger_table_statements
@@ -174,6 +179,18 @@ def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tup
         ),
         (f"table {fq}.cost_features", create_features_table_sql(catalog, schema)),
         (f"table {fq}.cost_forecasts", create_forecasts_table_sql(catalog, schema)),
+        (
+            f"table {fq}.estimator_price_snapshots",
+            create_price_snapshot_table_sql(catalog, schema),
+        ),
+        (
+            f"table {fq}.estimator_estimates",
+            create_estimates_table_sql(catalog, schema),
+        ),
+        (
+            f"table {fq}.estimator_deployments",
+            create_deployments_table_sql(catalog, schema),
+        ),
         (
             f"function {fq}.job_type_from_sku",
             f"""CREATE OR REPLACE FUNCTION {fq}.job_type_from_sku(sku STRING)

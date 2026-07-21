@@ -1,8 +1,70 @@
+from unittest.mock import MagicMock
+
+from dbx_platform import cost
 from dbx_platform.cost import (
     classify_cluster_utilization,
     classify_warehouse_utilization,
 )
 from dbx_platform.housekeeping import find_jobs_on_all_purpose
+from dbx_platform.system_tables import load_query
+
+
+def test_usage_report_is_scoped_to_current_workspace(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 12345
+    captured = {}
+
+    def read(_workspace, sql, warehouse_id, parameters):
+        captured.update(sql=sql, warehouse_id=warehouse_id, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.usage_report(workspace, "warehouse-1", 30) == []
+    assert "u.workspace_id = :workspace_id" in captured["sql"]
+    assert captured["warehouse_id"] == "warehouse-1"
+    assert captured["parameters"] == {"days": 30, "workspace_id": "12345"}
+
+
+def test_product_spend_has_product_attribution_and_equal_comparison_windows(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 987
+    captured = {}
+
+    def read(_workspace, sql, _warehouse_id, parameters):
+        captured.update(sql=sql, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.product_spend(workspace, "warehouse-1", 30) == []
+    assert "u.billing_origin_product" in captured["sql"]
+    assert "u.usage_metadata.app_name" in captured["sql"]
+    assert "u.usage_metadata.database_instance_id" in captured["sql"]
+    assert "u.usage_metadata.cluster_id" in captured["sql"]
+    assert "u.usage_metadata.dlt_pipeline_id" in captured["sql"]
+    assert captured["parameters"] == {
+        "current_start_days": 29,
+        "comparison_start_days": 59,
+        "workspace_id": "987",
+    }
+
+
+def test_product_spend_query_reports_usage_units_instead_of_calling_everything_dbus():
+    sql = load_query("product_spend")
+    assert "u.usage_unit" in sql
+    assert "u.usage_type" in sql
+    assert "as dbus" not in sql.lower()
+
+
+def test_all_cost_page_queries_are_scoped_to_the_current_workspace():
+    for name in (
+        "usage_last_30d",
+        "product_spend",
+        "job_run_cost",
+        "cluster_utilization",
+        "warehouse_utilization",
+        "failed_run_cost",
+    ):
+        assert ":workspace_id" in load_query(name), name
 
 # --- classify_cluster_utilization ----------------------------------------------
 # Rows arrive from the Statement Execution API, so values are strings.
@@ -152,3 +214,60 @@ def test_large_fixed_shared_job_cluster_flagged():
     j = _job(job_clusters=[{"key": "shared", "fixed_workers": 16}])
     findings = find_jobs_on_all_purpose([j], fixed_workers_max=10)
     assert [f["action"] for f in findings] == ["enable-autoscale"]
+
+
+# --- attribution --------------------------------------------------------------
+
+def test_attribution_sql_groups_spend_by_enforced_tag():
+    sql = cost.attribution_sql("team")
+    assert "u.custom_tags['team']" in sql
+    assert "'unallocated'" in sql
+    assert "AS x_team" in sql
+    assert "AS sub_account_id" in sql
+    assert "AS list_cost" in sql
+    assert "u.workspace_id = :workspace_id" in sql
+
+
+def test_attribution_sql_workspace_dimension_has_no_tag_column():
+    sql = cost.attribution_sql("workspace")
+    assert "custom_tags" not in sql
+    assert "AS sub_account_id" in sql
+
+
+def test_attribution_sql_rejects_unknown_dimension():
+    import pytest
+
+    with pytest.raises(ValueError):
+        cost.attribution_sql("cost_center'; DROP TABLE x --")
+
+
+def test_attribution_scopes_to_current_workspace(monkeypatch):
+    workspace = MagicMock()
+    workspace.get_workspace_id.return_value = 555
+    captured = {}
+
+    def read(_workspace, sql, warehouse_id, parameters):
+        captured.update(sql=sql, parameters=parameters)
+        return []
+
+    monkeypatch.setattr(cost, "run_query", read)
+    assert cost.attribution(workspace, "wh", "project", 30) == []
+    assert captured["parameters"] == {"days": 30, "workspace_id": "555"}
+    assert "x_project" in captured["sql"]
+
+
+def test_core_cost_reports_expose_team_and_project_dimensions():
+    for query_name in ("usage_last_30d", "product_spend", "job_run_cost"):
+        sql = cost.load_query(query_name)
+        assert "custom_tags['team']" in sql
+        assert "custom_tags['project']" in sql
+        assert "AS team" in sql
+        assert "AS project" in sql
+
+
+def test_tag_coverage_reports_each_required_dimension():
+    sql = cost.load_query("untagged_usage")
+    assert "missing_team_list_cost_usd" in sql
+    assert "missing_team_pct" in sql
+    assert "missing_project_list_cost_usd" in sql
+    assert "missing_project_pct" in sql

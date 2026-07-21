@@ -4,6 +4,7 @@ SELECT
   u.usage_date                                                   AS usage_date,
   u.workspace_id                                                 AS workspace_id,
   CASE
+    WHEN u.billing_origin_product = 'GENIE' THEN 'databricks'
     WHEN UPPER(COALESCE(
       u.usage_metadata.ai_gateway.destination_model,
       u.sku_name
@@ -18,6 +19,7 @@ SELECT
   END                                                            AS provider,
   COALESCE(
     u.usage_metadata.ai_gateway.destination_model,
+    CASE WHEN u.billing_origin_product = 'GENIE' THEN 'GENIE' END,
     u.sku_name
   )                                                              AS model,
   COALESCE(
@@ -48,8 +50,10 @@ LEFT JOIN system.billing.list_prices p
   AND u.usage_start_time >= p.price_start_time
   AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
 WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+  AND u.workspace_id = :workspace_id
   AND (
     u.billing_origin_product = 'MODEL_SERVING'
+    OR u.billing_origin_product = 'GENIE'
     OR u.sku_name LIKE '%INFERENCE%'
     OR u.sku_name LIKE '%SERVING%'
   )

@@ -1,10 +1,11 @@
 """Security-definer write broker for human Mission Control decisions.
 
 The Databricks App service principal and human groups receive no ``MODIFY`` on
-the action ledger. Verified App user tokens call these narrowly scoped Unity
-Catalog procedures with ``EXECUTE`` only. The procedures re-check the connected
-user's live account-group membership through native ``EXECUTE`` authorization
-on every call and record ``session_user()`` as the actor.
+the action ledger. Only the App service principal receives ``EXECUTE`` on these
+narrowly scoped Unity Catalog procedures. The App re-checks the forwarded
+user's live account-group membership and passes that verified identity as the
+actor. Human groups deliberately cannot call the procedures directly and
+substitute another actor identity.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ def procedure_statements(
     catalog: str,
     schema: str,
     *,
+    app_service_principal: str,
     operator_group: str,
     approver_group: str,
 ) -> list[tuple[str, str]]:
@@ -38,14 +40,14 @@ def procedure_statements(
 
     catalog = _identifier(catalog)
     schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
     operator_group = _principal(operator_group)
     approver_group = _principal(approver_group)
     fq = f"`{catalog}`.`{schema}`"
-    # Group membership is revalidated by Unity Catalog on every CALL through
-    # the exact EXECUTE grants emitted below. Databricks does not allow
-    # is_account_group_member() inside an atomic stored-procedure transaction.
-    # Keep the procedures atomic and rely on native procedure authorization,
-    # with cp_decide_action granted only to the approver group.
+    # Databricks does not allow is_account_group_member() or session_user()
+    # inside an atomic stored-procedure transaction. Keep the procedures atomic
+    # and make the App the sole caller. Its request boundary verifies the
+    # forwarded user and live group membership before supplying actor fields.
     allowed_actions = (
         "'stale-clusters', 'orphaned-jobs', 'token-revoke', 'policy-sync', "
         "'run-job', 'configure-budget'"
@@ -72,17 +74,19 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
-  IF p_proposer_email IS NULL
-     OR lower(session_user()) <> lower(p_proposer_email) THEN
+  IF p_proposer_id IS NULL OR p_proposer_id = ''
+     OR p_proposer_email IS NULL OR p_proposer_email = '' THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The connected user does not match the proposer';
+      SET MESSAGE_TEXT = 'The verified proposer identity is required';
   END IF;
   IF p_action_type NOT IN ({allowed_actions}) THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'The proposed action type is not allowlisted';
   END IF;
   IF (p_action_type = 'token-revoke' AND p_risk <> 'HIGH')
-     OR (p_action_type <> 'token-revoke' AND p_risk <> 'MEDIUM') THEN
+     OR (p_action_type = 'run-job' AND p_risk NOT IN ('LOW', 'MEDIUM'))
+     OR (p_action_type NOT IN ('token-revoke', 'run-job')
+         AND p_risk <> 'MEDIUM') THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'The action risk does not match the allowlisted policy';
   END IF;
@@ -101,7 +105,7 @@ AS BEGIN ATOMIC
        CAST(json_array_length(get_json_object(p_plan_json, '$.targets')) AS STRING)
      ) THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The typed confirmation phrase is not canonical';
+      SET MESSAGE_TEXT = 'The immutable confirmation marker is not canonical';
   END IF;
   IF sha2(p_plan_json, 256) <> lower(p_plan_hash)
      OR get_json_object(p_plan_json, '$.schema_version') <> '1'
@@ -112,7 +116,7 @@ AS BEGIN ATOMIC
      OR get_json_object(p_plan_json, '$.risk') <> p_risk
      OR get_json_object(p_plan_json, '$.proposer_id') <> p_proposer_id
      OR lower(get_json_object(p_plan_json, '$.proposer_email'))
-       <> lower(session_user())
+       <> lower(p_proposer_email)
      OR get_json_object(p_plan_json, '$.created_at') <> p_created_at
      OR get_json_object(p_plan_json, '$.expires_at') <> p_expires_at
      OR get_json_object(p_plan_json, '$.confirm_phrase') <> p_confirm_phrase
@@ -136,7 +140,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_action_id, p_action_type,
     'AWAITING_APPROVAL', p_plan_json, p_plan_hash, p_confirm_phrase, p_risk,
-    p_proposer_id, session_user(), CAST(p_created_at AS TIMESTAMP),
+    p_proposer_id, p_proposer_email, CAST(p_created_at AS TIMESTAMP),
     CAST(p_expires_at AS TIMESTAMP), CAST(p_updated_at AS TIMESTAMP),
     p_idempotency_key, NULL
   );
@@ -152,6 +156,7 @@ CREATE OR REPLACE PROCEDURE {fq}.`cp_transition_action`(
   IN p_target_status STRING,
   IN p_reason STRING,
   IN p_event_id STRING,
+  IN p_actor_id STRING,
   IN p_details_json STRING,
   IN p_event_at STRING
 )
@@ -160,6 +165,10 @@ SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
   DECLARE v_from_status STRING;
+  IF p_actor_id IS NULL OR p_actor_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified transition actor is required';
+  END IF;
   IF p_target_status NOT IN ('STALE', 'EXPIRED') THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Human transition target is not allowlisted';
@@ -189,7 +198,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id,
     concat('STATUS_', p_target_status), v_from_status, p_target_status,
-    session_user(), p_details_json, CAST(p_event_at AS TIMESTAMP)
+    p_actor_id, p_details_json, CAST(p_event_at AS TIMESTAMP)
   );
 END
 """.strip()
@@ -217,13 +226,11 @@ SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
   DECLARE v_status STRING;
-  DECLARE v_risk STRING;
-  DECLARE v_confirm_phrase STRING;
   DECLARE v_expires_at TIMESTAMP;
-  IF p_approver_email IS NULL
-     OR lower(session_user()) <> lower(p_approver_email) THEN
+  IF p_approver_id IS NULL OR p_approver_id = ''
+     OR p_approver_email IS NULL OR p_approver_email = '' THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The connected user does not match the approver';
+      SET MESSAGE_TEXT = 'The verified approver identity is required';
   END IF;
   IF NOT (
     (p_target_status = 'APPROVED' AND p_decision = 'APPROVED'
@@ -237,20 +244,6 @@ AS BEGIN ATOMIC
   END IF;
   SET v_status = (
     SELECT max(status) FROM {fq}.`action_requests`
-    WHERE workspace_id = p_workspace_id
-      AND environment = p_environment
-      AND action_id = p_action_id
-      AND plan_hash = p_plan_hash
-  );
-  SET v_risk = (
-    SELECT max(risk) FROM {fq}.`action_requests`
-    WHERE workspace_id = p_workspace_id
-      AND environment = p_environment
-      AND action_id = p_action_id
-      AND plan_hash = p_plan_hash
-  );
-  SET v_confirm_phrase = (
-    SELECT max(confirm_phrase) FROM {fq}.`action_requests`
     WHERE workspace_id = p_workspace_id
       AND environment = p_environment
       AND action_id = p_action_id
@@ -280,12 +273,6 @@ AS BEGIN ATOMIC
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'The action plan has expired';
   END IF;
-  IF p_target_status = 'APPROVED'
-     AND v_risk IN ('MEDIUM', 'HIGH')
-     AND p_confirmation <> v_confirm_phrase THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'The exact typed confirmation is required';
-  END IF;
   IF EXISTS (
     SELECT 1 FROM {fq}.`action_approvals`
     WHERE workspace_id = p_workspace_id
@@ -310,7 +297,7 @@ AS BEGIN ATOMIC
     approver_id, approver_email, approver_role, confirmation, decided_at
   ) VALUES (
     p_workspace_id, p_environment, p_approval_id, p_action_id, p_plan_hash,
-    p_decision, p_approver_id, session_user(), 'approver',
+    p_decision, p_approver_id, p_approver_email, 'approver',
     nullif(p_confirmation, ''), CAST(p_decided_at AS TIMESTAMP)
   );
   INSERT INTO {fq}.`action_events` (
@@ -319,7 +306,7 @@ AS BEGIN ATOMIC
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id,
     concat('STATUS_', p_target_status), p_expected_status, p_target_status,
-    session_user(), p_details_json, CAST(p_decided_at AS TIMESTAMP)
+    p_approver_id, p_details_json, CAST(p_decided_at AS TIMESTAMP)
   );
 END
 """.strip()
@@ -333,6 +320,7 @@ CREATE OR REPLACE PROCEDURE {fq}.`cp_append_event`(
   IN p_event_type STRING,
   IN p_from_status STRING,
   IN p_to_status STRING,
+  IN p_actor_id STRING,
   IN p_details_json STRING,
   IN p_event_at STRING
 )
@@ -340,6 +328,10 @@ LANGUAGE SQL
 SQL SECURITY DEFINER
 MODIFIES SQL DATA
 AS BEGIN ATOMIC
+  IF p_actor_id IS NULL OR p_actor_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified event actor is required';
+  END IF;
   IF p_event_type NOT IN (
     'PLAN_CREATED',
     'PLAN_REQUESTED_FROM_APP',
@@ -372,7 +364,7 @@ AS BEGIN ATOMIC
     to_status, actor_id, details_json, event_ts
   ) VALUES (
     p_workspace_id, p_environment, p_event_id, p_action_id, p_event_type,
-    nullif(p_from_status, ''), nullif(p_to_status, ''), session_user(),
+    nullif(p_from_status, ''), nullif(p_to_status, ''), p_actor_id,
     p_details_json, CAST(p_event_at AS TIMESTAMP)
   );
 END
@@ -389,19 +381,243 @@ END
         for name, sql in procedures.items()
     ]
     for name in procedures:
-        if name != "cp_decide_action":
+        # Remove grants from the earlier group-authorized implementation. This
+        # is intentionally idempotent and closes direct SQL identity spoofing.
+        for group in (operator_group, approver_group):
             statements.append(
                 (
-                    f"grant {operator_group} execute on {name}",
-                    f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                    f"TO `{operator_group}`",
+                    f"revoke {group} execute on {name}",
+                    f"REVOKE EXECUTE ON PROCEDURE {fq}.`{name}` FROM `{group}`",
                 )
             )
         statements.append(
             (
-                f"grant {approver_group} execute on {name}",
+                f"grant {app_service_principal} execute on {name}",
                 f"GRANT EXECUTE ON PROCEDURE {fq}.`{name}` "
-                f"TO `{approver_group}`",
+                f"TO `{app_service_principal}`",
             )
         )
     return statements
+
+
+def estimate_procedure_statements(
+    catalog: str,
+    schema: str,
+    *,
+    app_service_principal: str,
+) -> list[tuple[str, str]]:
+    """Security-definer append broker for the saved-estimate library.
+
+    Saving an estimate is telemetry append (no target mutation, no approval
+    flow) — the same trust shape as a proposer creating an action request:
+    the App verifies the forwarded user's role at the request boundary and
+    passes the verified identity as ``p_created_by``. Unlike the action
+    procedures, the grant here is NOT gated on ``actions_enabled``; the
+    library must work in proposal-only deployments too.
+    """
+
+    catalog = _identifier(catalog)
+    schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
+    fq = f"`{catalog}`.`{schema}`"
+
+    record_estimate = f"""
+CREATE OR REPLACE PROCEDURE {fq}.`cp_record_estimate`(
+  IN p_workspace_id STRING,
+  IN p_environment STRING,
+  IN p_estimate_id STRING,
+  IN p_created_by STRING,
+  IN p_title STRING,
+  IN p_pattern STRING,
+  IN p_monthly_requests STRING,
+  IN p_corpus_gb STRING,
+  IN p_requirements_json STRING,
+  IN p_requirements_hash STRING,
+  IN p_engine_version STRING,
+  IN p_rate_card_version STRING,
+  IN p_snapshot_date STRING,
+  IN p_rigor_pct STRING,
+  IN p_results_json STRING
+)
+LANGUAGE SQL
+SQL SECURITY DEFINER
+MODIFIES SQL DATA
+AS BEGIN ATOMIC
+  IF p_created_by IS NULL OR p_created_by = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified creator identity is required';
+  END IF;
+  IF p_workspace_id IS NULL OR p_workspace_id = ''
+     OR p_environment IS NULL OR p_environment = ''
+     OR p_estimate_id IS NULL OR p_estimate_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate scope and identifier are required';
+  END IF;
+  IF p_requirements_hash NOT RLIKE '^[0-9a-f]{{64}}$' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The requirements hash is not a canonical digest';
+  END IF;
+  IF p_requirements_json IS NULL OR p_requirements_json = ''
+     OR get_json_object(p_requirements_json, '$.pattern') <> p_pattern
+     OR p_results_json IS NULL OR p_results_json = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate document is inconsistent';
+  END IF;
+  IF CAST(p_rigor_pct AS INT) IS NULL
+     OR CAST(p_rigor_pct AS INT) < 0 OR CAST(p_rigor_pct AS INT) > 100
+     OR CAST(p_monthly_requests AS BIGINT) IS NULL
+     OR CAST(p_monthly_requests AS BIGINT) < 1 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate sizing values are out of bounds';
+  END IF;
+  IF p_title IS NULL OR p_title = '' OR length(p_title) > 200 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'A title of at most 200 characters is required';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM {fq}.`estimator_estimates`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND estimate_id = p_estimate_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The estimate ID already exists';
+  END IF;
+  INSERT INTO {fq}.`estimator_estimates` (
+    workspace_id, environment, estimate_id, created_at, created_by, title,
+    pattern, monthly_requests, corpus_gb, requirements_json,
+    requirements_hash, engine_version, rate_card_version, snapshot_date,
+    rigor_pct, results_json
+  ) VALUES (
+    p_workspace_id, p_environment, p_estimate_id, current_timestamp(),
+    p_created_by, p_title, p_pattern, CAST(p_monthly_requests AS BIGINT),
+    CAST(p_corpus_gb AS DOUBLE), p_requirements_json, p_requirements_hash,
+    p_engine_version, p_rate_card_version, CAST(p_snapshot_date AS DATE),
+    CAST(p_rigor_pct AS INT), p_results_json
+  );
+END
+""".strip()
+
+    return [
+        (f"procedure {catalog}.{schema}.cp_record_estimate", record_estimate),
+        (
+            f"grant {app_service_principal} execute on cp_record_estimate",
+            f"GRANT EXECUTE ON PROCEDURE {fq}.`cp_record_estimate` "
+            f"TO `{app_service_principal}`",
+        ),
+    ]
+
+
+def deployment_procedure_statements(
+    catalog: str,
+    schema: str,
+    *,
+    app_service_principal: str,
+) -> list[tuple[str, str]]:
+    """Security-definer append broker for estimate→deployment links.
+
+    Linking a saved estimate to a deployed cost anchor is telemetry append
+    (no target mutation, no approval flow) — the same trust shape as
+    ``cp_record_estimate``. The App verifies the operator at the request
+    boundary and passes the verified identity as ``p_created_by`` plus the
+    projected monthly total it read from the estimate's stored results. The
+    grant is NOT gated on ``actions_enabled``.
+    """
+
+    catalog = _identifier(catalog)
+    schema = _identifier(schema)
+    app_service_principal = _principal(app_service_principal)
+    fq = f"`{catalog}`.`{schema}`"
+
+    link_deployment = f"""
+CREATE OR REPLACE PROCEDURE {fq}.`cp_link_deployment`(
+  IN p_workspace_id STRING,
+  IN p_environment STRING,
+  IN p_deployment_id STRING,
+  IN p_estimate_id STRING,
+  IN p_created_by STRING,
+  IN p_tier STRING,
+  IN p_scenario STRING,
+  IN p_anchor_kind STRING,
+  IN p_anchor_value STRING,
+  IN p_monthly_projected_usd STRING,
+  IN p_currency STRING,
+  IN p_active STRING
+)
+LANGUAGE SQL
+SQL SECURITY DEFINER
+MODIFIES SQL DATA
+AS BEGIN ATOMIC
+  IF p_created_by IS NULL OR p_created_by = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The verified creator identity is required';
+  END IF;
+  IF p_workspace_id IS NULL OR p_workspace_id = ''
+     OR p_environment IS NULL OR p_environment = ''
+     OR p_deployment_id IS NULL OR p_deployment_id = ''
+     OR p_estimate_id IS NULL OR p_estimate_id = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The deployment scope and identifiers are required';
+  END IF;
+  IF p_tier NOT IN ('prototype', 'production', 'fiduciary') THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The tier is not one of the estimator tiers';
+  END IF;
+  IF p_scenario NOT IN ('databricks', 'azure') THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The scenario is not one of the estimator scenarios';
+  END IF;
+  IF p_anchor_kind NOT IN (
+       'azure_resource_group', 'databricks_project_tag', 'databricks_team_tag'
+     ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The cost anchor kind is not allowlisted';
+  END IF;
+  IF p_anchor_value IS NULL OR p_anchor_value = '' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'A cost anchor value is required';
+  END IF;
+  IF CAST(p_monthly_projected_usd AS DOUBLE) IS NULL
+     OR CAST(p_monthly_projected_usd AS DOUBLE) < 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The projected monthly cost is invalid';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM {fq}.`estimator_estimates`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND estimate_id = p_estimate_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The referenced estimate does not exist';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM {fq}.`estimator_deployments`
+    WHERE workspace_id = p_workspace_id
+      AND environment = p_environment
+      AND deployment_id = p_deployment_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'The deployment ID already exists';
+  END IF;
+  INSERT INTO {fq}.`estimator_deployments` (
+    workspace_id, environment, deployment_id, estimate_id, created_at,
+    created_by, tier, scenario, anchor_kind, anchor_value,
+    monthly_projected_usd, currency, active
+  ) VALUES (
+    p_workspace_id, p_environment, p_deployment_id, p_estimate_id,
+    current_timestamp(), p_created_by, p_tier, p_scenario, p_anchor_kind,
+    p_anchor_value, CAST(p_monthly_projected_usd AS DOUBLE), p_currency,
+    CAST(p_active AS BOOLEAN)
+  );
+END
+""".strip()
+
+    return [
+        (f"procedure {catalog}.{schema}.cp_link_deployment", link_deployment),
+        (
+            f"grant {app_service_principal} execute on cp_link_deployment",
+            f"GRANT EXECUTE ON PROCEDURE {fq}.`cp_link_deployment` "
+            f"TO `{app_service_principal}`",
+        ),
+    ]

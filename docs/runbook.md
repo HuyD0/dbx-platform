@@ -30,8 +30,9 @@ Every action stores the canonical plan JSON and SHA-256 hash, exact targets,
 resource versions/preconditions, before/after state, impact, rollback,
 verification, proposer, workspace/environment, 15-minute expiry, and
 single-use idempotency key. Every approval stores the same plan hash, verified
-approver identity/role, decision, timestamp, and typed confirmation when
-required. Execution and verification produce append-only events.
+approver identity/role, decision, and timestamp. The UI requires a separate
+explicit confirmation after the approval click. Execution and verification
+produce append-only events.
 
 Any payload change, target drift, expiry before executor claim, replay, missing
 SCIM identity, lost approver-group membership, unavailable audit storage, or
@@ -42,7 +43,7 @@ failed precondition invalidates the action without a target mutation.
 1. Open **Action Center → Awaiting Approval**.
 2. Confirm workspace/environment, exact target count, before/after state,
    source freshness, blast radius, rollback, and verification.
-3. For medium/high risk, type the displayed action and target count.
+3. Select Approve, then confirm the decision in the separate confirmation step.
 4. Approve or reject. One current member of `dbx-platform-approvers` is
    sufficient and may approve their own proposal.
 5. Follow Activity through execution and verification. Do not retry by
@@ -99,12 +100,11 @@ Use **Workflows → `[dbx-platform] power-controller`**:
 1. Run `operation=plan-hibernate`.
 2. Review resources to stop, already-stopped resources, exclusions, active
    runs/queries, dependencies, estimated idle savings, retained data, wake
-   procedure, inverse state, expiry, hash, and confirmation phrase.
+   procedure, inverse state, expiry, and hash.
 3. Before expiry, rerun with:
    - `operation=execute-hibernate`
    - `plan_id=<reviewed action id>`
    - `plan_hash=<reviewed hash>`
-   - `confirmation=<exact displayed phrase>`
 
 Execution:
 
@@ -127,8 +127,7 @@ Use the same out-of-band controller in the Jobs UI:
 
 1. Run `operation=plan-wake`.
 2. Review the exact 15-minute plan/hash.
-3. Rerun with `operation=execute-wake`, plan ID, plan hash, and exact
-   confirmation.
+3. Rerun with `operation=execute-wake`, plan ID, and plan hash.
 
 The controller verifies the launcher’s current approver-group membership,
 starts the dedicated warehouse, starts and health-checks the currently
@@ -164,6 +163,29 @@ Deploying while desired state is `SLEEPING` leaves the warehouse and schedules
 asleep, but still starts the app, which declares `started: true`. A routine
 merge to `main` therefore restarts the app even when the toolkit is hibernated;
 only the warehouse and schedules stay asleep until an approved Wake.
+
+## Assistant model access
+
+The FastAPI backend hosts the LangGraph ReAct agent in-process. The graph uses
+the Databricks-hosted endpoint configured by `var.chat_model` (default
+`databricks-claude-sonnet-4-5`) as its LLM. The bundle binds that endpoint as
+the `chat-model` App resource with `CAN_QUERY` and injects its exact name
+through `DBX_PLATFORM_CHAT_ENDPOINT`.
+
+The graph receives the current page context and browser-held conversation. Its
+allowlisted tools reuse package checks for SQL-backed operational evidence and
+the canonical `platform_findings` repository for privileged scheduled
+evidence. It has no executor or target-mutation tool.
+
+If chat returns `agent_unavailable`, verify that the endpoint is `READY`, the
+App deployment includes the `chat-model` resource, and the active deployment
+contains `DBX_PLATFORM_CHAT_ENDPOINT`. Also verify the App environment
+installed `databricks-langchain` and `langgraph` from `requirements.txt`.
+
+The optional MLflow-serving wrapper under `agents/platform_agent/` remains
+disabled; the App does not need it. Its deployment helper intentionally exits
+because separate model registration/deployment is a governed mutation without
+an allowlisted executor action.
 
 ## Protected forecast training
 
@@ -267,6 +289,18 @@ Interpret labels literally:
 - `Databricks list`: usage joined to list prices, not an invoice;
 - `provider estimate`: AI Gateway/provider estimate, never silently combined
   with actual billed cost.
+
+Azure billed cost is ingested only after Cost Management applies the configured
+resource-group allowlist. The Databricks/Azure reconciliation view is a daily
+SKU-family bridge, not invoice-line equivalence; it withholds variance when the
+Azure billing currency is not USD. Compute, storage, networking, commitments,
+credits, and tax lines can remain unmatched by design.
+
+Paid Genie usage is included from `billing_origin_product = 'GENIE'` in the
+Databricks list-cost basis. SQL warehouse compute used by Genie remains a
+separate Databricks product cost. Use native Databricks Genie budgets for
+near-real-time alerts or blocking; Mission Control budgets are analytical,
+approval-gated guardrails and do not replace native enforcement.
 
 Do not add currencies without a documented conversion source/rate/time.
 Request telemetry allocates billed totals to workloads but does not claim

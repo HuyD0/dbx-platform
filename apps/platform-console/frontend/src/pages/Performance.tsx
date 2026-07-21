@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FindingsSection } from "../components/FindingsSection";
-import { Card, PageHeader, SectionTitle } from "../components/ui";
+import { Card, SectionTitle } from "../components/ui";
 
 const WINDOWS = [7, 30, 90];
 
@@ -8,12 +8,6 @@ export function Performance() {
   const [days, setDays] = useState(30);
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow="Reliability engineering"
-        title="Performance"
-        description="Find regressions and SLO risk in context, including the cost and reliability trade-off of a proposed fix."
-      />
-
       <Card>
         <SectionTitle
           title="Analysis window"

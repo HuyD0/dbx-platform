@@ -78,6 +78,13 @@ variables:
       action plans and launch the out-of-band power controller.
     default: dbx-platform-approvers
 
+  approver_group_id:
+    description: >
+      Exact SCIM ID of dbx-platform-approvers. The least-privileged action
+      executor compares this immutable value with the resolved user's current
+      memberships without enumerating the workspace group directory.
+    default: ""
+
   operator_group:
     description: >
       Account group allowed to create immutable Mission Control proposals.
@@ -104,6 +111,14 @@ variables:
       BUNDLE_VAR_azure_subscription_id.
     default: ""
 
+  azure_cost_resource_groups:
+    description: >
+      Comma-separated allowlist of Azure resource groups whose billed charges
+      belong to this Databricks workspace. Ingestion fails closed when empty.
+      Include the Databricks managed resource group and Azure AI resource
+      groups intentionally allocated to this workspace.
+    default: ""
+
   azure_service_credential:
     description: >
       Unity Catalog service credential name used for keyless Azure auth from
@@ -126,6 +141,92 @@ targets:
   dev:
     default: true
     mode: development
+    resources:
+      jobs:
+        llm_cost_rollup:
+          performance_target: STANDARD
+        schema_migrations:
+          performance_target: STANDARD
+        ai_monitor_rollup:
+          performance_target: STANDARD
+        ai_catalog_sync:
+          performance_target: STANDARD
+        ml_serving_report:
+          performance_target: STANDARD
+        ml_hygiene_report:
+          performance_target: STANDARD
+        dashboards_setup:
+          performance_target: STANDARD
+        azure_cost_pull:
+          performance_target: STANDARD
+        security_audit:
+          performance_target: STANDARD
+        cost_forecast_train:
+          performance_target: STANDARD
+        cost_forecast_daily:
+          performance_target: STANDARD
+        cost_usage_report:
+          performance_target: STANDARD
+        power_controller:
+          performance_target: STANDARD
+        housekeeping_report:
+          performance_target: STANDARD
+        action_executor:
+          performance_target: STANDARD
+        platform_digest:
+          performance_target: STANDARD
+        governance_check:
+          performance_target: STANDARD
+
+  # UAT: mirrors production semantics in the dedicated UAT workspace, but keeps
+  # serverless jobs on the cost-optimized STANDARD target and isolates durable
+  # control-plane data from dev/prod. Schedules remain paused from the resource
+  # definitions, and the managed warehouse remains 2X-Small with a 5 minute
+  # auto-stop (resources/runtime_control.yml).
+  uat:
+    mode: production
+    workspace:
+      host: https://adb-7405613180844632.12.azuredatabricks.net
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      state_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}/state
+    variables:
+      control_plane_catalog: dbx_uat
+    resources:
+      jobs:
+        llm_cost_rollup:
+          performance_target: STANDARD
+        schema_migrations:
+          performance_target: STANDARD
+        ai_monitor_rollup:
+          performance_target: STANDARD
+        ai_catalog_sync:
+          performance_target: STANDARD
+        ml_serving_report:
+          performance_target: STANDARD
+        ml_hygiene_report:
+          performance_target: STANDARD
+        dashboards_setup:
+          performance_target: STANDARD
+        azure_cost_pull:
+          performance_target: STANDARD
+        security_audit:
+          performance_target: STANDARD
+        cost_forecast_train:
+          performance_target: STANDARD
+        cost_forecast_daily:
+          performance_target: STANDARD
+        cost_usage_report:
+          performance_target: STANDARD
+        power_controller:
+          performance_target: STANDARD
+        housekeeping_report:
+          performance_target: STANDARD
+        action_executor:
+          performance_target: STANDARD
+        platform_digest:
+          performance_target: STANDARD
+        governance_check:
+          performance_target: STANDARD
 
   # Production: real names, schedules deployed paused, identity-owned root.
   # The power controller proposes reconciliation; a human approves the exact

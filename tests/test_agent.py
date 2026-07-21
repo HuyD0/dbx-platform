@@ -75,11 +75,34 @@ def test_agent_tools_wrap_no_mutating_functions():
     mutation happens only in the Platform Console's confirm-gated apply."""
     source = (
         Path(__file__).resolve().parent.parent
-        / "agents" / "platform_agent" / "tools.py"
+        / "src" / "dbx_platform" / "platform_agent" / "tools.py"
     ).read_text()
     for forbidden in ("apply_", "pause_job", "revoke_", "run_setup", "permanent_delete",
                       "run_now", "jobs.update", "jobs.delete"):
         assert forbidden not in source, f"agent tools reference {forbidden}"
+
+
+def test_platform_console_hosts_langgraph_agent_without_direct_invocation():
+    root = Path(__file__).resolve().parent.parent
+    runtime = (
+        root / "apps" / "platform-console" / "backend" / "platform_agent.py"
+    ).read_text()
+    router = (
+        root / "apps" / "platform-console" / "backend" / "routers" / "chat.py"
+    ).read_text()
+    assert "create_react_agent" in runtime
+    assert "backend.agent_runtime" in runtime
+    assert "DatabricksChatModel" in (
+        root / "apps" / "platform-console" / "backend" / "agent_runtime" / "chat_model.py"
+    ).read_text()
+    assert "configure_mlflow_tracing" in (
+        root / "apps" / "platform-console" / "backend" / "agent_runtime" / "tracing.py"
+    ).read_text()
+    assert "databricks_langchain" not in runtime
+    assert "get_platform_agent().invoke" in router
+    assert "api_client.do(" not in router
+    for forbidden in ("action_executor", "run_now", "jobs.update", "jobs.delete"):
+        assert forbidden not in runtime
 
 
 def test_system_prompt_teaches_the_proposal_convention():

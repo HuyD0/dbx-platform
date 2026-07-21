@@ -1,2 +1,1 @@
-"""Read-only tool and formatting support for the Platform Console agent."""
-
+"""Shared read-only LangGraph agent logic for Mission Control."""

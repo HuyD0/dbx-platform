@@ -135,6 +135,9 @@ def run_inference(
     model_name: str,
     horizon: int,
     lookback_days: int = 120,
+    *,
+    workspace_id: str,
+    environment: str,
 ) -> list[dict]:
     """Load @champion, forecast, persist. Returns summary rows for emit."""
     try:
@@ -152,8 +155,15 @@ def run_inference(
     version = MlflowClient().get_model_version_by_alias(uc_name, "champion").version
     model = mlflow.pyfunc.load_model(f"models:/{uc_name}@champion")
 
-    rows = azure_cost.fetch_daily_buckets(w, warehouse_id, catalog, schema,
-                                          lookback_days)
+    rows = azure_cost.fetch_daily_buckets(
+        w,
+        warehouse_id,
+        catalog,
+        schema,
+        lookback_days,
+        workspace_id=workspace_id,
+        environment=environment,
+    )
     dense = forecast_features.daily_series(rows)
     if not dense:
         raise ValueError(

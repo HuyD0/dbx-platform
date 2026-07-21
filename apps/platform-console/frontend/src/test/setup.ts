@@ -29,3 +29,8 @@ Object.defineProperty(URL, "revokeObjectURL", {
   configurable: true,
   value: vi.fn(),
 });
+
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  configurable: true,
+  value: vi.fn(),
+});

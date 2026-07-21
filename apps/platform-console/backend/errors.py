@@ -37,6 +37,7 @@ def payload(error: str, message: str, hint: str | None = None) -> dict:
 
 
 def install(app: FastAPI) -> None:
+    from backend.control_plane import ActionNotFoundError
     from backend.identity import UnauthenticatedError, UnauthorizedError
 
     @app.exception_handler(UnauthenticatedError)
@@ -53,6 +54,16 @@ def install(app: FastAPI) -> None:
         return JSONResponse(
             status_code=403,
             content=payload("unauthorized", str(exc)),
+        )
+
+    @app.exception_handler(ActionNotFoundError)
+    def _action_not_found(
+        request: Request,
+        exc: ActionNotFoundError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=404,
+            content=payload("action_not_found", str(exc)),
         )
 
     @app.exception_handler(SystemTablesUnavailableError)

@@ -7,8 +7,8 @@
 # a stateful and potentially expensive action.
 #
 # Daily: rebuild features from the ingested bill -> batch inference from
-# @champion into cost_forecasts -> drift + accuracy monitor (fails the job on
-# a retrain verdict, so the failure email is the alert).
+# @champion into cost_forecasts -> drift + accuracy monitor (writes findings for
+# in-app alerts instead of sending job-failure email).
 #
 # The forecast environment installs the [forecast] extras on serverless —
 # they are deliberately NOT in the core wheel (see pyproject.toml).
@@ -39,9 +39,6 @@ resources:
           default: ""
         - name: approved_plan_hash
           default: ""
-      email_notifications:
-        on_failure:
-          - ${var.notification_email}
       environments:
         - environment_key: forecast
           spec:
@@ -93,9 +90,6 @@ resources:
           default: ""
         - name: approved_plan_hash
           default: ""
-      email_notifications:
-        on_failure:
-          - ${var.notification_email}
       environments:
         - environment_key: forecast
           spec:

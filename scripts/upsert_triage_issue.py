@@ -2,9 +2,9 @@
 
 Reads NDJSON files produced by ``dbx-platform ... --output json`` (one JSON
 document per report block), and upserts a single issue labeled
-``platform-triage`` whose body carries the findings plus an @claude mention
-asking for remediation *as pull requests* — the agent proposes git changes
-only; --apply paths remain human-invoked.
+``platform-triage`` whose body carries the findings for human review. The
+script intentionally avoids tagging coding agents; remediation should start
+from the in-app alert and a deliberate human request.
 
 Uses the ``gh`` CLI (present on GitHub runners) with the workflow's
 GITHUB_TOKEN. Stdlib only; no third-party dependencies.
@@ -42,9 +42,10 @@ def build_body(blocks: list[dict]) -> str:
     findings = "\n\n".join(sections)
     return f"""Automated checks found actionable issues on {date.today().isoformat()}.
 
-@claude please review the findings below and propose fixes **as pull
-requests** — for example policy drift is fixed by editing `policies/*.json`,
-and right-sizing findings by adjusting job/cluster specs kept in git. Do not
+Review the findings below in the Platform Console, then ask an agent or
+engineer to propose code changes only when you want remediation work to begin.
+For example, policy drift is fixed by editing `policies/*.json`, and
+right-sizing findings by adjusting job/cluster specs kept in git. Do not
 attempt to change the workspace directly: `--apply` actions stay
 human-invoked, per the repo safety model.
 

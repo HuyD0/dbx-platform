@@ -60,6 +60,9 @@ class Settings:
     service_credential: str = ""
     # Azure Cost Management (bill ingestion + spike check)
     azure_subscription_id: str = ""
+    # Resource groups whose charges are attributable to this workspace.
+    # Empty fails closed instead of relabeling a subscription-wide bill.
+    azure_cost_resource_groups: str = ""
     azure_spike_pct: int = 50
     azure_spike_min_cost: int = 10
     # AI catalog (ai_catalog.py): comma-separated Azure subscription IDs to
