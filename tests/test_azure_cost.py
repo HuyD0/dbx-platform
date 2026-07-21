@@ -8,8 +8,11 @@ from dbx_platform.azure_cost import (
     build_detail_query_body,
     build_query_body,
     classify_azure_spend,
+    count_costs_sql,
+    count_detail_costs_sql,
     create_detail_table_sql,
     create_table_sql,
+    expected_daily_counts,
     fetch_cost_query,
     inclusive_date_window,
     merge_costs_sql,
@@ -24,6 +27,7 @@ from dbx_platform.azure_cost import (
     split_date_windows,
     store_costs,
     store_detail_costs,
+    validate_cost_reconciliation,
 )
 from dbx_platform.control_plane_schema import MIGRATION_COLUMNS
 
@@ -439,6 +443,184 @@ def test_store_failure_has_migration_guidance(monkeypatch):
             window_start="2026-07-14",
             window_end="2026-07-17",
         )
+
+
+def _cost_row(day: str, service: str = "Azure Databricks") -> dict:
+    return {
+        "usage_date": day,
+        "service_name": service,
+        "resource_group": "rg",
+        "service_bucket": "databricks",
+        "cost": 1.0,
+        "currency": "CAD",
+    }
+
+
+def _validate_costs(monkeypatch, target_rows: list[dict], rows: list[dict]) -> list[dict]:
+    monkeypatch.setattr(
+        azure_cost,
+        "run_query",
+        lambda *_args, **_kwargs: target_rows,
+    )
+    return validate_cost_reconciliation(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        rows,
+        workspace_id="w1",
+        environment="prod",
+        subscription_id="sub-1",
+        scope_filter="rg",
+        window_start="2026-07-14",
+        window_end="2026-07-16",
+    )
+
+
+def test_expected_daily_counts_includes_zero_count_days():
+    assert expected_daily_counts(
+        [_cost_row("2026-07-14"), _cost_row("2026-07-16")],
+        "2026-07-14",
+        "2026-07-16",
+    ) == {"2026-07-14": 1, "2026-07-15": 0, "2026-07-16": 1}
+
+
+def test_count_sql_scopes_the_exact_target_window():
+    for sql in (
+        count_costs_sql("main", "dbx_platform"),
+        count_detail_costs_sql("main", "dbx_platform"),
+    ):
+        assert "workspace_id = :workspace_id" in sql
+        assert "environment = :environment" in sql
+        assert "subscription_id = :subscription_id" in sql
+        assert "BETWEEN CAST(:window_start AS DATE)" in sql
+        assert "scope_filter = :scope_filter" in sql
+
+
+def test_cost_reconciliation_validation_passes_for_matching_daily_counts(monkeypatch):
+    summaries = _validate_costs(
+        monkeypatch,
+        [
+            {"usage_date": "2026-07-14", "row_count": 2, "scope_row_count": 2},
+            {"usage_date": "2026-07-16", "row_count": 1, "scope_row_count": 1},
+        ],
+        [
+            _cost_row("2026-07-14"),
+            _cost_row("2026-07-14", "Storage"),
+            _cost_row("2026-07-16"),
+        ],
+    )
+    assert summaries == [
+        {
+            "table": "main.dbx_platform.azure_costs",
+            "window_start": "2026-07-14",
+            "window_end": "2026-07-16",
+            "source_rows": 3,
+            "target_rows": 3,
+            "validated_days": 3,
+            "status": "validated",
+        }
+    ]
+
+
+@pytest.mark.parametrize("target_count", [1, 3])
+def test_cost_reconciliation_validation_fails_on_under_or_overcount(
+    monkeypatch, target_count
+):
+    with pytest.raises(RuntimeError, match=r"expected=2 target="):
+        _validate_costs(
+            monkeypatch,
+            [
+                {
+                    "usage_date": "2026-07-14",
+                    "row_count": target_count,
+                    "scope_row_count": target_count,
+                }
+            ],
+            [_cost_row("2026-07-14"), _cost_row("2026-07-14", "Storage")],
+        )
+
+
+def test_cost_reconciliation_validation_detects_rows_on_empty_source_day(monkeypatch):
+    with pytest.raises(RuntimeError, match=r"2026-07-15 expected=0 target=1"):
+        _validate_costs(
+            monkeypatch,
+            [
+                {"usage_date": "2026-07-14", "row_count": 1, "scope_row_count": 1},
+                {"usage_date": "2026-07-15", "row_count": 1, "scope_row_count": 1},
+                {"usage_date": "2026-07-16", "row_count": 1, "scope_row_count": 1},
+            ],
+            [_cost_row("2026-07-14"), _cost_row("2026-07-16")],
+        )
+
+
+def test_cost_reconciliation_validation_detects_stale_scope_rows(monkeypatch):
+    with pytest.raises(RuntimeError, match=r"target=2 current_scope=1"):
+        _validate_costs(
+            monkeypatch,
+            [
+                {"usage_date": "2026-07-14", "row_count": 2, "scope_row_count": 1},
+            ],
+            [_cost_row("2026-07-14"), _cost_row("2026-07-14", "Storage")],
+        )
+
+
+def test_cost_reconciliation_validation_query_failure_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        azure_cost,
+        "run_query",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(Exception("warehouse unavailable")),
+    )
+    with pytest.raises(RuntimeError, match="Unable to validate required table"):
+        validate_cost_reconciliation(
+            object(),
+            "warehouse",
+            "main",
+            "dbx_platform",
+            [],
+            workspace_id="w1",
+            environment="prod",
+            subscription_id="sub-1",
+            scope_filter="rg",
+            window_start="2026-07-14",
+            window_end="2026-07-16",
+        )
+
+
+def test_oversized_reconciliation_validates_each_atomic_day(monkeypatch):
+    calls = []
+    monkeypatch.setattr(azure_cost, "_MAX_SQL_PARAMETER_BYTES", 240)
+
+    def fake_query(_w, _sql, _warehouse, params=None, **_kwargs):
+        calls.append(params)
+        return [
+            {
+                "usage_date": params["window_start"],
+                "row_count": 1,
+                "scope_row_count": 1,
+            }
+        ]
+
+    monkeypatch.setattr(azure_cost, "run_query", fake_query)
+    rows = [_cost_row("2026-07-14"), _cost_row("2026-07-15")]
+    summaries = validate_cost_reconciliation(
+        object(),
+        "warehouse",
+        "main",
+        "dbx_platform",
+        rows,
+        workspace_id="w1",
+        environment="prod",
+        subscription_id="sub-1",
+        scope_filter="rg",
+        window_start="2026-07-14",
+        window_end="2026-07-15",
+    )
+    assert [(p["window_start"], p["window_end"]) for p in calls] == [
+        ("2026-07-14", "2026-07-14"),
+        ("2026-07-15", "2026-07-15"),
+    ]
+    assert len(summaries) == 2
 
 
 def test_report_sql_whitelists_dimension():
