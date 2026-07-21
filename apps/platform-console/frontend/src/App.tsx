@@ -12,6 +12,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Building2,
   Sparkles,
   Sun,
   Tags,
@@ -46,6 +47,7 @@ import { MissionControl } from "./pages/MissionControl";
 import { Operations } from "./pages/Operations";
 import { SecurityRisk } from "./pages/SecurityRisk";
 import { Settings as SettingsPage } from "./pages/Settings";
+import { Workspaces } from "./pages/Workspaces";
 
 interface NavItem {
   to: string;
@@ -64,6 +66,7 @@ const NAV: NavItem[] = [
   { to: "/risk", label: "Risk", icon: ShieldCheck, page: <SecurityRisk /> },
   { to: "/operations", label: "Operations", icon: ServerCog, page: <Operations /> },
   { to: "/automations", label: "Automations", icon: Workflow, page: <Automations /> },
+  { to: "/workspaces", label: "Workspaces", icon: Building2, page: <Workspaces /> },
   { to: "/learn", label: "Learn", icon: GraduationCap, page: <Learn /> },
 ];
 
