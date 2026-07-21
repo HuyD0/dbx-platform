@@ -2,52 +2,81 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — light blueprint is the first-visit theme, with a saved
-   dark blueprint variant. Categorical slots and status colors retain fixed
-   meanings across both modes. */
+/* Brand system. The shell is deliberately neutral: red identifies the product
+   and primary actions, while operational states keep their own semantic
+   colors. Light is the first-visit theme and dark remains user-selectable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #ffffff;
-  --color-surface: #f4f4f3;
-  --color-ink: #1a1c1f;
-  --color-ink-2: #50545a;
-  --color-muted: #73777e;
-  --color-grid: #e2e4e7;
-  --color-hairline: rgba(26, 28, 31, 0.09);
+  --color-page: #fbf7f8;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-tint: #f9eaed;
+  --color-ink: #240b15;
+  --color-ink-2: #4b3f43;
+  --color-muted: #806a72;
+  --color-grid: #e4d7db;
+  --color-hairline: rgba(36, 11, 21, 0.08);
 
-  --color-series-1: #2a78d6;
-  --color-series-2: #008300;
-  --color-series-3: #e87ba4;
-  --color-series-4: #eda100;
+  --color-brand-primary: #f00037;
+  --color-brand-maroon: #240b15;
+  --color-brand-mid: #8b001f;
+  --color-rose-grey: #b79aa3;
+  --color-sand: #e4d7db;
+  --color-warning-surface: #fff8e1;
+  --color-warning-accent: #ffcd67;
+  --color-info-surface: #e5f6f5;
+  --color-success-surface: #edf6e8;
+  --color-serious-surface: #fbeee9;
+  --color-critical-surface: #fce9ed;
 
-  --color-status-good: #0ca30c;
-  --color-status-warning: #fab219;
-  --color-status-serious: #ec835a;
-  --color-status-critical: #d03b3b;
+  --color-series-1: #006f72;
+  --color-series-2: #3f7424;
+  --color-series-3: #8b001f;
+  --color-series-4: #8a6200;
 
-  --color-accent: #2a78d6;
-  --color-blueprint: #339cff;
-  --color-process: #b76532;
+  --color-status-info: #006f72;
+  --color-status-good: #3f7424;
+  --color-status-warning: #6e4d00;
+  --color-status-serious: #8a432f;
+  --color-status-critical: #b4233e;
+
+  --color-accent: #8b001f;
+  --color-blueprint: #006f72;
+  --color-process: #8b001f;
 }
 
 .dark {
-  --color-page: #0d0d0d;
-  --color-surface: #1a1a19;
-  --color-ink: #ffffff;
-  --color-ink-2: #c3c2b7;
-  --color-muted: #898781;
-  --color-grid: #2c2c2a;
-  --color-hairline: rgba(255, 255, 255, 0.1);
+  --color-page: #171315;
+  --color-surface: #211a1d;
+  --color-raised: #2b2326;
+  --color-tint: #34252a;
+  --color-ink: #fbf7f8;
+  --color-ink-2: #d8ccd0;
+  --color-muted: #bfaeb4;
+  --color-grid: #493b40;
+  --color-hairline: rgba(251, 247, 248, 0.1);
 
-  --color-series-1: #3987e5;
-  --color-series-2: #008300;
-  --color-series-3: #d55181;
-  --color-series-4: #c98500;
+  --color-warning-surface: #382d17;
+  --color-info-surface: #173537;
+  --color-success-surface: #26351f;
+  --color-serious-surface: #402922;
+  --color-critical-surface: #44212a;
 
-  --color-accent: #3987e5;
-  --color-blueprint: #83c3ff;
-  --color-process: #ed9b63;
+  --color-series-1: #5ed5d7;
+  --color-series-2: #9ad878;
+  --color-series-3: #ff6a88;
+  --color-series-4: #ffcd67;
+
+  --color-status-info: #5ed5d7;
+  --color-status-good: #9ad878;
+  --color-status-warning: #ffcd67;
+  --color-status-serious: #ffad91;
+  --color-status-critical: #ff8da0;
+
+  --color-accent: #ff4c70;
+  --color-blueprint: #5ed5d7;
+  --color-process: #ff6a88;
 }
 
 html,
@@ -81,63 +110,54 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-brand-primary);
   outline-offset: 2px;
 }
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  background: color-mix(in srgb, var(--color-brand-primary) 28%, transparent);
 }
 
-/* Technical-paper field. The orthogonal grid is intentionally recessive:
-   it organizes the canvas without implying relationships between cards. */
 body {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in srgb, var(--color-grid) 54%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--color-grid) 54%, transparent) 1px,
-      transparent 1px
-    );
-  background-size: 24px 24px;
-  background-position: -1px -1px;
-  background-attachment: fixed;
+  background-image: none;
 }
 
-/* Restrained drafting surfaces: mostly opaque, lightly lifted, and still
-   coordinated with the existing modal and drawer system. */
+/* Existing class names remain stable for callers, but the surfaces are now
+   fully opaque and restrained. */
 .glass {
-  background: rgba(244, 244, 243, 0.88);
-  backdrop-filter: blur(12px) saturate(1.15);
-  -webkit-backdrop-filter: blur(12px) saturate(1.15);
-  border: 1px solid rgba(26, 28, 31, 0.1);
-  box-shadow: 0 12px 30px rgba(26, 28, 31, 0.06);
+  background: var(--color-surface);
+  border: 1px solid var(--color-grid);
+  box-shadow: 0 1px 2px rgba(36, 11, 21, 0.04);
 }
 .dark .glass {
-  background: rgba(26, 26, 25, 0.82);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+  background: var(--color-surface);
+  border-color: var(--color-grid);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
 }
-/* Higher-opacity variant for modals/panels that sit over busy content. */
+/* Raised dialogs and drawers remain visually distinct without transparency. */
 .glass-strong {
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(18px) saturate(1.15);
-  -webkit-backdrop-filter: blur(18px) saturate(1.15);
-  border: 1px solid rgba(26, 28, 31, 0.12);
+  background: var(--color-raised);
+  border: 1px solid var(--color-grid);
 }
 .dark .glass-strong {
-  background: rgba(22, 22, 21, 0.94);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--color-raised);
+  border-color: var(--color-grid);
+}
+
+/* Solid controls and readable light-theme accent text use the deeper red.
+   Bright primary red remains a decorative brand, rail, and focus color. */
+.bg-accent {
+  background-color: var(--color-brand-mid);
+}
+
+nav a[aria-current="page"] {
+  box-shadow: inset 3px 0 var(--color-brand-primary);
 }
 
 .brand-diamond {
-  border: 1px solid color-mix(in srgb, var(--color-accent) 58%, var(--color-grid));
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 58%, var(--color-grid));
   border-radius: 0.3rem;
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-page));
-  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-brand-primary) 9%, var(--color-surface));
+  color: var(--color-brand-primary);
   box-shadow: none;
   transform: rotate(45deg) scale(0.78);
 }
@@ -252,11 +272,8 @@ body {
   }
 }
 
-/* These glass rules are unlayered, so Tailwind's layered utilities
-   (border-y-0, hover:border-accent/40, …) can never override them — the
-   cascade-layers spec puts any unlayered rule above any layered one. Edge
-   and hover variants therefore live here, after the base rules, where plain
-   source order settles it deterministically. */
+/* These surface rules are unlayered, so Tailwind's layered utilities cannot
+   override their edges. Keep edge variants here for the shell. */
 .glass-edge-r {
   border-width: 0 1px 0 0; /* full-height left sidebar: right edge only */
 }
@@ -276,13 +293,11 @@ body {
   border-color: var(--color-accent);
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass {
-    background: var(--color-surface);
-  }
-  .glass-strong {
-    background: var(--color-page);
-  }
+/* Remove ambient blur from legacy utility usage in modals and sticky tables. */
+.backdrop-blur-sm,
+.backdrop-blur-md {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 @media (forced-colors: active) {

@@ -7,14 +7,14 @@ import {
   Info,
   RefreshCw,
 } from "lucide-react";
-import { useId, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ApiError } from "../lib/types";
 import type { SourceHealth } from "../lib/types";
 import { timeAgo } from "../lib/format";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`glass rounded-2xl p-4 shadow-xl shadow-black/5 dark:shadow-black/25 ${className}`}>
+    <div className={`glass rounded-2xl p-4 ${className}`}>
       {children}
     </div>
   );
@@ -37,6 +37,29 @@ export function SectionTitle({
       </div>
       {right}
     </div>
+  );
+}
+
+export function HelpTip({ label, children }: { label: string; children: ReactNode }) {
+  const tooltipId = useId();
+  return (
+    <span className="group relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label={label}
+        aria-describedby={tooltipId}
+        className="rounded-full p-0.5 text-muted hover:bg-hairline hover:text-ink focus-visible:text-ink"
+      >
+        <CircleHelp className="h-3.5 w-3.5" />
+      </button>
+      <span
+        id={tooltipId}
+        role="tooltip"
+        className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-1.5 w-64 -translate-x-1/2 rounded-lg bg-ink px-2.5 py-2 text-left text-[11px] font-normal leading-4 text-page opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+      >
+        {children}
+      </span>
+    </span>
   );
 }
 
@@ -95,11 +118,12 @@ export function StatTile({
 }
 
 const badgeTones: Record<string, string> = {
-  critical: "bg-status-critical/15 text-status-critical",
-  serious: "bg-status-serious/15 text-status-serious",
-  warning: "bg-status-warning/15 text-status-warning",
-  good: "bg-status-good/15 text-status-good",
-  info: "bg-hairline text-ink-2",
+  critical: "border border-status-critical/30 bg-critical-surface text-status-critical",
+  serious: "border border-status-serious/30 bg-serious-surface text-status-serious",
+  warning:
+    "border border-warning-accent bg-warning-surface text-brand-maroon dark:text-status-warning",
+  good: "border border-status-good/30 bg-success-surface text-status-good",
+  info: "border border-status-info/30 bg-info-surface text-status-info",
 };
 
 export function Badge({
@@ -144,6 +168,9 @@ export function statusTone(
       "attention",
       "warning",
       "degraded",
+      "medium",
+      "partial",
+      "expiring",
       "executing",
       "verifying",
     ].some((s) => value.includes(s))
@@ -198,7 +225,7 @@ const errorGuidance: Record<string, string> = {
   unauthenticated: "Your Databricks user identity could not be verified.",
   unauthorized: "Your identity is not authorized for this governed operation.",
   control_plane_unavailable: "Mission Control storage is temporarily unavailable.",
-  agent_unavailable: "The platform agent's serving endpoint is not reachable.",
+  agent_unavailable: "The backend LangGraph agent is not reachable.",
   query_timeout: "The warehouse query timed out — try refresh, or check the warehouse.",
 };
 
@@ -379,9 +406,19 @@ export function AsOf({
 }: {
   asOf?: string;
   cached?: boolean;
-  onRefresh: () => void;
+  onRefresh: () => Promise<unknown>;
   refreshing: boolean;
 }) {
+  const [requestPending, setRequestPending] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const refresh = () => {
+    setRequestPending(true);
+    setAnnouncement("Refreshing data.");
+    void onRefresh().then(
+      () => setAnnouncement("Refresh complete."),
+      () => setAnnouncement("Refresh failed. Existing data remains on screen."),
+    ).finally(() => setRequestPending(false));
+  };
   return (
     <div className="flex items-center gap-2 text-xs text-muted">
       {asOf && (
@@ -392,14 +429,19 @@ export function AsOf({
       )}
       <button
         type="button"
-        onClick={onRefresh}
+        onClick={refresh}
         title="Refresh"
         aria-label="Refresh"
-        className="rounded p-1 hover:bg-hairline disabled:opacity-50"
-        disabled={refreshing}
+        className="grid min-h-6 min-w-6 place-items-center rounded p-1 hover:bg-hairline disabled:opacity-50"
+        disabled={refreshing || requestPending}
       >
-        <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+        <RefreshCw
+          className={`h-3.5 w-3.5 ${refreshing || requestPending ? "animate-spin" : ""}`}
+        />
       </button>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </span>
     </div>
   );
 }

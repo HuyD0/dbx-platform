@@ -36,6 +36,7 @@ SELECT
   PERCENTILE_APPROX(latency_ms, 0.95)                             AS p95_latency_ms
 FROM system.ai_gateway.usage
 WHERE DATE(event_time) >= DATE_SUB(CURRENT_DATE(), :days)
+  AND workspace_id = :workspace_id
 GROUP BY
   usage_date,
   usage_hour,

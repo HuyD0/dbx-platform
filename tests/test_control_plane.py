@@ -848,7 +848,6 @@ def test_generic_api_hash_auth_replay_and_audit(control_plane_client):
         f"/api/action-requests/{plan['action_id']}/approve",
         json={
             "plan_hash": plan["plan_hash"],
-            "confirm": plan["confirm_phrase"],
         },
     )
     assert approved.status_code == 200
@@ -998,6 +997,383 @@ def test_manual_job_run_is_planned_not_executed(control_plane_client):
     assert target["job_state"]["run_as_user_name"] == "platform-runner@example.com"
     assert target["settings_sha256"] == sha256_json(target["job_state"])
     assert plan["status"] == "AWAITING_APPROVAL"
+
+
+def test_exact_low_risk_report_job_uses_click_confirmation(
+    control_plane_client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DBX_PLATFORM_LOW_RISK_JOB_IDS", "7")
+    planned = control_plane_client.post(
+        "/api/action-requests/plan",
+        json={
+            "action": "run-job",
+            "parameters": {
+                "job_id": 7,
+                "job_name": "[dbx-platform] cost-usage-report",
+            },
+        },
+    ).json()
+
+    assert planned["risk"] == "low"
+    response = control_plane_client.post(
+        f"/api/action-requests/{planned['action_id']}/approve",
+        json={"plan_hash": planned["plan_hash"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "APPROVED"
+
+
+def _seed_decision_action(
+    repository,
+    *,
+    action_id: str,
+    now: datetime,
+    risk: RiskLevel,
+    target_id: str,
+    action_type: str = "stale-clusters",
+    target_field: str = "cluster_id",
+) -> ActionRequest:
+    action = ActionRequest.create(
+        action_type=action_type,
+        workspace_id="local",
+        environment="dev",
+        targets=[{target_field: target_id}],
+        parameters={},
+        preconditions={"state_sha256": sha256_json([target_id])},
+        before_state=[{target_field: target_id}],
+        after_state={"state": "TERMINATED"},
+        impact={"summary": {"clusters": 1}, "target_count": 1},
+        rollback={"supported": False},
+        verification={"strategy": "re-read"},
+        risk=risk,
+        proposer=_actor("proposer"),
+        now=now,
+    )
+    action.action_id = action_id
+    action.plan_hash = action.calculated_hash()
+    repository.create_action(action)
+    return action
+
+
+def test_mission_control_decision_queue_is_open_ranked_and_read_only(
+    control_plane_client,
+):
+    repository = deps.get_control_plane_repository()
+    now = control_plane.utc_now()
+    high = _seed_decision_action(
+        repository,
+        action_id="action-high",
+        now=now - timedelta(minutes=1),
+        risk=RiskLevel.HIGH,
+        target_id="cluster-high",
+    )
+    medium_soon = _seed_decision_action(
+        repository,
+        action_id="action-medium-soon",
+        now=now - timedelta(minutes=12),
+        risk=RiskLevel.MEDIUM,
+        target_id="cluster-medium-soon",
+    )
+    medium_later = _seed_decision_action(
+        repository,
+        action_id="action-medium-later",
+        now=now - timedelta(minutes=2),
+        risk=RiskLevel.MEDIUM,
+        target_id="cluster-medium-later",
+    )
+    low = _seed_decision_action(
+        repository,
+        action_id="action-low",
+        now=now - timedelta(minutes=3),
+        risk=RiskLevel.LOW,
+        target_id="cluster-low",
+    )
+    derived_expired = _seed_decision_action(
+        repository,
+        action_id="action-derived-expired",
+        now=now - timedelta(minutes=16),
+        risk=RiskLevel.HIGH,
+        target_id="cluster-derived-expired",
+    )
+    raw_expired = _seed_decision_action(
+        repository,
+        action_id="action-raw-expired",
+        now=now - timedelta(minutes=30),
+        risk=RiskLevel.HIGH,
+        target_id="cluster-raw-expired",
+    )
+    approved_expired = _seed_decision_action(
+        repository,
+        action_id="action-approved-expired",
+        now=now - timedelta(minutes=20),
+        risk=RiskLevel.MEDIUM,
+        target_id="cluster-approved-expired",
+    )
+    repository.transition(
+        raw_expired.action_id,
+        expected={ActionStatus.AWAITING_APPROVAL},
+        target=ActionStatus.EXPIRED,
+        actor_id="test",
+    )
+    repository.transition(
+        approved_expired.action_id,
+        expected={ActionStatus.AWAITING_APPROVAL},
+        target=ActionStatus.APPROVED,
+        actor_id="test",
+    )
+    repository.add_finding(
+        {
+            "finding_id": "finding-open",
+            "workspace_id": "local",
+            "environment": "dev",
+            "pillar": "SECURITY",
+            "severity": "HIGH",
+            "confidence": 0.9,
+            "check_name": "stale-cluster",
+            "reason": "Cluster is stale.",
+            "state": "OPEN",
+            "proposed_action_type": "stale-clusters",
+            "affected_resources_json": json.dumps(
+                [{"cluster_id": "cluster-high"}]
+            ),
+            "freshness_at": "2026-07-18T12:00:00Z",
+        }
+    )
+    repository.add_finding(
+        {
+            "finding_id": "finding-resolved",
+            "workspace_id": "local",
+            "environment": "dev",
+            "pillar": "COST",
+            "severity": "LOW",
+            "state": "RESOLVED",
+            "proposed_action_type": "stale-clusters",
+            "affected_resources_json": json.dumps(
+                [{"cluster_id": "cluster-high"}]
+            ),
+        }
+    )
+    before = {
+        action.action_id: (
+            action.plan_hash,
+            len(repository.list_events(action.action_id)),
+        )
+        for action in (
+            high,
+            medium_soon,
+            medium_later,
+            low,
+            derived_expired,
+            raw_expired,
+            approved_expired,
+        )
+    }
+    cache.clear()
+
+    response = control_plane_client.get("/api/mission-control")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    queue = data["decision_queue"]
+    assert data["pending_approvals"] == 4
+    assert data["findings"]["data"]["total"] == 1
+    assert [row["finding_id"] for row in data["decisions"]] == [
+        "finding-open"
+    ]
+    assert queue["ranking"] == "risk-expiry-created-v1"
+    assert queue["active_count"] == 4
+    assert queue["expiring_soon_count"] == 1
+    assert queue["expired_count"] == 3
+    assert [row["action_id"] for row in queue["items"]] == [
+        "action-high",
+        "action-medium-soon",
+        "action-medium-later",
+        "action-low",
+    ]
+    assert queue["items"][0]["evidence_summary"] == {
+        "matched_count": 1,
+        "pillars": ["SECURITY"],
+        "freshest_at": "2026-07-18T12:00:00Z",
+        "coverage_status": "MATCHED",
+    }
+
+    expired_listing = control_plane_client.get(
+        "/api/action-requests",
+        params={"status": "EXPIRED"},
+    ).json()
+    assert {
+        row["action_id"] for row in expired_listing["data"]
+    } == {
+        "action-approved-expired",
+        "action-derived-expired",
+        "action-raw-expired",
+    }
+    detail = control_plane_client.get(
+        f"/api/action-requests/{derived_expired.action_id}"
+    ).json()
+    assert detail["status"] == "AWAITING_APPROVAL"
+    assert detail["raw_status"] == "AWAITING_APPROVAL"
+    assert detail["effective_status"] == "EXPIRED"
+    assert detail["can_approve"] is False
+    assert "Create a new exact plan" in detail["expiry_guidance"]
+
+    for action_id, (plan_hash, event_count) in before.items():
+        current = repository.get_action(action_id)
+        assert current is not None
+        assert current.plan_hash == plan_hash
+        assert len(repository.list_events(action_id)) == event_count
+
+
+def test_action_detail_correlates_bounded_scoped_evidence(
+    control_plane_client,
+):
+    repository = deps.get_control_plane_repository()
+    action = _seed_decision_action(
+        repository,
+        action_id="action-evidence",
+        now=control_plane.utc_now() - timedelta(minutes=1),
+        risk=RiskLevel.MEDIUM,
+        target_id="cluster-evidence",
+    )
+    for index in range(51):
+        repository.add_finding(
+            {
+                "finding_id": f"finding-{index:02d}",
+                "workspace_id": "local",
+                "environment": "dev",
+                "pillar": "SECURITY" if index % 2 else "COST",
+                "severity": "HIGH",
+                "confidence": 0.8,
+                "check_name": "stale-cluster",
+                "reason": "Current evidence for the exact cluster.",
+                "state": "OPEN" if index else "RESOLVED",
+                "proposed_action_type": (
+                    "stale-clusters" if index != 1 else "review"
+                ),
+                "affected_resources_json": json.dumps(
+                    [{"resource_id": "cluster-evidence"}]
+                ),
+                "freshness_at": f"2026-07-18T12:{index:02d}:00Z",
+            }
+        )
+    repository.add_finding(
+        {
+            "finding_id": "foreign-finding",
+            "workspace_id": "local",
+            "environment": "prod",
+            "pillar": "SECURITY",
+            "state": "OPEN",
+            "proposed_action_type": "stale-clusters",
+            "affected_resources_json": json.dumps(
+                [{"resource_id": "cluster-evidence"}]
+            ),
+        }
+    )
+
+    response = control_plane_client.get(
+        f"/api/action-requests/{action.action_id}"
+    )
+
+    assert response.status_code == 200
+    correlation = response.json()["evidence_correlation"]
+    assert correlation["coverage_status"] == "MATCHED"
+    assert correlation["total"] == 51
+    assert correlation["truncated"] is True
+    assert len(correlation["items"]) == 50
+    assert "foreign-finding" not in {
+        row["finding_id"] for row in correlation["items"]
+    }
+    assert {
+        row["match_type"] for row in correlation["items"]
+    } == {"supports_action", "same_target"}
+
+
+def test_action_evidence_masks_sensitive_token_fields_for_viewer(
+    control_plane_client,
+    monkeypatch,
+):
+    repository = deps.get_control_plane_repository()
+    action = _seed_decision_action(
+        repository,
+        action_id="action-token-evidence",
+        now=control_plane.utc_now() - timedelta(minutes=1),
+        risk=RiskLevel.HIGH,
+        target_id="pat-secret-id",
+        action_type="token-revoke",
+        target_field="token_id",
+    )
+    repository.add_finding(
+        {
+            "finding_id": "token-finding",
+            "workspace_id": "local",
+            "environment": "dev",
+            "pillar": "SECURITY",
+            "check_name": "stale-token",
+            "owner": "owner@example.com",
+            "reason": "Token exceeds the configured maximum age.",
+            "state": "OPEN",
+            "proposed_action_type": "token-revoke",
+            "affected_resources_json": json.dumps(
+                [{"token_id": "pat-secret-id"}]
+            ),
+        }
+    )
+    monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    deps.get_identity_verifier.cache_clear()
+
+    response = control_plane_client.get(
+        f"/api/action-requests/{action.action_id}"
+    )
+
+    assert response.status_code == 200
+    item = response.json()["evidence_correlation"]["items"][0]
+    assert item["owner"] == "[redacted]"
+    assert item["affected_resources"] == [{"resource_id": "[redacted]"}]
+
+
+def test_mission_and_action_detail_degrade_evidence_independently(
+    control_plane_client,
+    monkeypatch,
+):
+    repository = deps.get_control_plane_repository()
+    action = _seed_decision_action(
+        repository,
+        action_id="action-degraded-evidence",
+        now=control_plane.utc_now() - timedelta(minutes=1),
+        risk=RiskLevel.MEDIUM,
+        target_id="cluster-degraded",
+    )
+
+    def unavailable_findings(**_kwargs):
+        raise RuntimeError("findings unavailable")
+
+    monkeypatch.setattr(repository, "list_findings", unavailable_findings)
+    cache.clear()
+
+    mission = control_plane_client.get("/api/mission-control")
+    detail = control_plane_client.get(
+        f"/api/action-requests/{action.action_id}"
+    )
+
+    assert mission.status_code == 200
+    mission_data = mission.json()["data"]
+    assert mission_data["decision_queue"]["items"][0]["evidence_summary"][
+        "coverage_status"
+    ] == "UNAVAILABLE"
+    assert next(
+        source
+        for source in mission_data["data_health"]
+        if source["source"] == "Platform findings"
+    )["status"] == "unavailable"
+    assert detail.status_code == 200
+    assert detail.json()["evidence_correlation"] == {
+        "coverage_status": "UNAVAILABLE",
+        "total": 0,
+        "truncated": False,
+        "items": [],
+    }
 
 
 def test_manual_job_target_rename_invalidates_approval(control_plane_client):
@@ -1205,7 +1581,7 @@ def test_runtime_alias_uses_controller_plan_and_submits_after_approval(
 
     approved = control_plane_client.post(
         f"/api/action-requests/{plan['action_id']}/approve",
-        json={"plan_hash": plan["plan_hash"], "confirm": plan["confirm_phrase"]},
+        json={"plan_hash": plan["plan_hash"]},
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "APPROVED"

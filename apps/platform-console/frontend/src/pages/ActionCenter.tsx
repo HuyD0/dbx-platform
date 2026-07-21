@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   UserCheck,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { PlanActionButton } from "../components/ActionPlanDialog";
 import { ActionReviewDialog } from "../components/ActionReviewDialog";
 import { DataTable } from "../components/DataTable";
@@ -27,7 +27,7 @@ import {
   statusTone,
 } from "../components/ui";
 import { apiGet, isUnavailable } from "../lib/api";
-import type { ActionRequest, Envelope } from "../lib/types";
+import type { ActionRequest, ActionStatus, Envelope, Row } from "../lib/types";
 
 const TABS = [
   { id: "recommendations", label: "Recommendations" },
@@ -76,7 +76,7 @@ const ACTION_LIFECYCLE = [
   },
   {
     label: "Human approval",
-    description: "Current membership and typed confirmation",
+    description: "Current membership and explicit confirmation",
     icon: UserCheck,
   },
   {
@@ -97,22 +97,62 @@ function rowsFromEnvelope(
   envelope: Envelope<ActionRequest[] | { items?: ActionRequest[] }>,
 ): ActionRequest[] {
   const items = Array.isArray(envelope.data) ? envelope.data : (envelope.data.items ?? []);
-  return items.map((row) => ({
-    ...row,
-    target_count:
-      row.target_count ??
-      (Array.isArray(row.targets) ? row.targets.length : undefined),
-  }));
+  return items.map((row) => {
+    const normalized: ActionRequest = {
+      ...row,
+      target_count: row.target_count ?? row.targets.length,
+    };
+    return {
+      ...normalized,
+      effective_status: effectiveStatus(normalized),
+    };
+  });
+}
+
+function effectiveStatus(row: ActionRequest): ActionStatus {
+  const evaluatedAt = Date.parse(row.evaluated_at);
+  const expiresAt = Date.parse(row.expires_at);
+  const current = row.effective_status || row.status;
+  if (
+    ["AWAITING_APPROVAL", "APPROVED"].includes(current) &&
+    Number.isFinite(evaluatedAt) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt <= evaluatedAt
+  ) {
+    return "EXPIRED";
+  }
+  return current;
+}
+
+function canApprove(row: ActionRequest): boolean {
+  return row.can_approve === true && effectiveStatus(row) === "AWAITING_APPROVAL";
 }
 
 function matchesTab(row: ActionRequest, tab: string): boolean {
-  const status = String(row.status ?? "").toUpperCase();
-  if (tab === "recommendations") return ["RECOMMENDED", "DRAFT", "PROPOSED"].includes(status);
-  if (tab === "approval") return ["AWAITING_APPROVAL", "APPROVED"].includes(status);
-  if (tab === "failed") {
-    return ["FAILED", "ROLLED_BACK", "REJECTED", "EXPIRED", "STALE"].includes(status);
-  }
-  return !["RECOMMENDED", "DRAFT", "PROPOSED", "AWAITING_APPROVAL"].includes(status);
+  const status = effectiveStatus(row);
+  const awaitingApproval = status === "AWAITING_APPROVAL";
+  const failed = ["FAILED", "ROLLED_BACK", "REJECTED", "EXPIRED", "STALE"].includes(status);
+
+  if (tab === "recommendations") return false;
+  if (tab === "approval") return awaitingApproval;
+  if (tab === "failed") return failed;
+  return !awaitingApproval && !failed;
+}
+
+/** Adapt strict action records only at the generic legacy table boundary. */
+function actionTableRows(actions: ActionRequest[]): Row[] {
+  return actions.map((action) => ({
+    action_id: action.action_id,
+    action_type: action.action_type,
+    effective_status: effectiveStatus(action),
+    can_approve: canApprove(action),
+    risk: action.risk,
+    target_count: action.target_count ?? action.targets.length,
+    proposer_email: action.proposer_email,
+    created_at: action.created_at,
+    expires_at: action.expires_at,
+    plan_hash: action.plan_hash,
+  }));
 }
 
 export function ActionCenter() {
@@ -132,6 +172,11 @@ export function ActionCenter() {
     ...item,
     badge: rows.filter((row) => matchesTab(row, item.id)).length,
   }));
+  const closeReview = useCallback(() => setReviewId(null), []);
+  const refreshActions = query.refetch;
+  const handleChanged = useCallback(() => {
+    void refreshActions();
+  }, [refreshActions]);
 
   return (
     <div className="space-y-5">
@@ -241,12 +286,13 @@ export function ActionCenter() {
           />
         ) : (
           <DataTable
-            rows={filtered}
+            rows={actionTableRows(filtered)}
             exportName={`action-center-${tab}`}
             caption={`${tab} action requests`}
             columns={[
               "action_type",
-              "status",
+              "effective_status",
+              "can_approve",
               "risk",
               "target_count",
               "proposer_email",
@@ -255,15 +301,20 @@ export function ActionCenter() {
               "plan_hash",
             ]}
             rowAction={(row) => {
-              const id = String(row.action_id ?? row.plan_id ?? row.id ?? "");
+              const id = typeof row.action_id === "string" ? row.action_id : "";
+              const readyForApproval =
+                row.can_approve === true && row.effective_status === "AWAITING_APPROVAL";
               return (
                 <button
                   type="button"
                   disabled={!id}
                   onClick={() => setReviewId(id)}
-                  className="rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-40"
+                  aria-label={`${readyForApproval ? "Review approval" : "Review action"} ${String(
+                    row.action_type ?? id,
+                  )}`}
+                  className="min-h-8 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-40"
                 >
-                  Review
+                  {readyForApproval ? "Review approval" : "Review"}
                 </button>
               );
             }}
@@ -302,8 +353,8 @@ export function ActionCenter() {
       {reviewId && (
         <ActionReviewDialog
           actionId={reviewId}
-          onClose={() => setReviewId(null)}
-          onChanged={() => query.refetch()}
+          onClose={closeReview}
+          onChanged={handleChanged}
         />
       )}
     </div>

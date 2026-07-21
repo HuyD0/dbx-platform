@@ -311,6 +311,8 @@ def test_app_binds_manual_job_without_adding_it_to_hibernate_inventory():
     runtime_resource = (root / "resources" / "runtime_control.yml").read_text()
     assert "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS" in app_resource
     assert "${resources.jobs.cost_forecast_train.id}" in app_resource
+    assert "DBX_PLATFORM_LOW_RISK_JOB_IDS" in app_resource
+    assert "${resources.jobs.platform_digest.id}" in app_resource
     assert "cost_forecast_train=${resources.jobs.cost_forecast_train.id}" not in (
         runtime_resource
     )

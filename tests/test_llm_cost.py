@@ -3,6 +3,7 @@ from datetime import date
 
 import pytest
 
+from dbx_platform import llm_cost
 from dbx_platform.llm_cost import (
     azure_actual_cost,
     breakdown,
@@ -64,6 +65,66 @@ def _usage(**overrides):
         "p95_latency_ms": 450,
     }
     return {**base, **overrides}
+
+
+def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
+    class Workspace:
+        def get_workspace_id(self):
+            return 12345
+
+    calls = []
+
+    def read(_workspace, sql, warehouse_id, parameters):
+        calls.append((sql, warehouse_id, parameters))
+        return []
+
+    monkeypatch.setattr(llm_cost, "run_query", read)
+    workspace = Workspace()
+
+    llm_cost.databricks_cost(workspace, "warehouse-1", 30, gateway_enriched=True)
+    llm_cost.databricks_cost(workspace, "warehouse-1", 30, gateway_enriched=False)
+    llm_cost.gateway_usage(workspace, "warehouse-1", 30)
+    llm_cost.endpoint_usage(workspace, "warehouse-1", 30)
+
+    assert len(calls) == 4
+    assert all(warehouse == "warehouse-1" for _, warehouse, _ in calls)
+    assert all(
+        parameters == {"days": 30, "workspace_id": "12345"}
+        for _, _, parameters in calls
+    )
+    assert all(":workspace_id" in sql for sql, _, _ in calls)
+    assert all(
+        "workspace_id = :workspace_id" in sql
+        for sql, _, _ in calls
+    )
+    assert "eu.workspace_id = se.workspace_id" in calls[3][0]
+    assert "'current'" not in calls[3][0]
+
+
+def test_live_llm_sources_honor_an_explicit_workspace_scope(monkeypatch):
+    class Workspace:
+        def get_workspace_id(self):
+            pytest.fail("explicit scope must not be replaced")
+
+    seen_parameters = []
+    monkeypatch.setattr(
+        llm_cost,
+        "run_query",
+        lambda _workspace, _sql, _warehouse, parameters: (
+            seen_parameters.append(parameters) or []
+        ),
+    )
+
+    llm_cost.gateway_usage(
+        Workspace(),
+        "warehouse-1",
+        7,
+        workspace_id="workspace-current",
+    )
+
+    assert seen_parameters == [
+        {"days": 7, "workspace_id": "workspace-current"}
+    ]
 
 
 def test_normalize_cost_preserves_basis_and_currency():

@@ -6,7 +6,7 @@ import logging
 import math
 import re
 from collections import Counter
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -39,6 +39,10 @@ from backend.models import (
 )
 from backend.routers import actions, jobs
 from dbx_platform import llm_cost
+from dbx_platform.resource_identifiers import (
+    extract_resource_ids,
+    parse_resource_ids,
+)
 from dbx_platform.system_tables import run_query
 
 router = APIRouter()
@@ -74,6 +78,16 @@ _ACTION_ALIASES = {
     "hibernate": "runtime.hibernate",
     "wake": "runtime.wake",
 }
+_EXPIRABLE_STATUSES = frozenset(
+    {ActionStatus.AWAITING_APPROVAL, ActionStatus.APPROVED}
+)
+_RISK_RANK = {
+    RiskLevel.HIGH: 3,
+    RiskLevel.MEDIUM: 2,
+    RiskLevel.LOW: 1,
+}
+_EVIDENCE_RESPONSE_LIMIT = 50
+_EVIDENCE_READ_LIMIT = 1000
 
 
 def _normalize_action_type(action_type: str) -> str:
@@ -425,10 +439,16 @@ def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
             job_id,
             str(claimed_name) if claimed_name is not None else None,
         )
+        risk = (
+            RiskLevel.LOW
+            if jobs.is_low_risk_manual_job(job_id)
+            else RiskLevel.MEDIUM
+        )
     else:
         items, execution_payload, summary = actions.build_action_plan(
             action_type, parameters
         )
+        risk = _ACTION_RISK.get(action_type, RiskLevel.HIGH)
     state_hash = sha256_json(
         {
             "targets": items,
@@ -466,7 +486,7 @@ def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
         verification={
             "strategy": "Re-read each target after execution and record its resulting state."
         },
-        risk=_ACTION_RISK.get(action_type, RiskLevel.HIGH),
+        risk=risk,
     )
 
 
@@ -493,12 +513,213 @@ def _revalidate(action: ActionRequest) -> dict[str, Any]:
     return dict(spec.preconditions)
 
 
+def _as_utc(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _effective_status(
+    action: ActionRequest,
+    evaluated_at: datetime,
+) -> ActionStatus:
+    if (
+        action.status in _EXPIRABLE_STATUSES
+        and action.is_expired(evaluated_at)
+    ):
+        return ActionStatus.EXPIRED
+    return action.status
+
+
+def _can_approve(
+    action: ActionRequest,
+    *,
+    actor,
+    evaluated_at: datetime,
+    repository,
+) -> bool:
+    return (
+        _effective_status(action, evaluated_at)
+        == ActionStatus.AWAITING_APPROVAL
+        and actor.has_role("approver")
+        and deps.actions_enabled()
+        and not repository.proposal_only
+    )
+
+
+def _finding_resource_value(finding: dict[str, Any]) -> Any:
+    if "affected_resources" in finding:
+        return finding.get("affected_resources")
+    return finding.get("affected_resources_json")
+
+
+def _matching_findings(
+    action: ActionRequest,
+    findings: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], str]]:
+    target_ids = extract_resource_ids(action.targets)
+    if not target_ids:
+        return []
+    matches: list[tuple[dict[str, Any], str]] = []
+    for finding in findings:
+        finding_ids = parse_resource_ids(_finding_resource_value(finding))
+        if not target_ids.intersection(finding_ids):
+            continue
+        finding_action = _normalize_action_type(
+            str(
+                finding.get("proposed_action_type")
+                or finding.get("action")
+                or ""
+            )
+        )
+        match_type = (
+            "supports_action"
+            if finding_action == action.action_type
+            else "same_target"
+        )
+        matches.append((finding, match_type))
+    return matches
+
+
+def _freshest_finding_at(
+    findings: list[dict[str, Any]],
+) -> str | None:
+    candidates: list[tuple[datetime, str]] = []
+    fallback: list[str] = []
+    for finding in findings:
+        value = (
+            finding.get("freshness_at")
+            or finding.get("last_seen_at")
+            or finding.get("run_ts")
+        )
+        if not value:
+            continue
+        text = value.isoformat() if isinstance(value, datetime) else str(value)
+        parsed = _as_utc(value)
+        if parsed is not None:
+            candidates.append((parsed, text))
+        else:
+            fallback.append(text)
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+    return max(fallback) if fallback else None
+
+
+def _evidence_summary(
+    action: ActionRequest,
+    findings: list[dict[str, Any]],
+    *,
+    available: bool,
+) -> dict[str, Any]:
+    if not available:
+        return {
+            "matched_count": 0,
+            "pillars": [],
+            "freshest_at": None,
+            "coverage_status": "UNAVAILABLE",
+        }
+    matches = _matching_findings(action, findings)
+    matched_findings = [finding for finding, _match_type in matches]
+    return {
+        "matched_count": len(matches),
+        "pillars": sorted(
+            {
+                str(finding.get("pillar") or "RISK").upper()
+                for finding in matched_findings
+            }
+        ),
+        "freshest_at": _freshest_finding_at(matched_findings),
+        "coverage_status": (
+            "MATCHED"
+            if matches
+            else (
+                "NO_MATCH"
+                if extract_resource_ids(action.targets)
+                else "NO_TARGETS"
+            )
+        ),
+    }
+
+
+def _action_evidence(
+    action: ActionRequest,
+    findings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    matches = _matching_findings(action, findings)
+    items = []
+    for finding, match_type in matches[:_EVIDENCE_RESPONSE_LIMIT]:
+        items.append(
+            {
+                "finding_id": finding.get("finding_id"),
+                "check_name": finding.get("check_name"),
+                "pillar": str(finding.get("pillar") or "RISK").upper(),
+                "severity": str(
+                    finding.get("severity") or "MEDIUM"
+                ).upper(),
+                "confidence": finding.get("confidence"),
+                "owner": finding.get("owner"),
+                "reason": finding.get("reason"),
+                "state": str(finding.get("state") or "OPEN").upper(),
+                "freshness_at": (
+                    finding.get("freshness_at")
+                    or finding.get("last_seen_at")
+                    or finding.get("run_ts")
+                ),
+                "proposed_action_type": (
+                    finding.get("proposed_action_type")
+                    or finding.get("action")
+                ),
+                "affected_resources": finding.get(
+                    "affected_resources",
+                    [],
+                ),
+                "match_type": match_type,
+            }
+        )
+    return {
+        "coverage_status": (
+            "MATCHED"
+            if matches
+            else (
+                "NO_MATCH"
+                if extract_resource_ids(action.targets)
+                else "NO_TARGETS"
+            )
+        ),
+        "total": len(matches),
+        "truncated": len(matches) > _EVIDENCE_RESPONSE_LIMIT,
+        "items": items,
+    }
+
+
+def _unavailable_action_evidence() -> dict[str, Any]:
+    return {
+        "coverage_status": "UNAVAILABLE",
+        "total": 0,
+        "truncated": False,
+        "items": [],
+    }
+
+
 def _action_body(
     action: ActionRequest,
     *,
     actor,
     detail: bool = False,
+    evaluated_at: datetime | None = None,
 ) -> dict[str, Any]:
+    evaluated_at = (evaluated_at or utc_now()).astimezone(UTC)
+    repo = _repository()
+    effective_status = _effective_status(action, evaluated_at)
     body = action.model_dump(mode="json")
     body.update(
         {
@@ -509,20 +730,42 @@ def _action_body(
             "items": action.targets,
             "summary": action.impact.get("summary", {}),
             "actions_enabled": (
-                deps.actions_enabled() and not _repository().proposal_only
+                deps.actions_enabled() and not repo.proposal_only
             ),
             "approver_required": True,
             "risk": action.risk.value.lower(),
+            "raw_status": action.status.value,
+            "effective_status": effective_status.value,
+            "evaluated_at": evaluated_at.isoformat(),
+            "can_approve": _can_approve(
+                action,
+                actor=actor,
+                evaluated_at=evaluated_at,
+                repository=repo,
+            ),
         }
     )
+    if effective_status == ActionStatus.EXPIRED:
+        body["expiry_guidance"] = (
+            "This immutable plan has expired. Create a new exact plan from "
+            "current evidence before requesting approval."
+        )
     if detail:
-        repo = _repository()
         body["approvals"] = [
             row.model_dump(mode="json") for row in repo.list_approvals(action.action_id)
         ]
         body["events"] = [
             row.model_dump(mode="json") for row in repo.list_events(action.action_id)
         ]
+        try:
+            findings = repo.list_findings(limit=_EVIDENCE_READ_LIMIT)
+            body["evidence_correlation"] = _action_evidence(action, findings)
+        except Exception:  # noqa: BLE001 - action history remains independently useful
+            log.warning(
+                "Action evidence correlation is unavailable",
+                exc_info=True,
+            )
+            body["evidence_correlation"] = _unavailable_action_evidence()
     return mask_for_viewer(body, actor)
 
 
@@ -532,17 +775,20 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
         actor = _actor(request)
         repo = _repository()
         workspace_id, environment = deps.control_plane_scope()
+        evaluated_at = utc_now().astimezone(UTC)
         health: list[dict[str, Any]] = []
         source_as_of: list[datetime] = []
         source_hits: list[bool] = []
         source_failed = False
+        findings_available = False
         try:
             raw_findings, fetched_at, hit = cache.cached(
-                f"mission-control/findings/{workspace_id}/{environment}",
-                lambda: repo.list_findings(limit=500),
+                f"mission-control/open-findings/{workspace_id}/{environment}",
+                lambda: repo.list_findings(state="OPEN", limit=500),
                 refresh,
                 ttl_seconds=30,
             )
+            findings_available = True
             findings = [
                 mask_for_viewer(row, actor)
                 for row in raw_findings
@@ -560,6 +806,7 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
         except Exception:  # noqa: BLE001 - an independent degraded section
             source_failed = True
             log.warning("Mission Control findings are unavailable", exc_info=True)
+            raw_findings = []
             findings = []
             health.append(
                 {
@@ -569,13 +816,20 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
                 }
             )
         try:
-            (pending, changes), fetched_at, hit = cache.cached(
-                f"mission-control/actions/{workspace_id}/{environment}",
+            (
+                pending_candidates,
+                approved_candidates,
+                expired,
+                changes,
+            ), fetched_at, hit = cache.cached(
+                f"mission-control/actions-v3/{workspace_id}/{environment}",
                 lambda: (
                     repo.list_actions(
                         status=ActionStatus.AWAITING_APPROVAL,
-                        limit=100,
+                        limit=500,
                     ),
+                    repo.list_actions(status=ActionStatus.APPROVED, limit=500),
+                    repo.list_actions(status=ActionStatus.EXPIRED, limit=500),
                     repo.list_actions(status=ActionStatus.SUCCEEDED, limit=5),
                 ),
                 refresh,
@@ -598,7 +852,12 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
         except Exception:  # noqa: BLE001 - an independent degraded section
             source_failed = True
             log.warning("Mission Control approval ledger is unavailable", exc_info=True)
-            pending, changes = [], []
+            pending_candidates, approved_candidates, expired, changes = (
+                [],
+                [],
+                [],
+                [],
+            )
             health.append(
                 {
                     "source": "Approval ledger",
@@ -644,6 +903,70 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
                     "notes": "Initialize the unscheduled power-controller job.",
                 }
             )
+        pending = [
+            action
+            for action in pending_candidates
+            if _effective_status(action, evaluated_at)
+            == ActionStatus.AWAITING_APPROVAL
+        ]
+        derived_expired = [
+            action
+            for action in [*pending_candidates, *approved_candidates]
+            if _effective_status(action, evaluated_at) == ActionStatus.EXPIRED
+        ]
+        pending.sort(
+            key=lambda action: (
+                -_RISK_RANK.get(action.risk, 0),
+                action.expires_at,
+                action.created_at,
+                action.action_id,
+            )
+        )
+        expiring_soon_count = sum(
+            1
+            for action in pending
+            if action.expires_at - evaluated_at <= timedelta(minutes=5)
+        )
+        expired_count = len(
+            {
+                action.action_id
+                for action in [*expired, *derived_expired]
+            }
+        )
+        decision_items = [
+            mask_for_viewer(
+                {
+                    "action_id": action.action_id,
+                    "action_type": action.action_type,
+                    "status": action.status.value,
+                    "raw_status": action.status.value,
+                    "effective_status": _effective_status(
+                        action,
+                        evaluated_at,
+                    ).value,
+                    "risk": action.risk.value.lower(),
+                    "target_count": len(action.targets),
+                    "proposer_id": action.proposer_id,
+                    "proposer_email": action.proposer_email,
+                    "created_at": action.created_at.isoformat(),
+                    "expires_at": action.expires_at.isoformat(),
+                    "can_approve": _can_approve(
+                        action,
+                        actor=actor,
+                        evaluated_at=evaluated_at,
+                        repository=repo,
+                    ),
+                    "impact": action.impact,
+                    "evidence_summary": _evidence_summary(
+                        action,
+                        raw_findings,
+                        available=findings_available,
+                    ),
+                },
+                actor,
+            )
+            for action in pending
+        ]
         by_pillar = Counter(str(row.get("pillar") or "RISK") for row in findings)
         by_severity = Counter(str(row.get("severity") or "MEDIUM") for row in findings)
         by_action = Counter(
@@ -681,8 +1004,23 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
             },
             "outcomes": outcomes,
             "pending_approvals": len(pending),
+            "decision_queue": {
+                "evaluated_at": evaluated_at.isoformat(),
+                "ranking": "risk-expiry-created-v1",
+                "active_count": len(pending),
+                "expiring_soon_count": expiring_soon_count,
+                "expired_count": expired_count,
+                "items": decision_items,
+            },
             "decisions": findings[:3],
-            "changes": [_action_body(row, actor=actor) for row in changes],
+            "changes": [
+                _action_body(
+                    row,
+                    actor=actor,
+                    evaluated_at=evaluated_at,
+                )
+                for row in changes
+            ],
             "findings": {
                 "data": {
                     "run_ts": max(freshness) if freshness else None,
@@ -716,14 +1054,33 @@ def list_action_requests(
 ) -> Any:
     try:
         actor = _actor(request)
-        rows = _repository().list_actions(
-            status=status,
-            action_type=action_type,
-            limit=max(1, min(limit, 500)),
+        evaluated_at = utc_now().astimezone(UTC)
+        requested_limit = max(1, min(limit, 500))
+        repository_status = (
+            None if status == ActionStatus.EXPIRED else status
         )
+        rows = _repository().list_actions(
+            status=repository_status,
+            action_type=action_type,
+            limit=500 if status == ActionStatus.EXPIRED else requested_limit,
+        )
+        if status is not None:
+            rows = [
+                row
+                for row in rows
+                if _effective_status(row, evaluated_at) == status
+            ]
+        rows = rows[:requested_limit]
         return envelope(
-            [_action_body(row, actor=actor) for row in rows],
-            utc_now(),
+            [
+                _action_body(
+                    row,
+                    actor=actor,
+                    evaluated_at=evaluated_at,
+                )
+                for row in rows
+            ],
+            evaluated_at,
             False,
         )
     except Exception as exc:  # noqa: BLE001
@@ -738,7 +1095,12 @@ def get_action_request(action_id: str, request: Request) -> Any:
         if action is None:
             raise ActionNotFoundError(f"Unknown action request {action_id}.")
         action.assert_integrity()
-        return _action_body(action, actor=actor, detail=True)
+        return _action_body(
+            action,
+            actor=actor,
+            detail=True,
+            evaluated_at=utc_now(),
+        )
     except Exception as exc:  # noqa: BLE001
         return _error(exc)
 

@@ -19,7 +19,7 @@ mutations. `--apply`/`--yes` are compatibility flags that always fail.
 
 Every managed-resource/configuration mutation requires one exact immutable,
 15-minute, single-use plan; current `dbx-platform-approvers` membership; a
-typed confirmation for medium/high risk; revalidation; a dedicated
+separate explicit confirmation after the approval click; revalidation; a dedicated
 least-privileged executor; and append-only execution/verification events.
 Missing identity/audit storage, altered payload/hash, drift, expiry, or replay
 fails closed. Resource deletion is unsupported.

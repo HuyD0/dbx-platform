@@ -38,10 +38,15 @@ resources:
             value_from: power-controller
           - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
             value_from: action-executor
+          - name: DBX_PLATFORM_CHAT_ENDPOINT
+            value_from: chat-model
           # Exact bundle-bound manual Jobs that Action Center may plan. These
           # remain protected/outside the Hibernate inventory.
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
             value_from: governed-forecast-training
+          # Exact report-only Job that uses the low-risk display policy.
+          - name: DBX_PLATFORM_LOW_RISK_JOB_IDS
+            value_from: low-risk-platform-digest
           - name: DBX_PLATFORM_ENVIRONMENT
             value: ${bundle.target}
           - name: DBX_PLATFORM_APPROVER_GROUP
@@ -56,6 +61,13 @@ resources:
           sql_warehouse:
             id: ${resources.sql_warehouses.platform_console_warehouse.id}
             permission: CAN_USE
+        - name: chat-model
+          description: >
+            Query the Databricks-hosted foundation model used by the
+            App-hosted read-only LangGraph agent.
+          serving_endpoint:
+            name: ${var.chat_model}
+            permission: CAN_QUERY
         - name: power-controller
           description: >
             Submit an already approved runtime action to the out-of-band
@@ -77,4 +89,12 @@ resources:
             directly; execution is submitted only through action-executor.
           job:
             id: ${resources.jobs.cost_forecast_train.id}
+            permission: CAN_VIEW
+        - name: low-risk-platform-digest
+          description: >
+            Bind the exact report-only digest Job ID to the low-risk
+            click-confirmation policy. Execution still goes through the
+            approved action executor.
+          job:
+            id: ${resources.jobs.platform_digest.id}
             permission: CAN_VIEW

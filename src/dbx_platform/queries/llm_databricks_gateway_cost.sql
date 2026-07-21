@@ -48,6 +48,7 @@ LEFT JOIN system.billing.list_prices p
   AND u.usage_start_time >= p.price_start_time
   AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
 WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
+  AND u.workspace_id = :workspace_id
   AND (
     u.billing_origin_product = 'MODEL_SERVING'
     OR u.sku_name LIKE '%INFERENCE%'
