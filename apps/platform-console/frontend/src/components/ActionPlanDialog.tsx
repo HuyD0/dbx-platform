@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, Clock3, Fingerprint, Play, ShieldAlert, X } from "lucide-react";
+import { CheckCircle2, Clock3, Fingerprint, Play, ShieldAlert, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiPost, isUnavailable } from "../lib/api";
@@ -38,7 +38,7 @@ function detailSummary(label: string, value: unknown): string {
   }
   if (label === "Rollback" && record?.description) return String(record.description);
   if (label === "Verification" && record?.strategy) return String(record.strategy);
-  return "See technical details below.";
+  return "See the exact payload for details.";
 }
 
 function DetailBlock({
@@ -185,7 +185,7 @@ export function ActionPlanDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="glass-strong max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-4 shadow-2xl sm:p-5"
+        className="glass-strong max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-4 shadow-2xl sm:p-5 lg:max-w-5xl"
       >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
@@ -213,85 +213,89 @@ export function ActionPlanDialog({
 
         {p && !approved && (
           <>
-            <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 rounded-lg bg-accent/10 p-2 text-accent">
-                  <Play className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold text-ink">
-                    {isJobRun ? `Run ${targetName} once?` : `Approve “${title}”?`}
-                  </h3>
-                  <p className="mt-1 text-xs leading-5 text-ink-2">
-                    {isJobRun
-                      ? "This starts one new run now. It does not change the job or its schedule."
-                      : `This applies the reviewed action to ${p.items.length} exact target${p.items.length === 1 ? "" : "s"}.`}
-                  </p>
+            {/* Split pane: the human-readable plan on the left, the exact payload
+                it is bound to on the right; the approval controls span below. */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-3">
+                <div className="rounded-xl border border-accent/25 bg-accent/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 rounded-lg bg-accent/10 p-2 text-accent">
+                      <Play className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-semibold text-ink">
+                        {isJobRun ? `Run ${targetName} once?` : `Approve “${title}”?`}
+                      </h3>
+                      <p className="mt-1 text-xs leading-5 text-ink-2">
+                        {isJobRun
+                          ? "This starts one new run now. It does not change the job or its schedule."
+                          : `This applies the reviewed action to ${p.items.length} exact target${p.items.length === 1 ? "" : "s"}.`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-grid/70 pt-3 text-xs text-muted">
+                    <Clock3 className="h-4 w-4 text-accent" />
+                    <span>
+                      Available for{" "}
+                      <strong className="font-semibold text-ink">
+                        {Math.floor(secondsLeft / 60)}m {Math.floor(secondsLeft % 60)}s
+                      </strong>
+                    </span>
+                    <HelpTip label="Why does this approval expire?">
+                      The short expiry prevents an old approval from being reused after the target
+                      changes. The app checks the target again immediately before execution.
+                    </HelpTip>
+                    <span className="ml-auto inline-flex items-center gap-1">
+                      <Badge tone={riskTone}>{risk} risk</Badge>
+                      <HelpTip label={`What does ${risk} risk mean?`}>
+                        Risk describes the possible operational impact. Every approval uses a separate
+                        confirmation step, plus expiry, revalidation, and an exact plan hash.
+                      </HelpTip>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2" aria-label="Plan summary">
+                  {Object.entries(p.summary ?? {}).map(([key, value]) => (
+                    <Badge
+                      key={key}
+                      tone={key.includes("unchanged") || key.includes("untouched") ? "info" : "warning"}
+                    >
+                      {key.replaceAll("_", " ")}: {value}
+                    </Badge>
+                  ))}
+                </div>
+
+                {p.items.length === 0 && <EmptyState message="There is nothing to approve." />}
+
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+                  <DetailBlock
+                    label="Impact"
+                    value={p.impact}
+                    help="What this action will start or change."
+                  />
+                  <DetailBlock
+                    label="Rollback"
+                    value={p.rollback}
+                    help="Whether Mission Control can automatically undo the action."
+                  />
+                  <DetailBlock
+                    label="Verification"
+                    value={p.verification}
+                    help="How Mission Control checks and records the result after execution."
+                  />
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-grid/70 pt-3 text-xs text-muted">
-                <Clock3 className="h-4 w-4 text-accent" />
-                <span>
-                  Available for{" "}
-                  <strong className="font-semibold text-ink">
-                    {Math.floor(secondsLeft / 60)}m {Math.floor(secondsLeft % 60)}s
-                  </strong>
-                </span>
-                <HelpTip label="Why does this approval expire?">
-                  The short expiry prevents an old approval from being reused after the target
-                  changes. The app checks the target again immediately before execution.
-                </HelpTip>
-                <span className="ml-auto inline-flex items-center gap-1">
-                  <Badge tone={riskTone}>{risk} risk</Badge>
-                  <HelpTip label={`What does ${risk} risk mean?`}>
-                    Risk describes the possible operational impact. Every approval uses a separate
-                    confirmation step, plus expiry, revalidation, and an exact plan hash.
-                  </HelpTip>
-                </span>
-              </div>
-            </div>
 
-            <div className="my-3 flex flex-wrap gap-2" aria-label="Plan summary">
-              {Object.entries(p.summary ?? {}).map(([key, value]) => (
-                <Badge
-                  key={key}
-                  tone={key.includes("unchanged") || key.includes("untouched") ? "info" : "warning"}
-                >
-                  {key.replaceAll("_", " ")}: {value}
-                </Badge>
-              ))}
-            </div>
-
-            {p.items.length === 0 && <EmptyState message="There is nothing to approve." />}
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <DetailBlock
-                label="Impact"
-                value={p.impact}
-                help="What this action will start or change."
-              />
-              <DetailBlock
-                label="Rollback"
-                value={p.rollback}
-                help="Whether Mission Control can automatically undo the action."
-              />
-              <DetailBlock
-                label="Verification"
-                value={p.verification}
-                help="How Mission Control checks and records the result after execution."
-              />
-            </div>
-
-            {p.items.length > 0 && (
-              <details className="mt-3 rounded-lg border border-grid bg-page/30">
-                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-ink hover:bg-hairline">
-                  <ChevronDown className="h-3.5 w-3.5 text-muted" />
-                  Technical details
-                  <span className="font-normal text-muted">
-                    Exact target, IDs, hashes, and export
-                  </span>
-                </summary>
-                <div className="space-y-3 border-t border-grid p-3">
+              {p.items.length > 0 && (
+                <div className="space-y-3 rounded-xl border border-grid bg-page/30 p-3">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    Exact payload
+                    <HelpTip label="About the exact payload">
+                      The precise resources, IDs, and plan fingerprint this approval is bound to.
+                      Execution revalidates against exactly this set before anything runs.
+                    </HelpTip>
+                  </div>
                   {p.plan_hash && (
                     <p className="flex min-w-0 items-center gap-1 text-[10px] text-muted">
                       <Fingerprint className="h-3.5 w-3.5 shrink-0" />
@@ -305,8 +309,8 @@ export function ActionPlanDialog({
                     caption={`Exact resources in ${title}`}
                   />
                 </div>
-              </details>
-            )}
+              )}
+            </div>
 
             {p.items.length > 0 && p.actions_enabled && (
               <div className="mt-4">

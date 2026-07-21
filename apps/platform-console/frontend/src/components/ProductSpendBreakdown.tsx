@@ -9,6 +9,11 @@ type ProductTotal = {
   previous: number;
 };
 
+/** Categorical fills for the composition bar and the matching ranked list. These
+ * are the non-red chart steps (teal / green / gold); series-3 is skipped because
+ * it resolves to the same red reserved for the product brand and primary actions. */
+const SERIES_FILLS = ["bg-series-1", "bg-series-2", "bg-series-4"];
+
 const PRODUCT_LABELS: Record<string, string> = {
   APPS: "Databricks Apps",
   DATABASE: "Lakebase",
@@ -171,8 +176,49 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
         </p>
       </div>
 
+      {currentTotal > 0 && groups.length > 1 && (
+        <div>
+          <span
+            className="flex h-3 w-full overflow-hidden rounded-md border border-grid"
+            role="img"
+            aria-label={`Spend composition: ${groups
+              .filter((group) => group.current > 0)
+              .map(
+                (group) =>
+                  `${group.label} ${((group.current / currentTotal) * 100).toFixed(0)}%`,
+              )
+              .join(", ")}`}
+          >
+            {groups.map((group, i) =>
+              group.current > 0 ? (
+                <span
+                  key={group.key}
+                  className={SERIES_FILLS[i % SERIES_FILLS.length]}
+                  style={{ width: `${(group.current / currentTotal) * 100}%` }}
+                />
+              ) : null,
+            )}
+          </span>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1" aria-hidden="true">
+            {groups.map((group, i) =>
+              (group.current / currentTotal) * 100 >= 1 ? (
+                <span
+                  key={group.key}
+                  className="inline-flex items-center gap-1.5 text-[11px] text-muted"
+                >
+                  <span
+                    className={`h-2 w-2 rounded-sm ${SERIES_FILLS[i % SERIES_FILLS.length]}`}
+                  />
+                  {group.label}
+                </span>
+              ) : null,
+            )}
+          </div>
+        </div>
+      )}
+
       <ul className="space-y-1" aria-label="List cost by Databricks product">
-        {groups.map((group) => {
+        {groups.map((group, gi) => {
           const share = currentTotal > 0 ? (group.current / currentTotal) * 100 : 0;
           const isSelected = selected?.key === group.key;
           return (
@@ -194,7 +240,7 @@ export function ProductSpendBreakdown({ rows, days }: { rows: Row[]; days: numbe
                 </span>
                 <span className="block h-2 rounded-sm bg-hairline" aria-hidden="true">
                   <span
-                    className="block h-2 rounded-sm bg-series-1"
+                    className={`block h-2 rounded-sm ${SERIES_FILLS[gi % SERIES_FILLS.length]}`}
                     style={{ width: `${Math.max((group.current / max) * 100, 1)}%` }}
                   />
                 </span>
