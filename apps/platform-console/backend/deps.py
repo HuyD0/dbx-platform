@@ -237,14 +237,25 @@ def get_action_executor_client():
     return ActionExecutorClient(get_ws(), action_executor_job_id())
 
 
-def agent_endpoint() -> str:
-    """Serving endpoint name of the platform agent. agents.deploy names it
-    agents_{catalog}-{schema}-{model}; override with DBX_PLATFORM_AGENT_ENDPOINT."""
-    explicit = os.environ.get("DBX_PLATFORM_AGENT_ENDPOINT", "").strip()
+def chat_endpoint() -> str:
+    """Least-privileged foundation-model endpoint bound to the App."""
+    explicit = os.environ.get("DBX_PLATFORM_CHAT_ENDPOINT", "").strip()
     if explicit:
         return explicit
-    s = get_settings()
-    return f"agents_{s.dashboard_catalog}-{s.dashboard_schema}-platform_agent"
+    return get_settings().digest_model
+
+
+@lru_cache(maxsize=1)
+def get_platform_agent():
+    """Process-local LangGraph agent hosted by the FastAPI backend."""
+    from backend.platform_agent import PlatformAgent
+
+    return PlatformAgent(
+        endpoint=chat_endpoint(),
+        workspace_client_factory=get_ws,
+        settings_factory=get_settings,
+        repository_factory=get_control_plane_repository,
+    )
 
 
 def clamp_days(days: int, lo: int = 7, hi: int = 90) -> int:

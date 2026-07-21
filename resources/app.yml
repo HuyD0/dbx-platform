@@ -38,6 +38,8 @@ resources:
             value_from: power-controller
           - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
             value_from: action-executor
+          - name: DBX_PLATFORM_CHAT_ENDPOINT
+            value_from: chat-model
           # Exact bundle-bound manual Jobs that Action Center may plan. These
           # remain protected/outside the Hibernate inventory.
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
@@ -56,6 +58,13 @@ resources:
           sql_warehouse:
             id: ${resources.sql_warehouses.platform_console_warehouse.id}
             permission: CAN_USE
+        - name: chat-model
+          description: >
+            Query the Databricks-hosted foundation model used by the
+            App-hosted read-only LangGraph agent.
+          serving_endpoint:
+            name: ${var.chat_model}
+            permission: CAN_QUERY
         - name: power-controller
           description: >
             Submit an already approved runtime action to the out-of-band

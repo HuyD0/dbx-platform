@@ -102,6 +102,11 @@ def test_app_yaml_launches_the_backend():
     requirements = (APP_DIR / "requirements.txt").read_text()
     assert "--find-links wheels" in requirements
     assert "fastapi" in requirements
+    assert "databricks-langchain" in requirements
+    assert "langgraph" in requirements
+    resources = bundle_config["resources"]["apps"]["platform_console"]["resources"]
+    chat_model = next(resource for resource in resources if resource["name"] == "chat-model")
+    assert chat_model["serving_endpoint"]["permission"] == "CAN_QUERY"
 
 
 def test_bundle_artifact_build_uses_managed_environment():
@@ -387,8 +392,10 @@ def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
     assert resp.json()["error"] == "warehouse_not_configured"
 
 
-def test_chat_degrades_when_the_agent_endpoint_is_missing(client, ws):
-    ws.api_client.do.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
+def test_chat_degrades_when_the_agent_endpoint_is_missing(client, monkeypatch):
+    agent = MagicMock()
+    agent.invoke.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 503
     assert resp.json()["error"] == "agent_unavailable"
@@ -400,6 +407,8 @@ def test_chat_denies_viewers_before_invoking_app_sp_agent(
     monkeypatch,
 ):
     monkeypatch.setenv("DBX_PLATFORM_LOCAL_ROLES", "viewer")
+    agent_factory = MagicMock()
+    monkeypatch.setattr(deps, "get_platform_agent", agent_factory)
     deps.get_identity_verifier.cache_clear()
     resp = client.post(
         "/api/chat",
@@ -407,19 +416,16 @@ def test_chat_denies_viewers_before_invoking_app_sp_agent(
     )
     assert resp.status_code == 403
     assert resp.json()["error"] == "unauthorized"
-    ws.api_client.do.assert_not_called()
+    agent_factory.assert_not_called()
 
 
-def test_chat_parses_agent_proposals(client, ws):
-    ws.api_client.do.return_value = {
-        "output": [{
-            "type": "message",
-            "content": [{"type": "output_text", "text": (
-                "Two stale clusters are burning money.\n"
-                'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
-            )}],
-        }],
-    }
+def test_chat_parses_agent_proposals(client, monkeypatch):
+    agent = MagicMock()
+    agent.invoke.return_value = (
+        "Two stale clusters are burning money.\n"
+        'ACTION_PROPOSAL:{"action": "stale-clusters", "count": 2}\n'
+    )
+    monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
     resp = client.post(
         "/api/chat",
         json={
@@ -436,7 +442,7 @@ def test_chat_parses_agent_proposals(client, ws):
     body = resp.json()
     assert body["message"] == "Two stale clusters are burning money."
     assert body["proposals"] == [{"kind": "action", "action": "stale-clusters", "count": 2}]
-    invocation = ws.api_client.do.call_args.kwargs["body"]["input"]
+    invocation = agent.invoke.call_args.args[0]
     assert invocation[0]["role"] == "system"
     assert "Every factual claim must cite" in invocation[0]["content"]
     assert invocation[1]["role"] == "system"

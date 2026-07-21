@@ -186,9 +186,9 @@ grants, and validate one complete scheduled reporting cycle. Full setup:
 ## Repository layout
 
 ```text
-apps/platform-console/     React/FastAPI Mission Control
-agents/platform_agent/     read-only contextual assistant
-src/dbx_platform/          evidence packs, ledger, migrations, executors
+apps/platform-console/     React/FastAPI Mission Control + LangGraph runtime
+agents/platform_agent/     disabled standalone agent deployment artifact
+src/dbx_platform/          evidence packs, assistant tools, ledger, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
 dashboards/                AI/BI templates and rendered definitions
 policies/                  reviewable policy source
