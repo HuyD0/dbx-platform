@@ -80,9 +80,8 @@ trap cleanup EXIT
 
 # Start backend in background
 echo -e "${BLUE}Starting backend (FastAPI server)...${NC}"
-PYTHON_BIN=$(which python3)
 cd "$BACKEND_DIR"
-"$PYTHON_BIN" main.py &
+python3 main.py &
 BACKEND_PID=$!
 echo -e "${GREEN}Backend started (PID: $BACKEND_PID)${NC}"
 echo "  URL: http://localhost:8000"
