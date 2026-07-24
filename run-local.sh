@@ -59,6 +59,17 @@ if ! command -v npm &> /dev/null; then
   exit 1
 fi
 
+# Install Python dependencies if needed
+echo -e "${BLUE}Checking Python dependencies...${NC}"
+if ! python3 -c "import uvicorn, fastapi" 2>/dev/null; then
+  echo "Installing Python dependencies..."
+  pip install -e ".[dev]" > /dev/null 2>&1 || {
+    echo -e "${YELLOW}Warning: pip install had issues. Trying basic deps...${NC}"
+    pip install fastapi uvicorn > /dev/null 2>&1
+  }
+fi
+echo -e "${GREEN}✓ Python dependencies ready${NC}\n"
+
 # Function to cleanup on exit
 cleanup() {
   echo -e "\n${YELLOW}Cleaning up processes...${NC}"
