@@ -61,7 +61,8 @@ fi
 
 # Install Python dependencies if needed
 echo -e "${BLUE}Checking Python dependencies...${NC}"
-echo "Using Python: $(python3 --version)"
+PYTHON_BIN=$(which python3)
+echo "Using Python: $(python3 --version) at $PYTHON_BIN"
 if ! python3 -c "import uvicorn, fastapi" 2>/dev/null; then
   echo "Installing Python dependencies..."
   python3 -m pip install -e ".[dev]" 2>&1 | grep -E "Successfully|already" || true
@@ -81,7 +82,8 @@ trap cleanup EXIT
 # Start backend in background
 echo -e "${BLUE}Starting backend (FastAPI server)...${NC}"
 cd "$BACKEND_DIR"
-python3 main.py &
+# Use explicit python path captured before cd (avoid pyenv auto-switching)
+"$PYTHON_BIN" main.py &
 BACKEND_PID=$!
 echo -e "${GREEN}Backend started (PID: $BACKEND_PID)${NC}"
 echo "  URL: http://localhost:8000"
