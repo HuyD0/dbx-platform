@@ -100,6 +100,7 @@ fi
 
 # Start frontend in background
 echo -e "${BLUE}Starting frontend (Vite dev server)...${NC}"
+cd - > /dev/null  # Back to repo root
 cd "$FRONTEND_DIR"
 npm ci > /dev/null 2>&1 || true  # Silent install of deps if needed
 npm run dev &
