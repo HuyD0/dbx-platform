@@ -21,17 +21,235 @@ import {
 } from "../components/ui";
 import { apiGet } from "../lib/api";
 import { currency } from "../lib/format";
-import type { CostOverview, Envelope, Row } from "../lib/types";
+import type {
+  BillingAlignmentRow,
+  CostOverview,
+  Envelope,
+  Row,
+} from "../lib/types";
 import { Cost } from "./Cost";
 
 const COST_TABS = [
   { id: "categories", label: "Service categories" },
   { id: "databricks", label: "Databricks drivers" },
   { id: "ownership", label: "Ownership" },
+  { id: "alignment", label: "Billing alignment" },
   { id: "forecast", label: "Forecast & budgets" },
   { id: "coverage", label: "Coverage" },
   { id: "llm", label: "LLM detail" },
 ];
+
+const ALIGNMENT_FILTERS = [
+  "ALL",
+  "AZURE_ONLY",
+  "DATABRICKS_ONLY",
+  "BILLING_LAG",
+  "PATTERN_VARIANCE",
+  "MONETARY_VARIANCE",
+  "BASIS_MISMATCH",
+] as const;
+
+function alignmentLabel(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function BillingAlignment({ data }: { data: CostOverview }) {
+  const [filter, setFilter] =
+    useState<(typeof ALIGNMENT_FILTERS)[number]>("ALL");
+  const query = useQuery({
+    queryKey: ["/api/cost/reconciliation", data.period.days],
+    queryFn: () =>
+      apiGet<Envelope<BillingAlignmentRow[]>>(
+        `/api/cost/reconciliation?days=${data.period.days}`,
+      ),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const summary = data.billing_alignment;
+  const rows = query.data?.data ?? [];
+  const filtered =
+    filter === "ALL"
+      ? rows
+      : rows.filter((row) => row.classifications?.includes(filter));
+  const statusTone =
+    summary.status === "aligned"
+      ? "good"
+      : summary.status === "unavailable"
+        ? "info"
+        : "warning";
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <SectionTitle
+          title="Variance watch"
+          subtitle="Daily and SKU-family alignment without treating CAD actuals and USD list price as the same money"
+          right={<Badge tone={statusTone}>{alignmentLabel(summary.status)}</Badge>}
+        />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="min-w-0 rounded-xl border border-grid bg-page/25 p-3">
+            <p className="text-[11px] text-muted">Variance rows</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
+              {summary.variance_count}
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              {summary.unmatched_count} unmatched
+            </p>
+          </div>
+          <div className="min-w-0 rounded-xl border border-grid bg-page/25 p-3">
+            <p className="text-[11px] text-muted">Azure Actual</p>
+            <p className="mt-1 break-words text-base font-semibold tabular-nums text-ink">
+              {summary.azure_totals.length
+                ? summary.azure_totals
+                    .map((total) => currency(total.cost, total.currency))
+                    .join(" · ")
+                : "—"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              through {summary.latest_azure_date ?? "—"}
+            </p>
+          </div>
+          <div className="min-w-0 rounded-xl border border-grid bg-page/25 p-3">
+            <p className="text-[11px] text-muted">Databricks List</p>
+            <p className="mt-1 break-words text-base font-semibold tabular-nums text-ink">
+              {summary.databricks_totals.length
+                ? summary.databricks_totals
+                    .map((total) => currency(total.cost, total.currency))
+                    .join(" · ")
+                : "—"}
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              through {summary.latest_databricks_date ?? "—"}
+            </p>
+          </div>
+          <div className="min-w-0 rounded-xl border border-grid bg-page/25 p-3">
+            <p className="text-[11px] text-muted">Largest pattern difference</p>
+            <p className="mt-1 text-base font-semibold tabular-nums text-ink">
+              {summary.largest_pattern_variance
+                ? `${Math.abs(summary.largest_pattern_variance.delta_pct_points)} pp`
+                : "—"}
+            </p>
+            <p className="mt-1 break-words text-[11px] text-muted">
+              {summary.largest_pattern_variance
+                ? `${summary.largest_pattern_variance.sku_family} · ${summary.largest_pattern_variance.usage_date}`
+                : "No material spend-shape difference"}
+            </p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted">{summary.notes}</p>
+      </Card>
+
+      <Card>
+        <SectionTitle
+          title="Where variance exists"
+          subtitle="Filter the closed-day register; open or delayed source days are not treated as monetary variance"
+        />
+        <div
+          className="mb-3 flex flex-wrap gap-1.5"
+          aria-label="Billing alignment filters"
+        >
+          {ALIGNMENT_FILTERS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setFilter(option)}
+              aria-pressed={filter === option}
+              className={`rounded-lg px-2.5 py-1.5 text-[11px] font-medium ${
+                filter === option
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {alignmentLabel(option)}
+            </button>
+          ))}
+        </div>
+        {query.isPending ? (
+          <Skeleton rows={6} />
+        ) : query.isError ? (
+          <ErrorState error={query.error} />
+        ) : filtered.length === 0 ? (
+          <EmptyState message="No reconciliation rows match this filter." />
+        ) : (
+          <div className="space-y-2" aria-label="Billing variance register">
+            {filtered.map((row, index) => (
+              <article
+                key={`${row.usage_date}-${row.sku_family}-${index}`}
+                className="min-w-0 rounded-xl border border-grid bg-page/20 p-3"
+              >
+                <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        tone={
+                          row.comparison_status === "MATCHED"
+                            ? "good"
+                            : row.comparison_status === "OPEN_PERIOD"
+                              ? "info"
+                              : "warning"
+                        }
+                      >
+                        {alignmentLabel(row.comparison_status)}
+                      </Badge>
+                      <span className="text-xs font-semibold text-ink">
+                        {row.sku_family}
+                      </span>
+                      <span className="text-[11px] text-muted">{row.usage_date}</span>
+                    </div>
+                    <p className="mt-1 break-words text-[11px] text-muted">
+                      {(row.classifications ?? []).map(alignmentLabel).join(" · ")}
+                    </p>
+                  </div>
+                  {row.pattern_delta_pct_points != null && (
+                    <div className="text-left sm:text-right">
+                      <p className="text-sm font-semibold tabular-nums text-ink">
+                        {row.pattern_delta_pct_points > 0 ? "+" : ""}
+                        {row.pattern_delta_pct_points} pp
+                      </p>
+                      <p className="text-[10px] text-muted">Azure share − list share</p>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="min-w-0 rounded-lg bg-hairline/35 p-2">
+                    <p className="text-[10px] uppercase tracking-wide text-muted">
+                      Azure Actual
+                    </p>
+                    <p className="mt-0.5 break-words font-medium tabular-nums text-ink">
+                      {row.azure_billed_cost == null
+                        ? "No row"
+                        : currency(row.azure_billed_cost, row.azure_currency)}
+                    </p>
+                    <p className="mt-1 break-words text-[10px] text-muted">
+                      {(row.azure_meters ?? []).join(", ") || "No Azure meter"}
+                    </p>
+                  </div>
+                  <div className="min-w-0 rounded-lg bg-hairline/35 p-2">
+                    <p className="text-[10px] uppercase tracking-wide text-muted">
+                      Databricks List
+                    </p>
+                    <p className="mt-0.5 break-words font-medium tabular-nums text-ink">
+                      {row.databricks_list_usd == null
+                        ? "No row"
+                        : currency(row.databricks_list_usd, "USD")}
+                    </p>
+                    <p className="mt-1 break-words text-[10px] text-muted">
+                      {(row.databricks_skus ?? []).join(", ") || "No Databricks SKU"}
+                    </p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
 
 function Budgets() {
   const query = useQuery({
@@ -384,6 +602,7 @@ export function CostValue() {
             <DatabricksDrivers data={query.data.data} />
           )}
           {active === "ownership" && <OwnershipExplorer data={query.data.data} />}
+          {active === "alignment" && <BillingAlignment data={query.data.data} />}
           {active === "forecast" && <Budgets />}
           {active === "coverage" && (
             <div className="space-y-4">

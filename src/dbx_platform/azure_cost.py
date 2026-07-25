@@ -157,7 +157,7 @@ def build_query_body(
 
     _validate_query_window(start, end)
     return {
-        "type": "Usage",
+        "type": "ActualCost",
         "timeframe": "Custom",
         "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
         "dataset": {
@@ -182,7 +182,7 @@ def build_detail_query_body(
 
     _validate_query_window(start, end)
     return {
-        "type": "Usage",
+        "type": "ActualCost",
         "timeframe": "Custom",
         "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
         "dataset": {
@@ -1171,6 +1171,304 @@ def reconciliation_sql(catalog: str, schema: str) -> str:
     )
 
 
+_PATTERN_VARIANCE_THRESHOLD_PP = 1.0
+
+
+def classify_reconciliation_rows(
+    rows: list[dict],
+    *,
+    today: date | None = None,
+    pattern_threshold_pp: float = _PATTERN_VARIANCE_THRESHOLD_PP,
+) -> list[dict]:
+    """Classify daily/family alignment without comparing incompatible money."""
+
+    today = today or date.today()
+    normalized = [dict(row) for row in rows]
+    databricks_dates = sorted(
+        {
+            date.fromisoformat(str(row["usage_date"])[:10])
+            for row in normalized
+            if row.get("usage_date") and row.get("databricks_list_usd") is not None
+        }
+    )
+    azure_dates = sorted(
+        {
+            date.fromisoformat(str(row["usage_date"])[:10])
+            for row in normalized
+            if row.get("usage_date") and row.get("azure_billed_cost") is not None
+        }
+    )
+    cutoff = (
+        min(databricks_dates[-1], azure_dates[-1], today - timedelta(days=1))
+        if databricks_dates and azure_dates
+        else None
+    )
+
+    evaluated_indexes = [
+        index
+        for index, row in enumerate(normalized)
+        if cutoff is not None
+        and date.fromisoformat(str(row["usage_date"])[:10]) <= cutoff
+    ]
+    lag_indexes: set[int] = set()
+    azure_only = [
+        index
+        for index in evaluated_indexes
+        if normalized[index].get("azure_billed_cost") is not None
+        and normalized[index].get("databricks_list_usd") is None
+    ]
+    databricks_only = [
+        index
+        for index in evaluated_indexes
+        if normalized[index].get("databricks_list_usd") is not None
+        and normalized[index].get("azure_billed_cost") is None
+    ]
+    claimed_databricks: set[int] = set()
+    for azure_index in azure_only:
+        azure_row = normalized[azure_index]
+        azure_day = date.fromisoformat(str(azure_row["usage_date"])[:10])
+        candidates = [
+            index
+            for index in databricks_only
+            if index not in claimed_databricks
+            and normalized[index].get("sku_family") == azure_row.get("sku_family")
+            and abs(
+                (
+                    date.fromisoformat(str(normalized[index]["usage_date"])[:10])
+                    - azure_day
+                ).days
+            )
+            == 1
+        ]
+        if candidates:
+            databricks_index = min(
+                candidates,
+                key=lambda index: str(normalized[index]["usage_date"]),
+            )
+            lag_indexes.update((azure_index, databricks_index))
+            claimed_databricks.add(databricks_index)
+
+    pattern_indexes = [
+        index
+        for index in evaluated_indexes
+        if index not in lag_indexes
+        and normalized[index].get("databricks_list_usd") is not None
+        and normalized[index].get("azure_billed_cost") is not None
+    ]
+    databricks_total = sum(
+        float(normalized[index].get("databricks_list_usd") or 0)
+        for index in pattern_indexes
+    )
+    azure_totals: dict[str, float] = {}
+    for index in pattern_indexes:
+        row = normalized[index]
+        currency = str(row.get("azure_currency") or "UNAVAILABLE").upper()
+        azure_totals[currency] = azure_totals.get(currency, 0.0) + float(
+            row.get("azure_billed_cost") or 0
+        )
+
+    for index, row in enumerate(normalized):
+        row_day = date.fromisoformat(str(row["usage_date"])[:10])
+        evaluated = cutoff is not None and row_day <= cutoff
+        row["evaluated"] = evaluated
+        row["money_comparable"] = bool(row.get("pricing_basis_comparable")) and (
+            str(row.get("azure_currency") or "").upper() == "USD"
+        )
+        row["pattern_delta_pct_points"] = None
+        classifications: list[str] = []
+        if not evaluated:
+            classifications.append("OPEN_PERIOD")
+        elif index in lag_indexes:
+            classifications.append("BILLING_LAG")
+        elif row.get("databricks_list_usd") is None:
+            classifications.append("AZURE_ONLY")
+        elif row.get("azure_billed_cost") is None:
+            classifications.append("DATABRICKS_ONLY")
+        else:
+            azure_currency = str(row.get("azure_currency") or "UNAVAILABLE").upper()
+            azure_total = azure_totals.get(azure_currency, 0.0)
+            databricks_share = (
+                float(row.get("databricks_list_usd") or 0) / databricks_total * 100
+                if databricks_total
+                else 0.0
+            )
+            azure_share = (
+                float(row.get("azure_billed_cost") or 0) / azure_total * 100
+                if azure_total
+                else 0.0
+            )
+            pattern_delta = round(azure_share - databricks_share, 2)
+            row["azure_window_share_pct"] = round(azure_share, 2)
+            row["databricks_window_share_pct"] = round(databricks_share, 2)
+            row["pattern_delta_pct_points"] = pattern_delta
+            if abs(pattern_delta) >= pattern_threshold_pp:
+                classifications.append("PATTERN_VARIANCE")
+            elif row["money_comparable"]:
+                variance = float(row.get("azure_billed_cost") or 0) - float(
+                    row.get("databricks_list_usd") or 0
+                )
+                row["variance"] = round(variance, 8)
+                row["variance_pct"] = (
+                    round(
+                        variance / float(row.get("databricks_list_usd") or 0) * 100,
+                        2,
+                    )
+                    if float(row.get("databricks_list_usd") or 0)
+                    else None
+                )
+                if abs(variance) > 0.005:
+                    classifications.append("MONETARY_VARIANCE")
+                else:
+                    classifications.append("MATCHED")
+            else:
+                classifications.append("MATCHED")
+            if not row["money_comparable"]:
+                classifications.append("BASIS_MISMATCH")
+        row["classifications"] = classifications
+        row["comparison_status"] = classifications[0]
+        if not row["money_comparable"]:
+            row["variance"] = None
+            row["variance_pct"] = None
+    return normalized
+
+
+def summarize_reconciliation(
+    rows: list[dict],
+    *,
+    today: date | None = None,
+) -> dict:
+    """Build the compact variance-watch contract used by Cost Control."""
+
+    today = today or date.today()
+    classified = (
+        rows
+        if all("classifications" in row for row in rows)
+        else classify_reconciliation_rows(rows, today=today)
+    )
+    evaluated = [row for row in classified if row.get("evaluated")]
+    databricks_dates = sorted(
+        {
+            str(row["usage_date"])[:10]
+            for row in classified
+            if row.get("databricks_list_usd") is not None
+        }
+    )
+    azure_dates = sorted(
+        {
+            str(row["usage_date"])[:10]
+            for row in classified
+            if row.get("azure_billed_cost") is not None
+        }
+    )
+    variance_kinds = {
+        "AZURE_ONLY",
+        "DATABRICKS_ONLY",
+        "BILLING_LAG",
+        "PATTERN_VARIANCE",
+        "MONETARY_VARIANCE",
+    }
+    variances = [
+        row
+        for row in evaluated
+        if variance_kinds.intersection(set(row.get("classifications") or []))
+    ]
+    largest_pattern = max(
+        (
+            row
+            for row in evaluated
+            if row.get("pattern_delta_pct_points") is not None
+        ),
+        key=lambda row: abs(float(row["pattern_delta_pct_points"])),
+        default=None,
+    )
+    azure_totals: dict[str, float] = {}
+    for row in evaluated:
+        if row.get("azure_billed_cost") is None:
+            continue
+        currency = str(row.get("azure_currency") or "UNAVAILABLE").upper()
+        azure_totals[currency] = azure_totals.get(currency, 0.0) + float(
+            row["azure_billed_cost"]
+        )
+    databricks_total = sum(
+        float(row.get("databricks_list_usd") or 0)
+        for row in evaluated
+    )
+    latest_azure = azure_dates[-1] if azure_dates else None
+    latest_databricks = databricks_dates[-1] if databricks_dates else None
+    source_date_delta = (
+        abs(
+            (
+                date.fromisoformat(latest_azure)
+                - date.fromisoformat(latest_databricks)
+            ).days
+        )
+        if latest_azure and latest_databricks
+        else None
+    )
+    if not latest_azure or not latest_databricks:
+        status = "unavailable"
+    elif source_date_delta is not None and source_date_delta > 1:
+        status = "delayed_source"
+    elif variances:
+        status = "variances_found"
+    else:
+        status = "aligned"
+    return {
+        "status": status,
+        "variance_count": len(variances),
+        "unmatched_count": sum(
+            1
+            for row in evaluated
+            if {"AZURE_ONLY", "DATABRICKS_ONLY"}.intersection(
+                set(row.get("classifications") or [])
+            )
+        ),
+        "latest_azure_date": latest_azure,
+        "latest_databricks_date": latest_databricks,
+        "azure_lag_days": (
+            (today - timedelta(days=1) - date.fromisoformat(latest_azure)).days
+            if latest_azure
+            else None
+        ),
+        "databricks_lag_days": (
+            (today - timedelta(days=1) - date.fromisoformat(latest_databricks)).days
+            if latest_databricks
+            else None
+        ),
+        "azure_totals": [
+            {
+                "cost": round(cost, 2),
+                "currency": currency,
+                "cost_basis": "AZURE_ACTUAL",
+            }
+            for currency, cost in sorted(azure_totals.items())
+        ],
+        "databricks_totals": [
+            {
+                "cost": round(databricks_total, 2),
+                "currency": "USD",
+                "cost_basis": "DATABRICKS_LIST",
+            }
+        ]
+        if databricks_dates
+        else [],
+        "largest_pattern_variance": (
+            {
+                "usage_date": str(largest_pattern["usage_date"])[:10],
+                "sku_family": largest_pattern.get("sku_family"),
+                "delta_pct_points": largest_pattern["pattern_delta_pct_points"],
+            }
+            if largest_pattern
+            else None
+        ),
+        "money_comparable": any(row.get("money_comparable") for row in evaluated),
+        "notes": (
+            "Coverage and spend-shape alignment; Azure Actual Cost and "
+            "Databricks list price remain separate cost bases."
+        ),
+    }
+
+
 def reconciliation(
     w: WorkspaceClient,
     warehouse_id: str,
@@ -1183,7 +1481,7 @@ def reconciliation(
 ) -> list[dict]:
     """Compare list and billed cost only where currency permits variance."""
 
-    return run_query(
+    rows = run_query(
         w,
         reconciliation_sql(catalog, schema),
         warehouse_id,
@@ -1194,6 +1492,7 @@ def reconciliation(
         },
         row_limit=50_000,
     )
+    return classify_reconciliation_rows(rows)
 
 
 # --- spike classification (pure) ----------------------------------------------

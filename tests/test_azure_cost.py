@@ -8,6 +8,7 @@ from dbx_platform.azure_cost import (
     build_detail_query_body,
     build_query_body,
     classify_azure_spend,
+    classify_reconciliation_rows,
     count_costs_sql,
     count_detail_costs_sql,
     create_detail_table_sql,
@@ -27,6 +28,7 @@ from dbx_platform.azure_cost import (
     split_date_windows,
     store_costs,
     store_detail_costs,
+    summarize_reconciliation,
     validate_cost_reconciliation,
 )
 from dbx_platform.control_plane_schema import MIGRATION_COLUMNS
@@ -137,7 +139,7 @@ def test_query_body_shape():
         "2026-07-03",
         resource_groups=["rg-workspace", "rg-ai"],
     )
-    assert body["type"] == "Usage"
+    assert body["type"] == "ActualCost"
     assert body["dataset"]["granularity"] == "Daily"
     assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
@@ -154,7 +156,7 @@ def test_detail_query_uses_resource_and_meter_dimensions():
         "2026-07-03",
         resource_groups="rg-workspace,rg-ai",
     )
-    assert body["type"] == "Usage"
+    assert body["type"] == "ActualCost"
     assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
     assert names == ["ResourceId", "Meter"]
@@ -648,6 +650,113 @@ def test_reconciliation_is_family_level_and_currency_safe():
     assert "COALESCE(scope_filter, '') <> ''" in sql
     assert "a.scope_filter = s.scope_filter" in sql
     assert "not invoice-line equivalence" in sql
+
+
+def _alignment_row(
+    day: str,
+    family: str = "JOBS",
+    databricks: float | None = 10,
+    azure: float | None = 13,
+    currency: str = "CAD",
+    comparable: bool = False,
+) -> dict:
+    return {
+        "usage_date": day,
+        "sku_family": family,
+        "databricks_list_usd": databricks,
+        "azure_billed_cost": azure,
+        "azure_currency": currency if azure is not None else "UNAVAILABLE",
+        "pricing_basis_comparable": comparable,
+        "databricks_skus": ["JOBS_COMPUTE"] if databricks is not None else None,
+        "azure_meters": ["Jobs Compute"] if azure is not None else None,
+    }
+
+
+def test_alignment_classifies_pattern_and_basis_without_cross_currency_variance():
+    rows = classify_reconciliation_rows(
+        [
+            _alignment_row("2026-07-20", databricks=90, azure=20),
+            _alignment_row("2026-07-21", databricks=10, azure=80),
+        ],
+        today=date(2026, 7, 23),
+    )
+
+    assert rows[0]["comparison_status"] == "PATTERN_VARIANCE"
+    assert "BASIS_MISMATCH" in rows[0]["classifications"]
+    assert rows[0]["variance"] is None
+    assert rows[0]["pattern_delta_pct_points"] == -70.0
+
+
+def test_alignment_pairs_adjacent_source_only_days_as_billing_lag():
+    rows = classify_reconciliation_rows(
+        [
+            _alignment_row("2026-07-20", databricks=None, azure=12),
+            _alignment_row("2026-07-21", databricks=10, azure=None),
+            _alignment_row("2026-07-22"),
+        ],
+        today=date(2026, 7, 24),
+    )
+
+    assert rows[0]["comparison_status"] == "BILLING_LAG"
+    assert rows[1]["comparison_status"] == "BILLING_LAG"
+    assert rows[2]["comparison_status"] == "MATCHED"
+
+
+def test_alignment_keeps_genuine_missing_family_and_excludes_open_days():
+    rows = classify_reconciliation_rows(
+        [
+            _alignment_row("2026-07-20", family="SQL", databricks=None),
+            _alignment_row("2026-07-20", family="JOBS"),
+            _alignment_row("2026-07-22", family="JOBS", databricks=5, azure=None),
+        ],
+        today=date(2026, 7, 23),
+    )
+
+    assert rows[0]["comparison_status"] == "AZURE_ONLY"
+    assert rows[2]["comparison_status"] == "OPEN_PERIOD"
+    assert rows[2]["evaluated"] is False
+
+
+def test_alignment_calculates_money_only_for_explicitly_comparable_basis():
+    rows = classify_reconciliation_rows(
+        [
+            _alignment_row(
+                "2026-07-20",
+                databricks=10,
+                azure=12,
+                currency="USD",
+                comparable=True,
+            )
+        ],
+        today=date(2026, 7, 22),
+    )
+
+    assert rows[0]["comparison_status"] == "MONETARY_VARIANCE"
+    assert rows[0]["money_comparable"] is True
+    assert rows[0]["variance"] == 2
+
+
+def test_alignment_summary_reports_where_variance_exists_and_source_lag():
+    rows = classify_reconciliation_rows(
+        [
+            _alignment_row("2026-07-19", databricks=90, azure=20),
+            _alignment_row("2026-07-20", databricks=10, azure=80),
+            _alignment_row("2026-07-21", databricks=None, azure=4),
+        ],
+        today=date(2026, 7, 23),
+    )
+    summary = summarize_reconciliation(rows, today=date(2026, 7, 23))
+
+    assert summary["status"] == "variances_found"
+    assert summary["variance_count"] == 2
+    assert summary["latest_azure_date"] == "2026-07-21"
+    assert summary["latest_databricks_date"] == "2026-07-20"
+    assert summary["largest_pattern_variance"] == {
+        "usage_date": "2026-07-19",
+        "sku_family": "JOBS",
+        "delta_pct_points": -70.0,
+    }
+    assert summary["money_comparable"] is False
 
 
 # --- classify_azure_spend -------------------------------------------------------

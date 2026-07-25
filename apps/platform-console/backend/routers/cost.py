@@ -46,7 +46,7 @@ def _load_cost_overview(days: int) -> dict:
         # Azure ActualCost remains authoritative even when the non-additive
         # Databricks workload attribution source is temporarily unavailable.
         databricks_error = "Databricks list-cost attribution is temporarily unavailable."
-    return platform_cost.build_overview(
+    overview = platform_cost.build_overview(
         azure_rows,
         databricks_rows,
         days=days,
@@ -59,6 +59,35 @@ def _load_cost_overview(days: int) -> dict:
         acceleration_min_cost=settings.azure_acceleration_min_cost,
         databricks_error=databricks_error,
     )
+    try:
+        alignment_rows = azure_cost.reconciliation(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            settings.dashboard_catalog,
+            settings.dashboard_schema,
+            days,
+            workspace_id=workspace_id,
+            environment=environment,
+        )
+        overview["billing_alignment"] = azure_cost.summarize_reconciliation(
+            alignment_rows
+        )
+    except Exception:
+        overview["billing_alignment"] = {
+            "status": "unavailable",
+            "variance_count": 0,
+            "unmatched_count": 0,
+            "latest_azure_date": None,
+            "latest_databricks_date": None,
+            "azure_lag_days": None,
+            "databricks_lag_days": None,
+            "azure_totals": [],
+            "databricks_totals": [],
+            "largest_pattern_variance": None,
+            "money_comparable": False,
+            "notes": "Daily Azure and Databricks alignment is temporarily unavailable.",
+        }
+    return overview
 
 
 def _cost_overview(days: int, refresh: bool) -> tuple[dict, object, bool]:
