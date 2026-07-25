@@ -284,6 +284,13 @@ def test_store_failure_has_migration_guidance(monkeypatch):
 
 def test_report_sql_whitelists_dimension():
     assert "GROUP BY service_bucket" in report_sql("main", "dbx_platform", "bucket")
+    resource_sql = report_sql("main", "dbx_platform", "resource")
+    meter_sql = report_sql("main", "dbx_platform", "meter")
+    assert "FROM main.dbx_platform.azure_cost_details" in resource_sql
+    assert "GROUP BY resource_id" in resource_sql
+    assert "GROUP BY meter_name" in meter_sql
+    assert "workspace_id = :workspace_id" in resource_sql
+    assert "environment = :environment" in resource_sql
     try:
         report_sql("main", "dbx_platform", "usage_date; DROP TABLE x")
     except ValueError:

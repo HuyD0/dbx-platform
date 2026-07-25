@@ -176,6 +176,12 @@ def test_llm_cost_routes_are_registered(client):
     }.issubset(paths)
 
 
+def test_cost_breakdown_dimensions_are_request_validated(client):
+    assert client.get("/api/llm-cost/breakdown?dimension=project").status_code != 422
+    assert client.get("/api/llm-cost/breakdown?dimension=not-a-dimension").status_code == 422
+    assert client.get("/api/cost/azure?by=not-a-dimension").status_code == 422
+
+
 def _iter_routes(container):
     """Walk app routes, unwrapping FastAPI's included-router containers."""
     for route in getattr(container, "routes", []):

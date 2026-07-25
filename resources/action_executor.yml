@@ -79,6 +79,8 @@ resources:
               - --governed-job-id
               - ${resources.jobs.llm_cost_rollup.id}
               - --governed-job-id
+              - ${resources.jobs.llm_cost_backfill.id}
+              - --governed-job-id
               - ${resources.jobs.ai_catalog_sync.id}
               - --governed-job-id
               - ${resources.jobs.ai_monitor_rollup.id}

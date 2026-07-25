@@ -220,6 +220,7 @@ export function LlmCostView() {
               ? currency(data.cost_per_request, singleTotal.currency)
               : "—"
           }
+          hint="MODEL_SERVING costs only"
         />
         <StatTile
           label="Month-end forecast"
@@ -239,8 +240,8 @@ export function LlmCostView() {
       <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <Card>
           <SectionTitle
-            title="LLM cost ledger"
-            subtitle="Provider and model detail with explicit currency and cost basis"
+            title="AI cost ledger"
+            subtitle="AI workload, provider and model detail with explicit currency and cost basis"
             right={<CircleDollarSign className="h-4 w-4 text-accent" />}
           />
           {timeseries.isPending ? (

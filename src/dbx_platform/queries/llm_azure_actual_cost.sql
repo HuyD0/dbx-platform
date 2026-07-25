@@ -3,10 +3,13 @@
 SELECT
   usage_date                                                     AS usage_date,
   workspace_id                                                   AS workspace_id,
+  'AZURE_AI'                                                     AS workload_type,
   'azure'                                                        AS provider,
   COALESCE(service_name, 'unallocated')                           AS model,
   COALESCE(resource_group, 'unallocated')                         AS endpoint,
   'unallocated'                                                  AS principal,
+  'unallocated'                                                  AS project,
+  'unallocated'                                                  AS app,
   'unallocated'                                                  AS team,
   'unallocated'                                                  AS use_case,
   ROUND(SUM(cost), 8)                                            AS cost,

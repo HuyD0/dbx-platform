@@ -406,9 +406,11 @@ def _reconciliation_params(
 # --- reporting ----------------------------------------------------------------
 
 _REPORT_DIMENSIONS = {
-    "bucket": "service_bucket",
-    "service": "service_name",
-    "resource-group": "resource_group",
+    "bucket": ("azure_costs", "service_bucket"),
+    "service": ("azure_costs", "service_name"),
+    "resource-group": ("azure_costs", "resource_group"),
+    "resource": ("azure_cost_details", "resource_id"),
+    "meter": ("azure_cost_details", "meter_name"),
 }
 
 
@@ -418,23 +420,34 @@ def report_sql(catalog: str, schema: str, by: str) -> str:
     ``by`` is validated against a whitelist because identifiers cannot be
     bound as statement parameters.
     """
-    dim = _REPORT_DIMENSIONS.get(by)
-    if not dim:
+    selected = _REPORT_DIMENSIONS.get(by)
+    if not selected:
         raise ValueError(f"--by must be one of {sorted(_REPORT_DIMENSIONS)}")
-    fq = f"{catalog}.{schema}.azure_costs"
+    table, dim = selected
+    fq = f"{catalog}.{schema}.{table}"
     return (
         f"SELECT {dim}, ROUND(SUM(cost), 2) AS cost, MAX(currency) AS currency, "
         "MIN(usage_date) AS first_day, MAX(usage_date) AS last_day "
         f"FROM {fq} WHERE usage_date >= DATE_SUB(CURRENT_DATE(), :days) "
+        "AND workspace_id = :workspace_id AND environment = :environment "
         f"GROUP BY {dim} ORDER BY cost DESC"
     )
 
 
 def report(
     w: WorkspaceClient, warehouse_id: str, catalog: str, schema: str,
-    by: str, days: int,
+    by: str, days: int, *, workspace_id: str, environment: str,
 ) -> list[dict]:
-    return run_query(w, report_sql(catalog, schema, by), warehouse_id, {"days": days})
+    return run_query(
+        w,
+        report_sql(catalog, schema, by),
+        warehouse_id,
+        {
+            "days": days,
+            "workspace_id": workspace_id,
+            "environment": environment,
+        },
+    )
 
 
 def daily_bucket_sql(catalog: str, schema: str) -> str:

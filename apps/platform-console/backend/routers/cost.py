@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter
 
 from backend import cache, deps
@@ -16,8 +18,13 @@ router = APIRouter(prefix="/api/cost")
 def usage(days: int = 30, refresh: bool = False) -> dict:
     days = deps.clamp_days(days)
     data, as_of, hit = cache.cached(
-        f"cost/usage/{days}",
-        lambda: cost.usage_report(deps.get_ws(), deps.warehouse_id(), days),
+        f"cost/usage/{deps.control_plane_scope()[0]}/{days}",
+        lambda: cost.usage_report(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            days,
+            workspace_id=deps.control_plane_scope()[0],
+        ),
         refresh,
     )
     return envelope(data, as_of, hit)
@@ -76,21 +83,28 @@ def failed_run_waste(days: int = 30, limit: int = 20, refresh: bool = False) -> 
 
 
 @router.get("/azure")
-def azure(days: int = 30, refresh: bool = False) -> dict:
+def azure(
+    days: int = 30,
+    by: Literal["service", "resource-group", "resource", "meter"] = "service",
+    refresh: bool = False,
+) -> dict:
     days = deps.clamp_days(days)
 
     def load() -> list[dict]:
         s = deps.get_settings()
+        workspace_id, environment = deps.control_plane_scope()
         return azure_cost.report(
             deps.get_ws(),
             deps.warehouse_id(),
             s.dashboard_catalog,
             s.dashboard_schema,
-            "service",
+            by,
             days,
+            workspace_id=workspace_id,
+            environment=environment,
         )
 
-    data, as_of, hit = cache.cached(f"cost/azure/{days}", load, refresh)
+    data, as_of, hit = cache.cached(f"cost/azure/{by}/{days}", load, refresh)
     return envelope(data, as_of, hit)
 
 

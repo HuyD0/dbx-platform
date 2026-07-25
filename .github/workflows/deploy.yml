@@ -136,6 +136,7 @@ jobs:
             --select jobs.dashboards_setup \
             --select jobs.governance_check \
             --select jobs.housekeeping_report \
+            --select jobs.llm_cost_backfill \
             --select jobs.llm_cost_rollup \
             --select jobs.ml_hygiene_report \
             --select jobs.ml_serving_report \

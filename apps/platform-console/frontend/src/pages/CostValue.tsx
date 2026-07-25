@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
 import { DataTable } from "../components/DataTable";
@@ -26,6 +27,7 @@ const COST_TABS = [
 ];
 
 function AzureCost() {
+  const [dimension, setDimension] = useState("service");
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
@@ -34,10 +36,32 @@ function AzureCost() {
       </div>
       <FindingsSection
         title="Azure actual cost"
-        subtitle="Daily spend by service, resource, meter and allocation tags"
+        subtitle="Exact billed actuals by service, resource group, resource or meter"
         path="/api/cost/azure"
-        params={{ days: 30 }}
+        params={{ days: 30, by: dimension }}
         emptyMessage="No Azure billing rows in the last 30 days."
+        actionSlot={
+          <label className="flex items-center gap-2 text-xs text-muted">
+            Dimension
+            <select
+              value={dimension}
+              onChange={(event) => setDimension(event.target.value)}
+              className="rounded-lg border border-grid bg-page px-2 py-1 text-ink"
+            >
+              <option value="service">Service</option>
+              <option value="resource-group">Resource group</option>
+              <option value="resource">Resource</option>
+              <option value="meter">Meter</option>
+            </select>
+          </label>
+        }
+        render={(rows) => (
+          <DataTable
+            rows={rows}
+            exportName={`azure-cost-${dimension}`}
+            caption={`Azure actual cost by ${dimension}`}
+          />
+        )}
       />
       <FindingsSection
         title="Azure spend anomalies"

@@ -383,3 +383,30 @@ def test_impact_followup_also_runs_on_existing_daily_ledger_schedule():
     parameters = tasks["impact_followup"]["python_wheel_task"]["parameters"]
     assert parameters[:2] == ["report", "impact-followup"]
     assert "{{job.trigger.type}}" in parameters
+
+
+def test_ai_cost_backfill_is_fixed_400_day_approval_only_job():
+    root = Path(__file__).resolve().parent.parent
+    resource = yaml.safe_load((root / "resources" / "llm_cost_jobs.yml").read_text())
+    backfill = resource["resources"]["jobs"]["llm_cost_backfill"]
+
+    assert "schedule" not in backfill
+    assert backfill["max_concurrent_runs"] == 1
+    assert {item["name"] for item in backfill["parameters"]} == {
+        "approved_action_id",
+        "approved_plan_hash",
+    }
+    task = backfill["tasks"][0]
+    parameters = task["python_wheel_task"]["parameters"]
+    assert parameters[:4] == ["llm-cost", "rollup", "--days", "400"]
+    assert "{{job.id}}" in parameters
+    assert "{{job.run_id}}" in parameters
+    assert "{{job.trigger.type}}" in parameters
+
+    executor = yaml.safe_load(
+        (root / "resources" / "action_executor.yml").read_text()
+    )
+    executor_params = executor["resources"]["jobs"]["action_executor"]["tasks"][0][
+        "spark_python_task"
+    ]["parameters"]
+    assert "${resources.jobs.llm_cost_backfill.id}" in executor_params

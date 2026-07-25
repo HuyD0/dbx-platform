@@ -49,9 +49,21 @@ with tab_bill:
         pivot = frame.pivot_table(index="usage_date", columns="service_bucket",
                                   values="cost", aggfunc="sum").fillna(0)
         st.bar_chart(pivot)
-        by = st.selectbox("Break down by", ["bucket", "service", "resource-group"])
-        show_rows(azure_cost.report(client(), warehouse_id(), s.dashboard_catalog,
-                                    s.dashboard_schema, by, days))
+        by = st.selectbox(
+            "Break down by",
+            ["bucket", "service", "resource-group", "resource", "meter"],
+        )
+        w = client()
+        show_rows(azure_cost.report(
+            w,
+            warehouse_id(),
+            s.dashboard_catalog,
+            s.dashboard_schema,
+            by,
+            days,
+            workspace_id=str(w.get_workspace_id()),
+            environment=s.environment,
+        ))
     st.subheader("Spend spikes (fresh check)")
     if st.button("Run spike check now"):
         with st.spinner("Classifying per-bucket spend…"):
