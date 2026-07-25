@@ -1,0 +1,99 @@
+name: LakeMeter upstream update
+
+on:
+  schedule:
+    - cron: "23 13 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: lakemeter-upstream-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Find the latest stable release
+        id: release
+        shell: bash
+        run: |
+          current="$(jq -r .tag integrations/lakemeter/upstream.lock.json)"
+          latest="$(
+            git ls-remote --tags --refs \
+              https://github.com/databrickslabs/lakemeter-oss.git 'v*' |
+              awk '{print $2}' |
+              sed 's#refs/tags/##' |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+              sort -V |
+              tail -1
+          )"
+          test -n "$latest"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "$current" = "$latest" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Import the immutable upstream snapshot
+        if: steps.release.outputs.changed == 'true'
+        run: python scripts/update_lakemeter.py --tag "${{ steps.release.outputs.latest }}"
+      - name: Run non-executing adapter compatibility scan
+        id: static_compat
+        if: steps.release.outputs.changed == 'true'
+        continue-on-error: true
+        run: python scripts/check_lakemeter_compat.py | tee /tmp/lakemeter-compat.json
+      - name: Open a draft upgrade PR
+        if: steps.release.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ steps.release.outputs.latest }}
+          OLD_TAG: ${{ steps.release.outputs.current }}
+          STATIC_RESULT: ${{ steps.static_compat.outcome }}
+        shell: bash
+        run: |
+          branch="automation/lakemeter-${NEW_TAG}"
+          if gh pr view "$branch" >/dev/null 2>&1; then
+            echo "An upgrade PR for ${NEW_TAG} is already open; preserving its adapter work."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Remote branch ${branch} already exists without an open PR; refusing to overwrite it."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add vendor/lakemeter integrations/lakemeter/upstream.lock.json \
+            src/dbx_platform/lakemeter_assets
+          git commit -m "chore: update LakeMeter ${OLD_TAG} to ${NEW_TAG}"
+          git push --set-upstream origin "$branch"
+          {
+            printf '## LakeMeter upstream update\n\n'
+            printf -- '- Previous stable release: `%s`\n' "$OLD_TAG"
+            printf -- '- New stable release: `%s`\n' "$NEW_TAG"
+            printf -- '- Non-executing adapter scan: `%s`\n' "$STATIC_RESULT"
+            printf -- '- Full API/database/frontend/build compatibility: delegated to this PR'\''s read-only CI checks\n\n'
+            printf 'This PR remains draft. Failed checks block merge until the adapter is deliberately updated. The update job never executes newly downloaded upstream code with its write-capable token.\n'
+          } > /tmp/lakemeter-pr.md
+          gh pr create \
+            --draft \
+            --title "chore: update LakeMeter to ${NEW_TAG}" \
+            --body-file /tmp/lakemeter-pr.md \
+            --base main \
+            --head "$branch"
+      - name: Block statically incompatible releases
+        if: steps.release.outputs.changed == 'true' && steps.static_compat.outcome != 'success'
+        run: |
+          echo "The draft PR was opened, but adapter compatibility checks failed."
+          exit 1

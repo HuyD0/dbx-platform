@@ -29,6 +29,7 @@ pointing CI or a local profile at a new workspace.
   - `AZURE_SUBSCRIPTION_ID`
   - `DBX_PLATFORM_RUNTIME_EXECUTOR_SP`
   - `DBX_PLATFORM_ACTION_EXECUTOR_SP`
+  - `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP`
   - `DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL`
   - `DBX_PLATFORM_ACTIONS_ENABLED`
 - Override bundle variables for enterprise names where needed:
@@ -59,6 +60,12 @@ pointing CI or a local profile at a new workspace.
   bundle-owned resources.
 - The evidence-job identity and action executor must be distinct service principals
   unless a reviewed exception explicitly sets `DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP`.
+- The LakeMeter migration executor must be a third, dedicated service
+  principal with access only to its Lakebase project/database and unscheduled
+  migration Job.
+- Confirm Lakebase Autoscaling and Databricks Apps database resources are
+  available in the target region. Keep the Estimator in its setup state until
+  the approved companion reconciliation and schema migration complete.
 - Unity Catalog `main.dbx_platform` in examples is only a default. Enterprise
   workspaces should either create that schema or set `control_plane_catalog` and
   `control_plane_schema` consistently before migrations.

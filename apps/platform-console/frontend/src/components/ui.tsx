@@ -7,7 +7,14 @@ import {
   Info,
   RefreshCw,
 } from "lucide-react";
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ApiError } from "../lib/types";
 import type { SourceHealth } from "../lib/types";
 import { timeAgo } from "../lib/format";
@@ -453,6 +460,14 @@ export function Tabs({
   label: string;
 }) {
   const id = useId();
+  const activeTabRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [active]);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
@@ -480,6 +495,7 @@ export function Tabs({
       {tabs.map((tab) => (
         <button
           key={tab.id}
+          ref={active === tab.id ? activeTabRef : undefined}
           id={`${id}-${tab.id}`}
           type="button"
           role="tab"

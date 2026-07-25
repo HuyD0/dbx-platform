@@ -91,3 +91,5 @@ resources:
               - ${resources.jobs.estimator_prices_pull.id}
               - --governed-job-id
               - ${resources.jobs.estimator_drift_check.id}
+              - --governed-job-id
+              - ${resources.jobs.lakemeter_schema_migrations.id}

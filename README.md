@@ -47,8 +47,8 @@ systems:
    outcomes, pending approvals, what changed, and the top decisions.
 2. **Action Center** — recommendations, awaiting approval, activity, failures,
    and rollback outcomes.
-3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, and unit
-   economics.
+3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, unit
+   economics, and the native LakeMeter Estimator.
 4. **Security & Risk** — identity, credentials, grants, ownership, policies,
    egress, and audit anomalies.
 5. **Performance** — job/query regressions, queueing, retry waste,
@@ -166,6 +166,7 @@ databricks auth login \
 
 export BUNDLE_VAR_runtime_executor_service_principal_name=<evidence-job-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-executor-client-id>
+export BUNDLE_VAR_lakemeter_migration_executor_service_principal_name=<lakemeter-migration-client-id>
 
 uv run ruff check .
 uv run pytest
@@ -179,12 +180,16 @@ controlled enablement, create the approver group, apply the least-privilege
 grants, and validate one complete scheduled reporting cycle. Full setup:
 [docs/setup.md](docs/setup.md). For enterprise migration pre-flight checks, see
 [docs/enterprise-migration-audit.md](docs/enterprise-migration-audit.md).
+LakeMeter provisioning, migration, and upstream-update procedures are in
+[docs/lakemeter.md](docs/lakemeter.md).
 
 ## Repository layout
 
 ```text
 apps/platform-console/     React/FastAPI Mission Control
 agents/platform_agent/     optional MLflow-serving compatibility wrapper
+integrations/lakemeter/     host adapters and immutable upstream lock
+vendor/lakemeter/           untouched pinned LakeMeter OSS snapshot
 src/dbx_platform/platform_agent/ shared read-only LangGraph tools and formatting
 src/dbx_platform/          evidence packs, ledger, migrations, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
@@ -203,7 +208,9 @@ uv run python -m build --wheel
 databricks bundle validate -t dev
 ```
 
-The frontend production build runs from
-`apps/platform-console/frontend` with `npm ci && npm run build`.
+The host frontend production build runs from
+`apps/platform-console/frontend` with `npm ci && npm run build`; the isolated
+LakeMeter build follows from `integrations/lakemeter/frontend` before
+`scripts/stage_lakemeter_app.py` assembles the App source.
 CI authenticates to Databricks only on protected workspace-touching jobs; PR
 tests remain credential-free and offline.

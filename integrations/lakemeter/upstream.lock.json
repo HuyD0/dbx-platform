@@ -1,0 +1,27 @@
+{
+  "archive_sha256": "8c7efabe14d27000fb6b672d05a5607b4282f2ddd3bd1b43d718c390907ac025",
+  "commit": "4454229a3371ba05b9aa8555df0ebba47aff4387",
+  "included_paths": [
+    "LICENSE.md",
+    "NOTICE.md",
+    "VERSION",
+    "backend/app",
+    "backend/static/pricing",
+    "frontend/index.html",
+    "frontend/package-lock.json",
+    "frontend/package.json",
+    "frontend/postcss.config.js",
+    "frontend/src",
+    "frontend/tailwind.config.js",
+    "frontend/tsconfig.json",
+    "frontend/tsconfig.node.json",
+    "scripts/functions",
+    "scripts/install_lakemeter.py"
+  ],
+  "license_sha256": "6171af349fecd05c10229c38ceeb497b1f774f844caa82d6aa87a6e3018e3933",
+  "pricing_version": "2026-04-10T09:20:30.571090",
+  "repository": "databrickslabs/lakemeter-oss",
+  "schema_version": 1,
+  "tag": "v0.1.0",
+  "vendored_tree_sha256": "12825405665222d37b9274408518b0c0f77d3ca771aa8e2cc79693459225ab26"
+}

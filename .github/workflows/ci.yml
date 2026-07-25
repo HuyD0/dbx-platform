@@ -55,6 +55,12 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/patterns.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/prompts/estimator_pattern_classify.md"
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/extraction_eval.jsonl"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_assets/pricing/manifest.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/backend/app/routes/estimates.py"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/scripts/functions/09_Main_Orchestrator.py"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/scripts/install_lakemeter.py"
+      - name: Verify pinned LakeMeter compatibility
+        run: uv run python scripts/check_lakemeter_compat.py
 
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
@@ -68,11 +74,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/platform-console/frontend/package-lock.json
+          cache-dependency-path: |
+            apps/platform-console/frontend/package-lock.json
+            integrations/lakemeter/frontend/package-lock.json
       - name: Install
         working-directory: apps/platform-console/frontend
         run: npm ci
@@ -85,6 +96,19 @@ jobs:
       - name: Typecheck and build
         working-directory: apps/platform-console/frontend
         run: npm run build
+      - name: Typecheck and build isolated LakeMeter
+        working-directory: integrations/lakemeter/frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Stage deployable LakeMeter assets
+        run: python scripts/stage_lakemeter_app.py
+      - name: Enforce Databricks Apps file limit
+        run: |
+          ! find apps/platform-console \
+            -path '*/node_modules' -prune -o \
+            -type f -size +9500k -print -quit | grep -q .
       - name: Responsive browser and visual tests
         working-directory: apps/platform-console/frontend
         run: npm run test:e2e
@@ -114,6 +138,7 @@ jobs:
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      BUNDLE_VAR_lakemeter_migration_executor_service_principal_name: ${{ vars.DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP }}
       BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
     steps:

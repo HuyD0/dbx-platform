@@ -298,6 +298,7 @@ export function AssistantLauncher({ onOpen }: { onOpen: () => void }) {
   const location = useLocation();
   const { setFocus } = useChat();
   if (["/", "/chat", "/assistant"].includes(location.pathname)) return null;
+  const estimator = location.pathname.startsWith("/cost/estimator");
   return (
     <button
       type="button"
@@ -305,11 +306,13 @@ export function AssistantLauncher({ onOpen }: { onOpen: () => void }) {
         setFocus(null);
         onOpen();
       }}
-      aria-label="Ask agent"
+      aria-label={estimator ? "Ask estimator" : "Ask agent"}
       className="fixed bottom-4 right-4 z-30 flex h-11 w-11 items-center justify-center gap-2 rounded-full bg-accent text-sm font-medium text-white shadow-xl transition-transform hover:scale-105 sm:bottom-5 sm:right-5 sm:h-auto sm:w-auto sm:px-4 sm:py-2.5"
     >
       <Bot className="h-4 w-4" />
-      <span className="hidden sm:inline">Ask agent</span>
+      <span className="hidden sm:inline">
+        {estimator ? "Ask estimator" : "Ask agent"}
+      </span>
     </button>
   );
 }

@@ -311,6 +311,7 @@ def test_app_binds_manual_job_without_a_runtime_controller():
     app_resource = (root / "resources" / "app.yml").read_text()
     assert "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS" in app_resource
     assert "${resources.jobs.cost_forecast_train.id}" in app_resource
+    assert "${resources.jobs.lakemeter_schema_migrations.id}" in app_resource
     assert not (root / "resources" / "runtime_control.yml").exists()
 
 

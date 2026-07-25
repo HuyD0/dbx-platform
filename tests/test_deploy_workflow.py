@@ -65,7 +65,7 @@ def test_stale_lock_recovery_is_explicit_and_manual_only() -> None:
     assert "lock_args+=(--force-lock)" in deploy_step["run"]
 
 
-def test_production_deploy_selects_every_declared_non_dashboard_resource() -> None:
+def test_production_deploy_selects_every_normal_application_resource() -> None:
     command = _deploy_command()
     resources: dict[str, dict[str, object]] = {}
 
@@ -86,11 +86,27 @@ def test_production_deploy_selects_every_declared_non_dashboard_resource() -> No
     expected = {
         f"{resource_type}.{resource_name}"
         for resource_type, declarations in resources.items()
-        if resource_type != "dashboards"
+        if resource_type
+        not in {
+            "dashboards",
+            "postgres_projects",
+            "postgres_branches",
+            "postgres_endpoints",
+            "postgres_roles",
+            "postgres_databases",
+        }
         for resource_name in declarations
     }
 
     assert selected == expected
+
+
+def test_normal_deploy_never_provisions_or_alters_lakebase() -> None:
+    command = _deploy_command()
+
+    assert "--select jobs.lakemeter_schema_migrations" in command
+    assert "--select postgres_" not in command
+    assert "bundle run lakemeter_schema_migrations" not in DEPLOY_WORKFLOW.read_text()
 
 
 def test_control_plane_jobs_share_one_catalog_and_schema() -> None:

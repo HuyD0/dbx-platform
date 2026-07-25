@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"],
+      "react/jsx-dev-runtime": ["node_modules/@types/react/jsx-dev-runtime.d.ts"],
+      "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+      "react-dom/client": ["node_modules/@types/react-dom/client.d.ts"],
+      "react-router-dom": ["node_modules/react-router-dom"],
+      "react-hot-toast": ["node_modules/react-hot-toast"],
+      "react-markdown": ["node_modules/react-markdown"],
+      "remark-gfm": ["node_modules/remark-gfm"],
+      "zustand": ["node_modules/zustand"],
+      "axios": ["node_modules/axios"],
+      "clsx": ["node_modules/clsx"],
+      "file-saver": ["node_modules/@types/file-saver/index.d.ts"],
+      "framer-motion": ["node_modules/framer-motion"],
+      "@headlessui/react": ["node_modules/@headlessui/react"],
+      "@heroicons/react/*": ["node_modules/@heroicons/react/*"],
+      "@dnd-kit/core": ["node_modules/@dnd-kit/core"],
+      "@dnd-kit/modifiers": ["node_modules/@dnd-kit/modifiers"],
+      "@dnd-kit/sortable": ["node_modules/@dnd-kit/sortable"],
+      "@dnd-kit/utilities": ["node_modules/@dnd-kit/utilities"]
+    },
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true
+  },
+  "include": ["src"]
+}

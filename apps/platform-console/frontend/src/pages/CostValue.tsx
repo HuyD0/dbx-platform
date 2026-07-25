@@ -3,6 +3,7 @@ import { ArrowLeft, Info, Layers3 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
+import { COST_TABS, CostTabs } from "../components/CostTabs";
 import { CostTrendChart } from "../components/CostTrendChart";
 import { DataTable } from "../components/DataTable";
 import { FindingsSection } from "../components/FindingsSection";
@@ -17,7 +18,6 @@ import {
   PageHeader,
   SectionTitle,
   Skeleton,
-  Tabs,
 } from "../components/ui";
 import { apiGet } from "../lib/api";
 import { currency } from "../lib/format";
@@ -28,16 +28,6 @@ import type {
   Row,
 } from "../lib/types";
 import { Cost } from "./Cost";
-
-const COST_TABS = [
-  { id: "categories", label: "Service categories" },
-  { id: "databricks", label: "Databricks drivers" },
-  { id: "ownership", label: "Ownership" },
-  { id: "alignment", label: "Billing alignment" },
-  { id: "forecast", label: "Forecast & budgets" },
-  { id: "coverage", label: "Coverage" },
-  { id: "llm", label: "LLM detail" },
-];
 
 const ALIGNMENT_FILTERS = [
   "ALL",
@@ -538,7 +528,7 @@ function OwnershipExplorer({ data }: { data: CostOverview }) {
 }
 
 export function CostValue() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const requested = params.get("tab") ?? "categories";
   const active = COST_TABS.some((tab) => tab.id === requested) ? requested : "categories";
   const days = Math.max(1, Math.min(365, Number(params.get("days") ?? 30)));
@@ -548,15 +538,6 @@ export function CostValue() {
     staleTime: 60_000,
     retry: false,
   });
-  const setActive = (tab: string) => {
-    const next = new URLSearchParams(params);
-    if (tab === "categories") next.delete("tab");
-    else next.set("tab", tab);
-    next.delete("date");
-    next.delete("category");
-    setParams(next, { replace: true });
-  };
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -572,7 +553,7 @@ export function CostValue() {
           </Link>
         }
       />
-      <Tabs tabs={COST_TABS} active={active} onChange={setActive} label="Cost Explorer views" />
+      <CostTabs />
       {query.isPending ? (
         <Skeleton rows={10} />
       ) : query.isError ? (
