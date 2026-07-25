@@ -15,7 +15,7 @@ make an executor a workspace admin as a convenience.
 | App service principal | Read summaries and submit an already approved action ID to executor Jobs | UC `MODIFY`; cluster/job/token/policy/app/warehouse mutation APIs |
 | Evidence-job executor | Run scheduled evidence/reporting Jobs and append their governed outputs | Remediation, UC DDL, resource lifecycle APIs |
 | Action executor | Allowlisted remediation, protected manual Job launch, budget write | App lifecycle control, UC DDL, resource deletion |
-| LakeMeter migration executor | Own the dedicated Lakebase database and run an approved schema/pricing migration | App/runtime actions, workspace target mutation, shared database access |
+| LakeMeter migration executor | Own the isolated LakeMeter database in the shared PoC Lakebase project and run an approved schema/pricing migration | App/runtime actions, workspace target mutation, other database access |
 | Scheduled report identity | Read sources; append findings/cost/telemetry | Resource/configuration mutation APIs |
 | Human viewer | Read masked Mission Control data | Action-table writes |
 | Human operator/proposer | Create plans under forwarded user authorization | Approval unless also in approver group; executor API permissions |
@@ -36,7 +36,7 @@ never authorization.
 | Protected forecast-training Job | deploy/manage | `CAN_VIEW` exact ID | none | `CAN_MANAGE_RUN`, run-as | none |
 | Schema migration Job | deploy/run | none | none | none | none |
 | LakeMeter migration Job | deploy/manage | `CAN_VIEW` exact ID | none | `CAN_MANAGE_RUN` exact approved Job | none |
-| LakeMeter Lakebase project/database | approved companion reconciliation | scoped CRUD through App binding | none | none | none |
+| LakeMeter database in shared PoC project | approved companion reconciliation | scoped CRUD through App binding | none | none | none |
 | Eligible clusters | deploy only if bundle-owned | none | none | `CAN_MANAGE` on exact approved scope | read if needed |
 | Eligible orphaned Jobs | deploy/manage if bundle-owned | none | none | `CAN_MANAGE` on exact approved scope | read |
 | PAT token-management API | none | none | none | workspace-admin-level capability; keep pack disabled unless accepted | read/list only if security pack enabled |

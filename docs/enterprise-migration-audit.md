@@ -61,8 +61,8 @@ pointing CI or a local profile at a new workspace.
 - The evidence-job identity and action executor must be distinct service principals
   unless a reviewed exception explicitly sets `DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP`.
 - The LakeMeter migration executor must be a third, dedicated service
-  principal with access only to its Lakebase project/database and unscheduled
-  migration Job.
+  principal with access only to its database in the configured Lakebase
+  project and its unscheduled migration Job.
 - Confirm Lakebase Autoscaling and Databricks Apps database resources are
   available in the target region. Keep the Estimator in its setup state until
   the approved companion reconciliation and schema migration complete.

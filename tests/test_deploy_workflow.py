@@ -109,6 +109,20 @@ def test_normal_deploy_never_provisions_or_alters_lakebase() -> None:
     assert "bundle run lakemeter_schema_migrations" not in DEPLOY_WORKFLOW.read_text()
 
 
+def test_lakemeter_companion_reuses_existing_project_without_managing_it() -> None:
+    bundle = yaml.safe_load((ROOT / "databricks.yml").read_text())
+    document = yaml.safe_load((ROOT / "resources" / "lakemeter.yml").read_text())
+    resources = document["resources"]
+    expected_parent = "projects/${var.lakemeter_project_id}/branches/production"
+
+    assert bundle["variables"]["lakemeter_project_id"]["default"] == "learn-app-sync-dev-1"
+    assert "postgres_projects" not in resources
+    assert "postgres_branches" not in resources
+    assert "postgres_endpoints" not in resources
+    assert resources["postgres_roles"]["lakemeter_migration_owner"]["parent"] == expected_parent
+    assert resources["postgres_databases"]["lakemeter_database"]["parent"] == expected_parent
+
+
 def test_control_plane_jobs_share_one_catalog_and_schema() -> None:
     expected = [
         "--catalog",
