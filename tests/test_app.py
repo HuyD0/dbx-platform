@@ -730,6 +730,44 @@ def test_health_reports_workspace_scope(client):
     assert body["workspace_id"] == "local"
 
 
+def test_dashboard_links_include_workspace_context(client, ws):
+    ws.config.host = "https://adb-123.azuredatabricks.net/"
+    ws.get_workspace_id.return_value = "7405609799238491"
+    ws.lakeview.list.return_value = [
+        SimpleNamespace(
+            display_name="[dbx-platform] Cost & Usage",
+            dashboard_id="dashboard-123",
+        ),
+        SimpleNamespace(display_name="Unmanaged dashboard", dashboard_id="other"),
+    ]
+
+    body = client.get("/api/dashboards").json()
+
+    assert body["data"] == [
+        {
+            "name": "[dbx-platform] Cost & Usage",
+            "url": (
+                "https://adb-123.azuredatabricks.net/sql/dashboardsv3/"
+                "dashboard-123?o=7405609799238491"
+            ),
+            "embed_url": (
+                "https://adb-123.azuredatabricks.net/embed/dashboardsv3/"
+                "dashboard-123?o=7405609799238491"
+            ),
+        }
+    ]
+
+
+def test_dashboard_links_fail_closed_without_workspace_id(client, ws):
+    ws.config.host = "https://adb-123.azuredatabricks.net"
+    ws.get_workspace_id.return_value = None
+
+    body = client.get("/api/dashboards").json()
+
+    assert body["data"] == []
+    ws.lakeview.list.assert_not_called()
+
+
 def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
     captured: dict = {}
 

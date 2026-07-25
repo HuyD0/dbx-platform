@@ -25,7 +25,7 @@ export function Dashboards() {
       <Card>
         <SectionTitle
           title="Dashboards"
-          subtitle="The bundle's AI/BI dashboards, embedded. Blank frame? A workspace admin must approve the app's domain for embedding (docs/runbook.md)."
+          subtitle="Embedded with your current Databricks workspace session and permissions."
           right={
             query.data && (
               <AsOf
@@ -45,24 +45,41 @@ export function Dashboards() {
           <EmptyState message="No [dbx-platform] dashboards visible — deploy the bundle first." />
         ) : (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              {dashboards.map((d) => (
-                <button
-                  key={d.name}
-                  type="button"
-                  onClick={() => setSelectedName(d.name)}
-                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
-                    selected?.name === d.name
-                      ? "border-accent/40 bg-accent/15 text-accent"
-                      : "border-grid text-ink-2 hover:bg-hairline"
-                  }`}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {dashboards.map((d) => (
+                  <button
+                    key={d.name}
+                    type="button"
+                    onClick={() => setSelectedName(d.name)}
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-medium ${
+                      selected?.name === d.name
+                        ? "border-accent/40 bg-accent/15 text-accent"
+                        : "border-grid text-ink-2 hover:bg-hairline"
+                    }`}
+                  >
+                    {shortName(d.name)}
+                  </button>
+                ))}
+              </div>
+              {selected && (
+                <a
+                  href={selected.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex shrink-0 items-center gap-1 text-xs text-ink-2 hover:text-ink hover:underline"
                 >
-                  {shortName(d.name)}
-                </button>
-              ))}
+                  <ExternalLink className="h-3 w-3" />
+                  Open in workspace
+                </a>
+              )}
             </div>
             {selected && (
               <>
+                <p className="text-xs leading-5 text-muted">
+                  Seeing another Continue prompt? Allow third-party cookies for the Databricks
+                  app and workspace domains, then reload—or use Open in workspace.
+                </p>
                 <iframe
                   key={selected.name}
                   src={selected.embed_url}
@@ -70,15 +87,6 @@ export function Dashboards() {
                   loading="lazy"
                   className="h-[75vh] w-full rounded-xl border border-grid bg-white"
                 />
-                <a
-                  href={selected.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-ink-2 hover:text-ink hover:underline"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  Open in workspace
-                </a>
               </>
             )}
           </div>
