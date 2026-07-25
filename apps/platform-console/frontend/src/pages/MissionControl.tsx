@@ -62,7 +62,6 @@ interface RawMissionControl {
     awaiting_approval?: number;
   };
   top_decisions?: Row[];
-  runtime?: Row;
   data_health?: Record<string, unknown>;
 }
 
@@ -104,8 +103,6 @@ const ACTION_TITLES: Record<string, string> = {
   "policy-sync": "Synchronize managed policies",
   "run-job": "Run an evidence job",
   "configure-budget": "Update a governed budget",
-  "runtime.hibernate": "Hibernate resources",
-  "runtime.wake": "Wake resources",
 };
 
 const LEGACY_ACTION_TITLES: Record<string, string> = {

@@ -41,9 +41,8 @@ artifacts:
 variables:
   platform_console_name:
     description: >
-      Stable Databricks App resource name shared with the out-of-band runtime
-      controller. Keeping this as configuration avoids an App ↔ controller Job
-      dependency cycle while preserving an exact, non-discovered target.
+      Stable Databricks App resource name used across bundle targets and
+      deployment automation.
     default: platform-console
 
   chat_model:
@@ -75,7 +74,7 @@ variables:
   approver_group:
     description: >
       Workspace group allowed to review and approve exact Mission Control
-      action plans and launch the out-of-band power controller.
+      action plans and launch governed executor jobs.
     default: dbx-platform-approvers
 
   approver_group_id:
@@ -94,13 +93,14 @@ variables:
   runtime_executor_service_principal_name:
     description: >
       Application/client ID of the dedicated, least-privileged service
-      principal that runs the power controller. This deliberately has no
-      default: a deployment must explicitly name the executor identity.
+      principal that runs scheduled evidence and reporting jobs. This
+      deliberately has no default: a deployment must explicitly name the
+      executor identity.
 
   action_executor_service_principal_name:
     description: >
       Application/client ID of the separate remediation executor. It must not
-      be the runtime controller identity and receives only the permissions for
+      be the evidence-job identity and receives only the permissions for
       explicitly enabled non-runtime action packs.
 
   azure_subscription_id:
@@ -167,8 +167,6 @@ targets:
           performance_target: STANDARD
         cost_usage_report:
           performance_target: STANDARD
-        power_controller:
-          performance_target: STANDARD
         housekeeping_report:
           performance_target: STANDARD
         action_executor:
@@ -182,7 +180,7 @@ targets:
   # serverless jobs on the cost-optimized STANDARD target and isolates durable
   # control-plane data from dev/prod. Schedules remain paused from the resource
   # definitions, and the managed warehouse remains 2X-Small with a 5 minute
-  # auto-stop (resources/runtime_control.yml).
+  # auto-stop (resources/warehouse.yml).
   uat:
     mode: production
     workspace:
@@ -217,8 +215,6 @@ targets:
           performance_target: STANDARD
         cost_usage_report:
           performance_target: STANDARD
-        power_controller:
-          performance_target: STANDARD
         housekeeping_report:
           performance_target: STANDARD
         action_executor:
@@ -228,11 +224,9 @@ targets:
         governance_check:
           performance_target: STANDARD
 
-  # Production: real names, schedules deployed paused, identity-owned root.
-  # The power controller proposes reconciliation; a human approves the exact
-  # plan before the warehouse's ON/SLEEPING state is restored. The Platform
-  # Console app is the exception: it deploys started: true (resources/app.yml),
-  # so CI starts it directly on deploy without an approved plan.
+  # Production: real names, five curated schedules enabled, identity-owned
+  # root. The Platform Console app deploys started and its dedicated serverless
+  # warehouse starts on demand, then auto-stops after five idle minutes.
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
   # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:
@@ -240,10 +234,27 @@ targets:
   prod:
     mode: production
     workspace:
-      # Keep controller source out of /Workspace/Shared, which is writable by
+      # Keep deployed source out of /Workspace/Shared, which is writable by
       # every workspace user and would undermine immutable-plan execution.
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
       # Preserve the existing production deployment lineage while source and
       # artifacts move to the identity-owned root. Move the state itself only
       # through a separately rehearsed bundle-state migration.
       state_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}/state
+    resources:
+      jobs:
+        azure_cost_pull:
+          schedule:
+            pause_status: UNPAUSED
+        cost_usage_report:
+          schedule:
+            pause_status: UNPAUSED
+        security_audit:
+          schedule:
+            pause_status: UNPAUSED
+        governance_check:
+          schedule:
+            pause_status: UNPAUSED
+        platform_digest:
+          schedule:
+            pause_status: UNPAUSED

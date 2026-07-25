@@ -18,7 +18,7 @@ def test_production_deploy_preserves_existing_dashboards() -> None:
     assert "databricks bundle deploy -t prod" in command
     assert "--select apps.platform_console" in command
     assert "--select sql_warehouses.platform_console_warehouse" in command
-    assert "--select jobs.power_controller" in command
+    assert "--select jobs.power_controller" not in command
     assert "--select jobs.schema_migrations" in command
     assert "--select dashboards." not in command
     assert "--auto-approve" not in command
@@ -102,7 +102,6 @@ def test_control_plane_jobs_share_one_catalog_and_schema() -> None:
     ]
     jobs = (
         ("migrations.yml", "schema_migrations"),
-        ("runtime_control.yml", "power_controller"),
         ("action_executor.yml", "action_executor"),
     )
 
@@ -113,3 +112,40 @@ def test_control_plane_jobs_share_one_catalog_and_schema() -> None:
         ]["parameters"]
         start = parameters.index("--catalog")
         assert parameters[start : start + 4] == expected
+
+
+def test_only_curated_production_schedules_are_unpaused() -> None:
+    bundle = yaml.safe_load((ROOT / "databricks.yml").read_text())
+    prod_jobs = bundle["targets"]["prod"]["resources"]["jobs"]
+    unpaused = {
+        key
+        for key, override in prod_jobs.items()
+        if override.get("schedule", {}).get("pause_status") == "UNPAUSED"
+    }
+    assert unpaused == {
+        "azure_cost_pull",
+        "cost_usage_report",
+        "security_audit",
+        "governance_check",
+        "platform_digest",
+    }
+
+    schedules: dict[str, dict[str, str]] = {}
+    for resource_path in sorted((ROOT / "resources").glob("*.yml")):
+        document = yaml.safe_load(resource_path.read_text()) or {}
+        for key, job in document.get("resources", {}).get("jobs", {}).items():
+            schedule = job.get("schedule")
+            if schedule:
+                assert schedule["pause_status"] == "PAUSED"
+                schedules[key] = schedule
+
+    assert {
+        key: schedules[key]["quartz_cron_expression"] for key in unpaused
+    } == {
+        "azure_cost_pull": "0 30 6 * * ?",
+        "cost_usage_report": "0 0 7 * * ?",
+        "security_audit": "0 0 6 ? * MON",
+        "governance_check": "0 30 6 ? * MON",
+        "platform_digest": "0 0 8 ? * MON",
+    }
+    assert all(schedules[key]["timezone_id"] == "UTC" for key in unpaused)

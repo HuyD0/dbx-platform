@@ -425,15 +425,6 @@ export interface ActionRequestDetail extends ActionRequest {
   events: ActionEvent[];
 }
 
-export interface RuntimeState {
-  desired_state?: "ON" | "SLEEPING" | string;
-  current_state?: "ON" | "SLEEPING" | "TRANSITIONING" | string;
-  updated_at?: string | null;
-  active_operation?: string | null;
-  operation_status?: string | null;
-  wake_instructions?: string | null;
-}
-
 export interface LlmCostTotal {
   currency: string;
   cost: number;

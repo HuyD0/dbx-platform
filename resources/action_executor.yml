@@ -7,8 +7,7 @@ resources:
       name: "[dbx-platform] action-executor"
       description: >
         Executes one durable, approved, allowlisted Mission Control action by
-        action ID. This job has no schedule, no idle compute, and is excluded
-        from the Hibernate inventory.
+        action ID. This job has no schedule and no idle compute.
       max_concurrent_runs: 1
       timeout_seconds: 3600
       run_as:
@@ -88,3 +87,7 @@ resources:
               - ${resources.jobs.ai_catalog_sync.id}
               - --governed-job-id
               - ${resources.jobs.ai_monitor_rollup.id}
+              - --governed-job-id
+              - ${resources.jobs.estimator_prices_pull.id}
+              - --governed-job-id
+              - ${resources.jobs.estimator_drift_check.id}

@@ -13,8 +13,8 @@ allowlisted v1 action.
 
 Scheduled jobs may read platform sources and append findings, cost/usage
 ledger rows, forecasts, and audit telemetry. Budget/configuration changes,
-training/model promotion, manual stateful job runs, remediation, Hibernate,
-and Wake always require approval.
+training/model promotion, manual stateful job runs, and remediation always
+require approval.
 
 ## Action lifecycle
 
@@ -63,7 +63,7 @@ Keep bundle variable `actions_enabled=false` until all of these pass:
    sources are visible rather than silently omitted.
 4. `dbx-platform-approvers` membership resolves through Databricks user
    authorization/SCIM.
-5. Runtime and action executors are distinct identities with the grants in
+5. Evidence-job and action executors are distinct identities with the grants in
    [service-principal.md](service-principal.md).
 6. Spoofed identity, altered hash, unauthorized approval, expiry, replay,
    target drift, and missing audit storage tests fail without mutation.
@@ -74,95 +74,50 @@ Then set `BUNDLE_VAR_actions_enabled=true` through a reviewed deployment.
 Turning on this flag only permits approval/executor submission; it does not
 bypass any durable checks.
 
-## Safe Hibernate
+## Curated schedules and compute
 
-The exact managed scope is generated from bundle output:
+The Platform Console declares `started: true`. Its dedicated 2X-Small
+serverless SQL warehouse starts on first query and auto-stops after five idle
+minutes.
 
-- Platform Console app;
-- thirteen declared schedules;
-- dedicated `[dbx-platform] mission-control` 2X-Small serverless warehouse.
+All schedule definitions default to `PAUSED`. Dev and UAT keep that default.
+Production target overrides unpause exactly:
 
-Protected/out of scope:
+- `azure_cost_pull` daily at 06:30 UTC;
+- `cost_usage_report` daily at 07:00 UTC;
+- `security_audit` Monday at 06:00 UTC;
+- `governance_check` Monday at 06:30 UTC;
+- `platform_digest` Monday at 08:00 UTC.
 
-- shared Starter and every unrelated warehouse;
-- unscheduled `power-controller`, `action-executor`, and `schema_migrations`;
-- protected manual `cost-forecast-train`;
-- dashboards, UC data, models, storage/networking, workspace, and unrelated
-  projects.
+All other scheduled Jobs stay paused. When one is needed, create an exact
+`run-job` plan in Action Center and use the normal approval/executor flow.
+Never use Databricks **Run now** for a stateful evidence writer because it
+lacks the durable approval attestation.
 
-The controller never discovers targets by substring, tag, or broad workspace
-scan.
+CI builds and deploys the bundle, runs `schema_migrations`, and synchronizes
+estimator prompts. It does not run a lifecycle reconciliation job.
 
-### Plan and execute Hibernate
+After the first complete week, verify 17 scheduled Job triggers, confirm no new
+controller runs, and compare serverless billing with the previous week. A Job
+trigger may contain multiple billed tasks, so use system billing rather than
+trigger count as the dollar-savings measurement.
 
-Use **Workflows → `[dbx-platform] power-controller`**:
+### One-time power-controller retirement
 
-1. Run `operation=plan-hibernate`.
-2. Review resources to stop, already-stopped resources, exclusions, active
-   runs/queries, dependencies, estimated idle savings, retained data, wake
-   procedure, inverse state, expiry, and hash.
-3. Before expiry, rerun with:
-   - `operation=execute-hibernate`
-   - `plan_id=<reviewed action id>`
-   - `plan_hash=<reviewed hash>`
+Production already has a bundle-bound controller Job. Resource deletion is
+unsupported, so retire it without deleting it:
 
-Execution:
+1. Deploy the release that removes CI invocation and app access while the old
+   Job definition is still present and unscheduled.
+2. Resolve the production bundle summary and verify the exact
+   `power_controller` binding and remote Job ID.
+3. Run `databricks bundle deployment unbind power_controller -t prod`.
+4. Without an intervening deployment from a revision that still declares the
+   controller, deploy the release that removes its bundle definition.
 
-1. Persist exact before state and inverse Wake plan.
-2. Pause only schedules previously unpaused.
-3. Wait up to 15 minutes for owned runs and dedicated-warehouse statements.
-4. If activity remains, abort and restore schedules/runtime state. Cancellation
-   requires a separate action and is unsupported in v1.
-5. Stop the dedicated warehouse.
-6. Persist checkpoints and desired `SLEEPING`.
-7. Stop the app last.
-
-On partial failure the controller restores captured state where possible and
-records the exact result. Drift becomes `STALE`; there is no best-effort
-mutation.
-
-## Wake while the app is stopped
-
-Use the same out-of-band controller in the Jobs UI:
-
-1. Run `operation=plan-wake`.
-2. Review the exact 15-minute plan/hash.
-3. Rerun with `operation=execute-wake`, plan ID, and plan hash.
-
-The controller verifies the launcher’s current approver-group membership,
-starts the dedicated warehouse, starts and health-checks the currently
-deployed app revision, then restores only schedules enabled before Hibernate.
-Repeated Wake/Hibernate calls are idempotent.
-
-The controller does not deploy source. Releasing a different app revision is a
-separate reviewed deployment.
-
-Note: the app also starts on any prod deploy (it declares `started: true`), so
-after a merge to `main` this manual Wake is only needed to restart the warehouse
-and the schedules — the app itself is already up.
-
-## Deployment reconciliation
-
-Every bundle schedule declares `pause_status: PAUSED` and the dedicated
-warehouse declares `started: false`. The app declares `started: true`, so a
-prod deploy starts it directly (see `resources/app.yml`).
-
-CI performs:
-
-1. build wheel and frontend;
-2. validate/deploy the bundle;
-3. run unscheduled `schema_migrations` on serverless Spark;
-4. run `power_controller operation=reconcile`.
-
-The migration is the sole bootstrap path for schemas, tables, and dashboard
-helper functions. It does not start the managed SQL warehouse. Reconciliation
-reads durable desired state and either reports `ALREADY_RECONCILED` or creates
-an `AWAITING_APPROVAL` plan. CI never executes it.
-
-Deploying while desired state is `SLEEPING` leaves the warehouse and schedules
-asleep, but still starts the app, which declares `started: true`. A routine
-merge to `main` therefore restarts the app even when the toolkit is hibernated;
-only the warehouse and schedules stay asleep until an approved Wake.
+The old workspace Job remains inert and unmanaged. Existing runtime-state
+tables and historical action/audit rows are retained; retired runtime actions
+cannot be approved or executed.
 
 ## Assistant model access
 
@@ -190,8 +145,7 @@ an allowlisted executor action.
 ## Protected forecast training
 
 `cost-forecast-train` is unscheduled and runs as the action executor identity.
-It is exact-bound into the app as a governed manual Job but is absent from the
-Hibernate inventory.
+It is exact-bound into the app as a governed manual Job.
 
 To train/promote:
 

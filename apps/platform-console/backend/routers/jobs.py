@@ -24,27 +24,27 @@ def _as_bool(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes"}
 
 
-def _governed_manual_job_ids() -> set[int]:
-    """Return exact bundle-bound Jobs that are runnable but never hibernated."""
+def _governed_job_ids() -> set[int]:
+    """Return exact bundle-bound Jobs that are available for governed runs."""
 
-    raw = os.getenv("DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS", "")
     ids: set[int] = set()
-    for value in raw.split(","):
-        value = value.strip()
-        if not value:
-            continue
-        try:
-            job_id = int(value)
-        except ValueError as exc:
-            raise RuntimeError(
-                "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS must contain exact "
-                "comma-separated numeric Job IDs"
-            ) from exc
-        if job_id <= 0:
-            raise RuntimeError(
-                "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS contains an invalid Job ID"
-            )
-        ids.add(job_id)
+    for env_name in (
+        "DBX_PLATFORM_GOVERNED_SCHEDULED_JOB_IDS",
+        "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS",
+    ):
+        for value in os.getenv(env_name, "").split(","):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                job_id = int(value)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"{env_name} must contain exact comma-separated numeric Job IDs"
+                ) from exc
+            if job_id <= 0:
+                raise RuntimeError(f"{env_name} contains an invalid Job ID")
+            ids.add(job_id)
     return ids
 
 
@@ -61,11 +61,11 @@ def _platform_jobs() -> list[dict]:
         and str(resource.get("ownership") or "").upper() == "BUNDLE"
         and not _as_bool(resource.get("protected"))
     }
-    # Manual stateful Jobs (for example forecast training) are protected from
-    # Hibernate but may still be planned through Action Center. Their exact
+    # Manual stateful Jobs (for example forecast training) may still be planned
+    # through Action Center. Their exact
     # bundle resource IDs are injected into the app; no name-based discovery
     # or broad workspace scan can add a runnable target.
-    owned_ids.update(_governed_manual_job_ids())
+    owned_ids.update(_governed_job_ids())
     out = []
     for j in deps.get_ws().jobs.list():
         settings = j.settings

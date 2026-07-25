@@ -6,7 +6,7 @@ Databricks across cost, security, risk, and performance.
 It continuously observes the platform, normalizes evidence into findings, and
 uses AI to correlate symptoms and draft proposals. AI is never an executor.
 Every Databricks/Azure resource, credential, policy, budget, schedule, model,
-training, or runtime mutation follows:
+training, or other governed mutation follows:
 
 `Observe → correlate → propose → human approve → execute → verify → measure`
 
@@ -32,7 +32,7 @@ jobs are the only mutation boundary.
   unsupported in v1.
 - Autonomous schedules may read sources and append internal findings, usage,
   cost, and audit telemetry. Training, model promotion, budget/config changes,
-  manual stateful job runs, remediation, and runtime control require approval.
+  manual stateful job runs, and remediation require approval.
 
 See [docs/runbook.md](docs/runbook.md) for the operator flow and
 [docs/service-principal.md](docs/service-principal.md) for the exact identity
@@ -53,8 +53,7 @@ systems:
    egress, and audit anomalies.
 5. **Performance** — job/query regressions, queueing, retry waste,
    utilization, serving latency/errors, and SLO risk.
-6. **Resources & Runtime** — exact owned inventory, dependencies, Hibernate,
-   and Wake.
+6. **Operations** — performance regressions and compute hygiene.
 7. **Automations** — report schedules, monitors, and playbooks.
 8. **Assistant**, with Settings and Audit available globally.
 
@@ -89,32 +88,21 @@ The rollup keeps 90 days of hourly detail and 400 days of daily aggregates.
 Budgets default to 80% warning and 100% critical alerts; changing a budget is
 an approved action and an alert never changes resources automatically.
 
-## Safe Hibernate and Wake
+## Curated schedules and compute
 
 The bundle creates a dedicated 2X-Small serverless SQL warehouse with a
-five-minute auto-stop. It never manages or reuses the shared Starter warehouse.
+five-minute auto-stop. It starts on demand and never manages or reuses the
+shared Starter warehouse. The Platform Console remains started.
 
-The exact v1 Hibernate inventory is:
+Every schedule is paused by default in its resource definition. Production
+unpauses only:
 
-- the Platform Console app;
-- thirteen bundle-declared schedules;
-- the dedicated Mission Control warehouse.
+- daily `azure_cost_pull` and `cost_usage_report`;
+- weekly `security_audit`, `governance_check`, and `platform_digest`.
 
-The unscheduled `power-controller` and `action-executor` jobs, manual forecast
-training, dashboards, Unity Catalog data, models, shared compute, storage,
-networking, and unrelated projects are protected/out of scope.
-
-Hibernate records exact prior state, pauses only schedules that were enabled,
-waits up to 15 minutes for owned runs/queries to drain, stops the warehouse,
-then stops the app. Wake starts the warehouse, starts and health-checks the
-app, and restores only the schedules enabled before Hibernate. Partial failure
-restores captured state where possible and records the result.
-
-All bundle schedules deploy PAUSED and the warehouse deploys stopped; the app
-deploys started, so a prod deploy starts it directly. Deployments run schema
-migrations on serverless Spark, then produce a proposal-only runtime
-reconciliation. Deploying while `SLEEPING` still restarts the app but leaves
-the warehouse and schedules asleep.
+Dev and UAT keep every schedule paused. The other production Jobs remain
+deployed and may be launched through an approved `run-job` action when fresh
+evidence is needed.
 
 ## Commands and jobs
 
@@ -176,7 +164,7 @@ databricks auth login \
   --host https://adb-<workspace-id>.<n>.azuredatabricks.net \
   --profile dbx-platform
 
-export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-executor-client-id>
+export BUNDLE_VAR_runtime_executor_service_principal_name=<evidence-job-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-executor-client-id>
 
 uv run ruff check .
@@ -202,7 +190,7 @@ src/dbx_platform/          evidence packs, ledger, migrations, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
 dashboards/                AI/BI templates and rendered definitions
 policies/                  reviewable policy source
-tests/                     offline safety, decision, API, and runtime tests
+tests/                     offline safety, decision, API, and executor tests
 docs/                      setup, grants, runbook, secrets, cloud CI
 ```
 

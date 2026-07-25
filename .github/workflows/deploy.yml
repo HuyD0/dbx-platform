@@ -32,7 +32,7 @@ concurrency:
 #
 # Repository/environment variables:
 #   DBX_PLATFORM_RUNTIME_EXECUTOR_SP  application ID of the dedicated
-#                                     power-controller service principal
+#                                     evidence-job service principal
 #   DBX_PLATFORM_ACTION_EXECUTOR_SP   application ID of the separate
 #                                     allowlisted remediation executor
 #   DBX_PLATFORM_APPROVER_GROUP_ID    immutable SCIM ID of the approver group
@@ -165,7 +165,6 @@ jobs:
             --select jobs.ml_hygiene_report \
             --select jobs.ml_serving_report \
             --select jobs.platform_digest \
-            --select jobs.power_controller \
             --select jobs.schema_migrations \
             --select jobs.security_audit
       - name: Apply Mission Control schema migrations
@@ -177,10 +176,3 @@ jobs:
         # texts tagged by content hash, skipping unchanged versions, so
         # traces, registry versions and git commits reference the same bytes.
         run: databricks bundle run estimator_prompt_sync -t prod
-      - name: Reconcile the durable runtime intent (proposal only)
-        # Deploy leaves schedules paused and the warehouse asleep; the app
-        # declares started: true, so deploy does start it directly.
-        # This unscheduled serverless controller compares exact bundle IDs with
-        # the last approved ON/SLEEPING state. Drift creates a new immutable
-        # AWAITING_APPROVAL plan; it never changes resource state in CI.
-        run: databricks bundle run power_controller -t prod --params operation=reconcile

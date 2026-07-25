@@ -274,7 +274,7 @@ export function ActionCenter() {
         ) : unavailable ? (
           <CapabilityNotice
             title="Durable approval ledger is not connected yet"
-            description="Existing dry-run remediations remain available below. New runtime, job and budget actions fail closed until the action-request API is enabled."
+            description="Existing dry-run remediations remain available below. New job and budget actions fail closed until the action-request API is enabled."
           />
         ) : filtered.length === 0 ? (
           <EmptyState

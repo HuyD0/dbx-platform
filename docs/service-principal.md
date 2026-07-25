@@ -3,9 +3,9 @@
 Mission Control uses separate identities so compromise of one component does
 not turn observation or proposal capability into execution capability.
 
-Never reuse the app identity, deployment identity, runtime executor, or action
-executor. Do not grant `ALL PRIVILEGES` on a catalog/schema and do not make an
-executor a workspace admin as a convenience.
+Never reuse the app identity, deployment identity, evidence-job executor, or
+action executor. Do not grant `ALL PRIVILEGES` on a catalog/schema and do not
+make an executor a workspace admin as a convenience.
 
 ## Identities
 
@@ -13,8 +13,8 @@ executor a workspace admin as a convenience.
 |---|---|---|
 | Deployment identity | Asset Bundle deploy and idempotent schema migration | Runtime/action executor credentials; target API permissions unrelated to deployment |
 | App service principal | Read summaries and submit an already approved action ID to executor Jobs | UC `MODIFY`; cluster/job/token/policy/app/warehouse mutation APIs |
-| Runtime executor | Exact Hibernate/Wake and durable reconciliation | Non-runtime remediation, UC DDL, shared/unrelated resource access |
-| Action executor | Allowlisted remediation, protected manual Job launch, budget write | App/runtime control, UC DDL, resource deletion |
+| Evidence-job executor | Run scheduled evidence/reporting Jobs and append their governed outputs | Remediation, UC DDL, resource lifecycle APIs |
+| Action executor | Allowlisted remediation, protected manual Job launch, budget write | App lifecycle control, UC DDL, resource deletion |
 | Scheduled report identity | Read sources; append findings/cost/telemetry | Resource/configuration mutation APIs |
 | Human viewer | Read masked Mission Control data | Action-table writes |
 | Human operator/proposer | Create plans under forwarded user authorization | Approval unless also in approver group; executor API permissions |
@@ -28,10 +28,9 @@ never authorization.
 
 | Target | Deployment | App | Runtime executor | Action executor | Reports |
 |---|---:|---:|---:|---:|---:|
-| Platform Console app | deploy/manage | — | start/stop + status | none | none |
-| Dedicated Mission Control warehouse | deploy/configure | `CAN_USE` | `CAN_MANAGE` | `CAN_USE` only if an enabled action queries it | `CAN_USE` |
-| Eleven scheduled report Jobs | deploy/manage | `CAN_VIEW` on exact IDs | `CAN_MANAGE` on exact IDs | none | run-as |
-| Power controller Job | deploy/manage | `CAN_MANAGE_RUN` | run-as | none | none |
+| Platform Console app | deploy/manage | — | none | none | none |
+| Dedicated Mission Control warehouse | deploy/configure | `CAN_USE` | `CAN_USE` | `CAN_USE` only if an enabled action queries it | `CAN_USE` |
+| Fifteen scheduled report Jobs | deploy/manage | `CAN_VIEW` on exact IDs | `CAN_MANAGE` on exact IDs, run-as | none | run-as |
 | Action executor Job | deploy/manage | `CAN_MANAGE_RUN` | none | run-as | none |
 | Protected forecast-training Job | deploy/manage | `CAN_VIEW` exact ID | none | `CAN_MANAGE_RUN`, run-as | none |
 | Schema migration Job | deploy/run | none | none | none | none |
@@ -45,13 +44,12 @@ workspace entitlements. If a narrow grant cannot be expressed, keep that action
 pack proposal-only. In particular, do not make the whole action executor a
 workspace admin merely to enable PAT revocation.
 
-The runtime executor’s `CAN_MANAGE` on the dedicated warehouse is needed to
-inspect all active statements and stop it. It must have no permission on the
-shared Starter warehouse.
+The evidence-job executor needs only `CAN_USE` on the dedicated warehouse. It
+must have no permission on the shared Starter warehouse and no warehouse
+stop/edit capability.
 
 The protected training Job is injected into the app through the exact bundle
-ID (`DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS`) and is not placed in the Hibernate
-inventory.
+ID (`DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS`).
 
 ## Unity Catalog matrix
 
@@ -65,7 +63,7 @@ ALTER SCHEMA main.dbx_platform OWNER TO `dbx-platform-deployers`;
 ```
 
 Schema ownership is intentionally confined to this application schema. The
-deployment identity/group runs `schema_migrations`; no runtime identity gets
+deployment identity/group runs `schema_migrations`; no executor identity gets
 `CREATE TABLE`, `CREATE FUNCTION`, `MANAGE`, or ownership.
 
 Grant catalog/schema visibility:
@@ -155,23 +153,13 @@ Catalog commits enabled and supported current serverless/SQL compute. Keep
 `actions_enabled=false` until that prerequisite and a complete negative test
 cycle have been verified.
 
-### Runtime executor
+### Evidence-job executor
 
-```sql
-GRANT SELECT, MODIFY ON TABLE main.dbx_platform.action_requests
-  TO `dbx-platform-runtime-executor`;
-GRANT SELECT ON TABLE main.dbx_platform.action_approvals
-  TO `dbx-platform-runtime-executor`;
-GRANT SELECT, MODIFY ON TABLE main.dbx_platform.action_events
-  TO `dbx-platform-runtime-executor`;
-GRANT SELECT, MODIFY ON TABLE main.dbx_platform.managed_resources
-  TO `dbx-platform-runtime-executor`;
-GRANT SELECT, MODIFY ON TABLE main.dbx_platform.platform_runtime_state
-  TO `dbx-platform-runtime-executor`;
-```
-
-The runtime executor preflights both lifecycle update and event append. Missing
-storage or write permission stops it before observing/mutating managed targets.
+The legacy-named `dbx-platform-runtime-executor` principal no longer receives
+action-ledger or runtime-state `MODIFY`. Grant it only `CAN_MANAGE` on exact
+scheduled Jobs, `CAN_USE` on the dedicated warehouse, required source `SELECT`,
+and the same pack-specific destination-table grants listed for scheduled
+reports below.
 
 ### Action executor
 
@@ -269,7 +257,6 @@ budget action writes only its own governed `llm_budgets` table.
 The App resource binds:
 
 - dedicated warehouse as `CAN_USE`;
-- power controller as `CAN_MANAGE_RUN`;
 - action executor as `CAN_MANAGE_RUN`.
 
 Those bindings let the app submit only executor Job parameters. Its exact
@@ -322,6 +309,6 @@ Databricks Job `run_as` identities, not exposed to the app or GitHub steps.
 8. Remove unused grants after disabling a pack.
 
 Use `SHOW GRANTS` to compare actual versus this matrix. Any app `MODIFY`, any
-executor DDL, any runtime permission on shared/unrelated resources, or any
+executor DDL, any evidence-job permission on shared/unrelated resources, or any
 blanket workspace-admin grant is a release blocker unless explicitly
 documented as an accepted constraint for a disabled-by-default action pack.

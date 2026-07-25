@@ -11,7 +11,7 @@ expect.extend(toHaveNoViolations);
 const action: ActionRequestDetail = {
   schema_version: 1,
   action_id: "action-1",
-  action_type: "runtime.hibernate",
+  action_type: "orphaned-jobs",
   workspace_id: "workspace-1",
   environment: "production",
   parameters: {},
@@ -19,7 +19,7 @@ const action: ActionRequestDetail = {
   before_state: null,
   after_state: null,
   plan_hash: "a".repeat(64),
-  confirm_phrase: "apply runtime.hibernate 2",
+  confirm_phrase: "apply orphaned-jobs 2",
   status: "AWAITING_APPROVAL",
   raw_status: "AWAITING_APPROVAL",
   effective_status: "AWAITING_APPROVAL",
@@ -40,7 +40,7 @@ const action: ActionRequestDetail = {
     { resource_type: "APP", resource_id: "platform-console" },
   ],
   plan_id: "action-1",
-  action: "runtime.hibernate",
+  action: "orphaned-jobs",
   items: [
     { resource_type: "JOB", resource_id: "101" },
     { resource_type: "APP", resource_id: "platform-console" },
@@ -96,7 +96,7 @@ test("approval dialog traps/restores focus and uses a separate confirmation step
 
   const approve = screen.getByRole("button", { name: "Approve action" });
   expect(approve).toBeEnabled();
-  expect(screen.queryByLabelText(/Type apply runtime\.hibernate 2/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/Type apply orphaned-jobs 2/)).not.toBeInTheDocument();
   expect(screen.getByText("Plan review guide")).toBeInTheDocument();
   expect(screen.getByText(/Start with the plain-language summary/i)).toBeInTheDocument();
   expect(screen.getByText("changed resource count")).toBeInTheDocument();

@@ -1,8 +1,8 @@
 name: Platform triage
 
 # Human-dispatched findings -> rolling GitHub issue for human review.
-# This workflow is deliberately unscheduled: Hibernate must not have
-# any out-of-band timer capable of starting SQL compute.
+# This workflow is deliberately unscheduled so issue triage cannot start
+# workspace SQL compute outside the curated evidence schedule.
 # The agent never touches the workspace: remediation lands as reviewable git
 # changes (policies/*.json, job specs), humans merge, CI deploys. Any resulting
 # platform/configuration mutation still requires a Mission Control action.

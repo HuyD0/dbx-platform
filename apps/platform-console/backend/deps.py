@@ -198,32 +198,6 @@ def require_operator(request: Request):
     return actor
 
 
-def power_controller_job_id() -> int:
-    raw = os.environ.get("DBX_PLATFORM_POWER_CONTROLLER_JOB_ID", "").strip()
-    if not raw:
-        raise ValueError(
-            "DBX_PLATFORM_POWER_CONTROLLER_JOB_ID is not configured from the "
-            "power-controller app resource binding."
-        )
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise ValueError(
-            "DBX_PLATFORM_POWER_CONTROLLER_JOB_ID must be an integer job ID."
-        ) from exc
-
-
-@lru_cache(maxsize=1)
-def get_runtime_controller_client():
-    from backend.runtime_controller_client import RuntimeControllerClient
-
-    return RuntimeControllerClient(
-        get_ws(),
-        power_controller_job_id(),
-        get_control_plane_repository(),
-    )
-
-
 def action_executor_job_id() -> int:
     raw = os.environ.get("DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID", "").strip()
     if not raw:

@@ -582,7 +582,7 @@ class SQLControlPlaneRepository:
                 return
             if not self.auto_migrate:
                 # Production app identities stay read-only.  Migrations are
-                # applied by the setup/controller job under a separate
+                # applied by the deployment migration job under a separate
                 # deployment identity.
                 self._initialized = True
                 return
