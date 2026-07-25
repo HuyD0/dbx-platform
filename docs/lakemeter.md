@@ -34,11 +34,12 @@ export BUNDLE_VAR_lakemeter_migration_executor_service_principal_name=<client-id
 
 The first rollout has three deliberately separate phases:
 
-1. Review and approve the Lakebase companion-resource plan in
-   `resources/lakemeter.yml`. Apply only its `postgres_projects`,
-   `postgres_branches`, `postgres_endpoints`, `postgres_roles`, and
-   `postgres_databases` selections using the dedicated infrastructure
-   executor. They are excluded from the normal application deploy.
+1. Confirm the configured Lakebase project has a ready `production` branch and
+   `primary` endpoint. Review and approve the companion-resource plan in
+   `resources/lakemeter.yml`, then apply only its `postgres_roles` and
+   `postgres_databases` selections. The companion must not manage the shared
+   project, branch, or endpoint, and these resources remain excluded from the
+   normal application deploy.
 2. Run the normal deployment. It binds the existing database to the one
    Platform Console App, deploys the isolated assets, and installs the
    unscheduled migration Job.
@@ -51,6 +52,11 @@ Until all three phases complete, `/api/lakemeter/status` reports the missing or
 stale schema and the Estimator tab shows a setup/maintenance state. A normal
 deployment never selects Lakebase infrastructure and never starts the
 migration Job.
+
+The current PoC reuses `learn-app-sync-dev-1/production` while keeping
+LakeMeter data in its own `lakemeter` database. This shares project compute and
+project-level administration with Learn App, but not application tables,
+database ownership, or schema migrations.
 
 The migration is transactional. It reads schema/function/reference definitions
 from the pinned snapshot, reconciles only additive or replace-in-place objects,

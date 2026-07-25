@@ -1,54 +1,13 @@
-# LakeMeter's Lakebase infrastructure is deliberately not part of the normal
-# application deployment selection. Provision or reconcile these resources
-# only through the existing approved infrastructure path. The unscheduled
-# migration Job is deployed normally, but can run only through an approved
-# `run-job` action handled by the dedicated action executor.
+# LakeMeter reuses the workspace's existing Lakebase project and production
+# branch for this PoC. The companion reconciliation owns only its database and
+# OAuth migration role; it must never alter the shared project, branch, or
+# endpoint. The unscheduled migration Job is deployed normally, but can run
+# only through an approved `run-job` action handled by the dedicated executor.
 resources:
-  postgres_projects:
-    lakemeter_project:
-      project_id: ${var.lakemeter_project_id}
-      display_name: dbx-platform LakeMeter
-      pg_version: 17
-      # Lakebase disables native password login by default. Keep this implicit:
-      # some CLI builds validate the explicit field but fail while serializing
-      # unselected companion resources during a normal app deployment.
-      history_retention_duration: 604800s
-      default_endpoint_settings:
-        autoscaling_limit_min_cu: 0.5
-        autoscaling_limit_max_cu: 2
-        suspend_timeout_duration: 300s
-      lifecycle:
-        prevent_destroy: true
-      permissions:
-        - service_principal_name: ${var.lakemeter_migration_executor_service_principal_name}
-          level: CAN_MANAGE
-
-  postgres_branches:
-    lakemeter_production:
-      branch_id: production
-      parent: ${resources.postgres_projects.lakemeter_project.id}
-      no_expiry: true
-      is_protected: true
-      replace_existing: true
-      lifecycle:
-        prevent_destroy: true
-
-  postgres_endpoints:
-    lakemeter_primary:
-      endpoint_id: primary
-      parent: ${resources.postgres_branches.lakemeter_production.id}
-      endpoint_type: ENDPOINT_TYPE_READ_WRITE
-      autoscaling_limit_min_cu: 0.5
-      autoscaling_limit_max_cu: 2
-      suspend_timeout_duration: 300s
-      replace_existing: true
-      lifecycle:
-        prevent_destroy: true
-
   postgres_roles:
     lakemeter_migration_owner:
       role_id: lakemeter-migration-owner
-      parent: ${resources.postgres_branches.lakemeter_production.id}
+      parent: projects/${var.lakemeter_project_id}/branches/production
       postgres_role: ${var.lakemeter_migration_executor_service_principal_name}
       identity_type: SERVICE_PRINCIPAL
       auth_method: LAKEBASE_OAUTH_V1
@@ -58,7 +17,7 @@ resources:
   postgres_databases:
     lakemeter_database:
       database_id: lakemeter
-      parent: ${resources.postgres_branches.lakemeter_production.id}
+      parent: projects/${var.lakemeter_project_id}/branches/production
       postgres_database: lakemeter
       role: ${resources.postgres_roles.lakemeter_migration_owner.id}
       lifecycle:

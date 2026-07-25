@@ -112,9 +112,10 @@ variables:
 
   lakemeter_project_id:
     description: >
-      Stable Lakebase Autoscaling project ID. Provisioning and reconciliation
-      are selected only by the approved infrastructure workflow.
-    default: dbx-platform-lakemeter-dev
+      Existing Lakebase Autoscaling project whose production branch hosts the
+      isolated LakeMeter database. The companion reconciliation must not alter
+      the shared project, branch, or endpoint.
+    default: learn-app-sync-dev-1
 
   lakemeter_model_endpoint:
     description: >
@@ -252,8 +253,6 @@ targets:
   #     service_principal_name: b74a6820-d0ac-454f-8c32-02141cba3c8a
   prod:
     mode: production
-    variables:
-      lakemeter_project_id: dbx-platform-lakemeter
     workspace:
       # Keep deployed source out of /Workspace/Shared, which is writable by
       # every workspace user and would undermine immutable-plan execution.
