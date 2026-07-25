@@ -365,7 +365,8 @@ export default function App() {
             </div>
           </main>
 
-          {!mobileNavOpen && location.pathname !== "/" && (
+          {!mobileNavOpen &&
+            !["/", "/cost-planner"].includes(location.pathname) && (
             <AssistantLauncher onOpen={() => setAssistantOpen(true)} />
           )}
           <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />

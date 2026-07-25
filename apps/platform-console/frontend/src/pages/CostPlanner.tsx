@@ -12,7 +12,12 @@ import { EvaluationTaxPanel } from "../components/estimator/EvaluationTaxPanel";
 import { LineItemTable } from "../components/estimator/LineItemTable";
 import { SimilarEstimates } from "../components/estimator/SimilarEstimates";
 import { PricingFreshness } from "../components/estimator/PricingFreshness";
-import { RequirementsWizard, type WizardDraft } from "../components/estimator/RequirementsWizard";
+import {
+  estimatorPatternTags,
+  RequirementsWizard,
+  type DraftingAccess,
+  type WizardDraft,
+} from "../components/estimator/RequirementsWizard";
 import { ReviewRequirements } from "../components/estimator/ReviewRequirements";
 import { RigorSlider } from "../components/estimator/RigorSlider";
 import { ScenarioToggle } from "../components/estimator/ScenarioToggle";
@@ -32,6 +37,7 @@ import {
   type EstimatorPattern,
   type ExtractResponse,
   type SavedEstimateSummary,
+  type WorkspaceAccessResponse,
 } from "../lib/types";
 
 type Phase = "wizard" | "review" | "results";
@@ -80,6 +86,12 @@ export function CostPlanner() {
     queryFn: () => apiGet<Envelope<EstimatorPattern[]>>("/api/estimator/patterns"),
     staleTime: 60 * 60_000,
   });
+  const workspaceAccess = useQuery({
+    queryKey: ["workspaces", "access"],
+    queryFn: () => apiGet<WorkspaceAccessResponse>("/api/workspaces"),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
   const extract = useMutation({
     mutationFn: (text: string) =>
@@ -126,6 +138,15 @@ export function CostPlanner() {
     const key = String(requirements.pattern ?? "");
     return patterns.data?.data.find((p) => p.pattern === key)?.label ?? key;
   }, [patterns.data, requirements.pattern]);
+  const selectedPattern = useMemo(() => {
+    const key = String(requirements.pattern ?? "");
+    return patterns.data?.data.find((pattern) => pattern.pattern === key);
+  }, [patterns.data, requirements.pattern]);
+  const draftingAccess: DraftingAccess = workspaceAccess.isPending
+    ? "checking"
+    : workspaceAccess.data?.actor?.roles?.includes("proposer")
+      ? "available"
+      : "unavailable";
 
   const completeWizard = (draft: WizardDraft) => {
     setRequirements({ ...draft });
@@ -208,19 +229,34 @@ export function CostPlanner() {
         title="AI Cost Planner"
         description="Describe an AI solution in plain language and get a defensible monthly cost across three operating tiers — with the cost of checking the AI's work shown separately, never hidden."
         actions={
-          phase === "results" ? (
+          <>
+            {phase === "results" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPhase("wizard");
+                  setConfirmed(null);
+                  setWhatIf({});
+                }}
+                className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink-2 hover:bg-hairline"
+              >
+                Start a new estimate
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => {
-                setPhase("wizard");
-                setConfirmed(null);
-                setWhatIf({});
-              }}
-              className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink-2"
+              onClick={() =>
+                openAssistant({
+                  actionId: "cost-planner",
+                  label: phase === "results" ? "AI Cost Planner results" : "AI Cost Planner intake",
+                })
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-grid bg-surface px-3 py-1.5 text-xs font-medium text-ink shadow-sm hover:bg-hairline"
             >
-              Start a new estimate
+              <Bot className="h-3.5 w-3.5 text-accent" />
+              Ask agent
             </button>
-          ) : undefined
+          </>
         }
       />
 
@@ -235,6 +271,7 @@ export function CostPlanner() {
             onComplete={completeWizard}
             onExtract={(text) => extract.mutate(text)}
             onUpload={(file) => uploadDocument.mutate(file)}
+            draftingAccess={draftingAccess}
             extracting={extract.isPending || uploadDocument.isPending}
             extractError={(() => {
               const error = extract.isError
@@ -256,6 +293,7 @@ export function CostPlanner() {
             requirements={requirements}
             warnings={warnings}
             patternLabel={patternLabel}
+            tags={estimatorPatternTags(selectedPattern)}
             onConfirm={confirmReview}
             onBack={() => setPhase("wizard")}
           />

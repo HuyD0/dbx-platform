@@ -1,5 +1,6 @@
+import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
-import { Badge, Card, SectionTitle } from "../ui";
+import { PlannerWizardShell } from "./PlannerWizardShell";
 
 const NUMERIC_FIELDS: { key: string; label: string; hint: string }[] = [
   { key: "monthly_requests", label: "Requests per month", hint: "Production traffic" },
@@ -13,78 +14,72 @@ const NUMERIC_FIELDS: { key: string; label: string; hint: string }[] = [
 ];
 
 const inputClass =
-  "w-full rounded-lg border border-hairline bg-page px-3 py-2 text-sm text-ink " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-series-1";
+  "planner-input w-full rounded-xl border px-3 py-2.5 text-sm text-ink " +
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-red";
 
-/** The human-in-the-loop gate: whether the numbers came from the form or the
- * AI extraction, a person confirms (and can edit) every value before the
- * engine prices anything. */
+/** Human-in-the-loop gate shared by structured and AI-assisted intake. */
 export function ReviewRequirements({
   requirements,
   warnings,
   patternLabel,
+  tags = [],
   onConfirm,
   onBack,
 }: {
   requirements: Record<string, unknown>;
   warnings: string[];
   patternLabel: string;
+  tags?: string[];
   onConfirm: (requirements: Record<string, unknown>) => void;
   onBack: () => void;
 }) {
   const [draft, setDraft] = useState<Record<string, unknown>>({ ...requirements });
 
   return (
-    <Card>
-      <SectionTitle
-        title="Check the numbers before we price it"
-        subtitle="The estimate is only as good as these inputs — every value below can be corrected."
-      />
-      <p className="mb-3 text-sm text-ink-2">
-        Solution: <span className="font-semibold text-ink">{patternLabel}</span>
-      </p>
+    <PlannerWizardShell
+      activeStep="review"
+      title="Check the numbers before we price it"
+      description="Every assumption remains editable. Costs are computed only after you confirm this review."
+      selectedLabel={patternLabel}
+      tags={tags}
+      onBack={onBack}
+      primaryLabel="Show cost estimate"
+      onPrimary={() => onConfirm(draft)}
+    >
       {warnings.length > 0 && (
-        <ul aria-label="Extraction warnings" className="mb-4 space-y-1.5">
-          {warnings.map((warning) => (
-            <li key={warning} className="flex items-start gap-1.5 text-xs text-ink-2">
-              <Badge tone="warning">check</Badge>
-              <span>{warning}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="mb-4 rounded-xl border border-warning-accent bg-warning-surface p-3">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-status-warning">
+            <AlertTriangle className="h-4 w-4" />
+            Assumptions to check
+          </h3>
+          <ul aria-label="Extraction warnings" className="mt-2 space-y-1.5">
+            {warnings.map((warning) => (
+              <li key={warning} className="text-xs leading-5 text-ink-2">
+                {warning}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="planner-form-panel grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {NUMERIC_FIELDS.map((field) => (
           <label key={field.key} className="block text-sm">
             <span className="font-medium text-ink">{field.label}</span>
             {field.hint && <span className="block text-xs text-muted">{field.hint}</span>}
             <input
               type="number"
-              className={`${inputClass} mt-1`}
+              className={`${inputClass} mt-1.5`}
               value={Number(draft[field.key] ?? 0)}
               onChange={(event) =>
-                setDraft((d) => ({ ...d, [field.key]: Number(event.target.value) }))
+                setDraft((value) => ({
+                  ...value,
+                  [field.key]: Number(event.target.value),
+                }))
               }
             />
           </label>
         ))}
       </div>
-      <div className="mt-5 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink-2"
-        >
-          Back to the questions
-        </button>
-        <button
-          type="button"
-          onClick={() => onConfirm(draft)}
-          className="rounded-lg bg-series-1 px-4 py-1.5 text-xs font-semibold text-page"
-        >
-          These numbers are right — show the costs
-        </button>
-      </div>
-    </Card>
+    </PlannerWizardShell>
   );
 }

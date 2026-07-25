@@ -258,6 +258,23 @@ async function mockApi(page: Page, state: MissionState) {
       });
       return;
     }
+    if (url.pathname === "/api/workspaces") {
+      await json(route, {
+        actor: {
+          actor_id: "operator-1",
+          email: "operator@example.test",
+          roles: ["authenticated", "viewer", "operator", "proposer"],
+          view: "platform_admin",
+        },
+        workspaces: [],
+        source_status: {
+          source: "databricks_app_obo",
+          status: "available",
+          freshness: FIXED_NOW.toISOString(),
+        },
+      });
+      return;
+    }
     await json(
       route,
       { error: "not_found", message: `No e2e fixture for ${url.pathname}` },
@@ -473,12 +490,45 @@ test("themes use grey neutrals and accessible brand-red roles without legacy mar
 test("AI Cost Planner wizard renders and has no serious accessibility violations", async ({
   page,
 }, testInfo) => {
+  const { theme, width } = project(testInfo);
   await openMission(page, testInfo);
   await page.goto("/cost-planner");
-  await expect(page.getByRole("heading", { name: "What should it do?" })).toBeVisible();
-  await expect(
-    page.getByRole("radio", { name: /Chat with your documents/ }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a solution" })).toBeVisible();
+  const solution = page.getByRole("radio", { name: /Chat with your documents/ });
+  await expect(solution).toBeVisible();
+  await solution.click();
+  await expect
+    .poll(() => solution.evaluate((element) => getComputedStyle(element).boxShadow))
+    .toContain("rgb(240, 0, 55)");
+  await expect(page.getByText("Knowledge base", { exact: true })).toBeVisible();
+  await expect(page.getByText("Natural language Q&A", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI drafting available", { exact: true })).toBeVisible();
+  const continueButton = page.getByRole("button", { name: "Continue to usage" });
+  await expect(continueButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask agent" })).toHaveCount(1);
+  await expect(page.locator("button.fixed[aria-label='Ask agent']")).toHaveCount(0);
+  const palette = await page.getByText("Knowledge base", { exact: true }).evaluate((tag) => {
+    const tagStyle = getComputedStyle(tag);
+    const actionStyle = getComputedStyle(
+      document.querySelector(".planner-primary-button:not(:disabled)") as HTMLElement,
+    );
+    return {
+      tagBackground: tagStyle.backgroundColor,
+      tagBorder: tagStyle.borderTopColor,
+      tagText: tagStyle.color,
+      actionBackground: actionStyle.backgroundColor,
+    };
+  });
+  expect(palette.actionBackground).toBe(
+    theme === "light" ? "rgb(237, 0, 55)" : "rgb(255, 76, 112)",
+  );
+  if (theme === "light") {
+    expect(palette.tagBackground).toBe("rgb(229, 246, 245)");
+    expect(palette.tagBorder).toBe("rgb(0, 170, 173)");
+    expect(palette.tagText).toBe("rgb(0, 111, 114)");
+  } else {
+    expect(palette.tagText).toBe("rgb(94, 213, 215)");
+  }
   await assertNoPageOverflow(page);
 
   const results = await new AxeBuilder({ page })
@@ -493,6 +543,9 @@ test("AI Cost Planner wizard renders and has no serious accessibility violations
       targets: violation.nodes.map((node) => node.target),
     }));
   expect(severe).toEqual([]);
+  if ([375, 1440].includes(width)) {
+    await expect(page).toHaveScreenshot("cost-planner-wizard.png", { fullPage: true });
+  }
 });
 
 test("keyboard opens and closes the responsive decision sheet with visible focus", async ({
