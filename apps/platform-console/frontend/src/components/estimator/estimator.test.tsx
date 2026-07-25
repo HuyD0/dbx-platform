@@ -270,20 +270,22 @@ test("wizard walks pattern -> usage -> knowledge -> region and completes", async
   expect(await axe(container)).toHaveNoViolations();
 
   // Step 1: cannot advance without a pattern
-  expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Continue to usage" })).toBeDisabled();
   await user.click(screen.getByRole("radio", { name: /Chat with your documents/ }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Knowledge base")).toBeInTheDocument();
+  expect(screen.getByText("Natural language Q&A")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Continue to usage" }));
 
   // Step 2: usage — knowledge step appears for document patterns
   await user.click(screen.getByRole("button", { name: /A department using it daily/ }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Continue to knowledge" }));
   expect(
-    screen.getByRole("heading", { name: "What should it know?" }),
+    screen.getByRole("heading", { name: "Describe the knowledge base" }),
   ).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Continue to region" }));
 
   // Final step: region, then review
-  await user.click(screen.getByRole("button", { name: "Review my answers" }));
+  await user.click(screen.getByRole("button", { name: "Review requirements" }));
   expect(onComplete).toHaveBeenCalledWith(
     expect.objectContaining({
       pattern: "doc_chat",
@@ -298,10 +300,10 @@ test("wizard skips the knowledge step for patterns without a knowledge base", as
   const user = userEvent.setup();
   render(<RequirementsWizard patterns={patterns} onComplete={() => {}} />);
   await user.click(screen.getByRole("radio", { name: /Summarize long content/ }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
-  expect(screen.queryByText("What should it know?")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Review my answers" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Continue to usage" }));
+  await user.click(screen.getByRole("button", { name: "Continue to region" }));
+  expect(screen.queryByText("Describe the knowledge base")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Review requirements" })).toBeInTheDocument();
 });
 
 test("free-text extraction path surfaces the operator hint on failure", async () => {
@@ -312,6 +314,7 @@ test("free-text extraction path surfaces the operator hint on failure", async ()
       patterns={patterns}
       onComplete={() => {}}
       onExtract={onExtract}
+      draftingAccess="available"
       extractError="Drafting answers with AI needs operator access — the form works for everyone."
     />,
   );
@@ -319,9 +322,43 @@ test("free-text extraction path surfaces the operator hint on failure", async ()
     screen.getByPlaceholderText(/support agents/),
     "Policy chat for 200 people",
   );
-  await user.click(screen.getByRole("button", { name: /Draft the answers for me/ }));
+  await user.click(screen.getByRole("button", { name: "Draft requirements" }));
   expect(onExtract).toHaveBeenCalledWith("Policy chat for 200 people");
   expect(screen.getByRole("alert")).toHaveTextContent("operator access");
+});
+
+test("AI intake fails closed for viewers while the manual wizard remains available", async () => {
+  const user = userEvent.setup();
+  render(
+    <RequirementsWizard
+      patterns={patterns}
+      onComplete={() => {}}
+      onExtract={() => {}}
+      onUpload={() => {}}
+      draftingAccess="unavailable"
+    />,
+  );
+
+  expect(screen.getByText("Requires operator access")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/support agents/)).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Draft requirements" })).toBeDisabled();
+  expect(document.querySelector<HTMLInputElement>("#estimator-document")).toBeDisabled();
+
+  await user.click(screen.getByRole("radio", { name: /Summarize long content/ }));
+  expect(screen.getByRole("button", { name: "Continue to usage" })).toBeEnabled();
+});
+
+test("examples stay behind an explicit disclosure", async () => {
+  const user = userEvent.setup();
+  render(<RequirementsWizard patterns={patterns} onComplete={() => {}} />);
+
+  expect(screen.queryByText(/What does our policy say/)).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Show examples" }));
+  expect(screen.getByText(/What does our policy say/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Hide examples" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 });
 
 // --- SimilarEstimates ---------------------------------------------------------

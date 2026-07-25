@@ -42,6 +42,33 @@ test("global assistant launcher does not cover Mission Control decision actions"
   expect(screen.getByRole("button", { name: "Ask agent" })).toBeInTheDocument();
 });
 
+test("Cost Planner uses one header assistant action instead of the floating launcher", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "dev",
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+
+  renderApp("/cost-planner");
+  expect(screen.getAllByRole("button", { name: "Ask agent" })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Ask agent" })).not.toHaveClass("fixed");
+});
+
 test("LakeMeter route stays in the Mission Control shell while setup is pending", async () => {
   vi.stubGlobal(
     "fetch",
@@ -595,12 +622,12 @@ test("Cost Planner shows a friendly first-run pricing snapshot message", async (
 
   renderApp("/cost-planner");
   await user.click(await screen.findByRole("radio", { name: /Chat with your documents/ }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
-  await user.click(screen.getByRole("button", { name: "Next" }));
-  await user.click(screen.getByRole("button", { name: "Review my answers" }));
+  await user.click(screen.getByRole("button", { name: "Continue to usage" }));
+  await user.click(screen.getByRole("button", { name: "Continue to knowledge" }));
+  await user.click(screen.getByRole("button", { name: "Continue to region" }));
+  await user.click(screen.getByRole("button", { name: "Review requirements" }));
   await user.click(
-    screen.getByRole("button", { name: "These numbers are right — show the costs" }),
+    screen.getByRole("button", { name: "Show cost estimate" }),
   );
 
   expect(

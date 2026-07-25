@@ -186,6 +186,370 @@ body {
   }
 }
 
+/* Cost Planner — restrained glass around solid, high-contrast form controls.
+   Exact brand red marks navigation and decisions; teal is reserved for
+   selected attribute tags. */
+.planner-ambient {
+  isolation: isolate;
+  position: relative;
+}
+.planner-ambient::before {
+  position: absolute;
+  z-index: -1;
+  inset: -2rem 8% auto;
+  height: 19rem;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 22% 28%, rgba(240, 0, 55, 0.065), transparent 46%),
+    radial-gradient(circle at 75% 20%, rgba(71, 85, 105, 0.09), transparent 48%);
+  content: "";
+  filter: blur(28px);
+  pointer-events: none;
+}
+.dark .planner-ambient::before {
+  background:
+    radial-gradient(circle at 22% 28%, rgba(255, 76, 112, 0.1), transparent 46%),
+    radial-gradient(circle at 75% 20%, rgba(100, 116, 139, 0.16), transparent 48%);
+}
+.planner-glass {
+  border: 1px solid var(--color-grid);
+  background: var(--color-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 14px 38px rgba(24, 24, 27, 0.07);
+}
+.dark .planner-glass {
+  background: var(--color-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 18px 46px rgba(0, 0, 0, 0.28);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .planner-glass {
+    background: rgba(255, 255, 255, 0.82);
+    -webkit-backdrop-filter: saturate(135%) blur(18px);
+    backdrop-filter: saturate(135%) blur(18px);
+  }
+  .dark .planner-glass {
+    background: rgba(30, 30, 35, 0.84);
+    -webkit-backdrop-filter: saturate(140%) blur(20px);
+    backdrop-filter: saturate(140%) blur(20px);
+  }
+}
+.planner-progress {
+  overflow: hidden;
+  border-radius: 1rem;
+  padding: 0.65rem 0.85rem;
+}
+.planner-progress-step {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+.planner-progress-step:not(:last-child)::after {
+  width: min(4.5rem, 40%);
+  height: 1px;
+  margin-left: auto;
+  margin-right: 0.75rem;
+  background: var(--color-grid);
+  content: "";
+}
+.planner-progress-step.is-active {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.planner-progress-step.is-skipped {
+  color: var(--color-muted);
+}
+.planner-progress-marker {
+  display: grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-grid);
+  border-radius: 999px;
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-size: 0.68rem;
+}
+.planner-progress-step.is-active .planner-progress-marker {
+  border-color: var(--color-brand-primary);
+  background: var(--color-brand-primary);
+  color: white;
+}
+.planner-progress-step.is-complete:not(.is-active) .planner-progress-marker {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 35%, var(--color-grid));
+  color: var(--color-brand-primary);
+}
+.planner-workspace {
+  border-radius: 1.1rem;
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+.planner-intake-panel,
+.planner-form-panel {
+  border: 1px solid var(--color-grid);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-raised) 88%, var(--color-tint));
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+.dark .planner-intake-panel,
+.dark .planner-form-panel {
+  background: color-mix(in srgb, var(--color-raised) 90%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+.planner-input {
+  border-color: var(--color-grid);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  box-shadow: inset 0 1px 2px rgba(24, 24, 27, 0.035);
+}
+.planner-input:disabled {
+  cursor: not-allowed;
+  background: var(--color-tint);
+  color: var(--color-muted);
+  opacity: 0.72;
+}
+.planner-input::placeholder {
+  color: var(--color-muted);
+}
+.planner-solution-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 4.6rem;
+  align-items: center;
+  gap: 0.85rem;
+  overflow: hidden;
+  border: 1px solid var(--color-grid);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--color-raised) 94%, transparent);
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+.planner-solution-row:hover {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 32%, var(--color-grid));
+  transform: translateY(-1px);
+}
+.planner-solution-row.is-selected {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 62%, var(--color-grid));
+  background: color-mix(in srgb, var(--color-brand-primary) 3%, var(--color-raised));
+  box-shadow: inset 4px 0 var(--color-brand-primary);
+}
+.planner-solution-icon {
+  display: grid;
+  width: 2.45rem;
+  height: 2.45rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-grid);
+  border-radius: 0.65rem;
+  background: var(--color-tint);
+  color: var(--color-ink-2);
+}
+.planner-solution-row.is-selected .planner-solution-icon {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 30%, var(--color-grid));
+  color: var(--color-brand-primary);
+}
+.planner-radio {
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1.5px solid var(--color-muted);
+  border-radius: 999px;
+}
+.planner-solution-row.is-selected .planner-radio {
+  border-color: var(--color-brand-primary);
+}
+.planner-radio > span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: inherit;
+  background: var(--color-brand-primary);
+}
+.planner-preset-button {
+  border: 1px solid var(--color-grid);
+  border-radius: 0.8rem;
+  background: var(--color-raised);
+  padding: 0.7rem 0.8rem;
+  color: var(--color-ink-2);
+  text-align: left;
+  font-size: 0.75rem;
+}
+.planner-preset-button:hover,
+.planner-option-button:hover {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 36%, var(--color-grid));
+}
+.planner-preset-button.is-selected,
+.planner-option-button.is-selected {
+  border-color: var(--color-brand-primary);
+  background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-raised));
+}
+.planner-option-button {
+  border: 1px solid var(--color-grid);
+  border-radius: 0.65rem;
+  background: var(--color-raised);
+  padding: 0.45rem 0.7rem;
+  color: var(--color-ink-2);
+  font-size: 0.75rem;
+}
+.planner-access-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-grid);
+  border-radius: 999px;
+  background: var(--color-tint);
+  padding: 0.3rem 0.55rem;
+  color: var(--color-ink-2);
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.planner-access-badge > svg {
+  color: var(--color-brand-primary);
+}
+.planner-access-badge.is-available {
+  border-color: color-mix(in srgb, var(--color-brand-primary) 24%, var(--color-grid));
+}
+.planner-upload-zone {
+  display: flex;
+  min-height: 5.4rem;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  border: 1px dashed color-mix(in srgb, var(--color-muted) 50%, var(--color-grid));
+  border-radius: 0.85rem;
+  background: var(--color-raised);
+  padding: 0.85rem;
+  color: var(--color-ink-2);
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.planner-upload-zone:hover {
+  border-color: var(--color-brand-primary);
+  background: color-mix(in srgb, var(--color-brand-primary) 3%, var(--color-raised));
+}
+.planner-upload-zone.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.planner-selection-summary {
+  display: flex;
+  min-height: 3.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 1rem;
+  padding: 0.65rem 0.85rem;
+}
+.planner-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #00aaad;
+  border-radius: 999px;
+  background: #e5f6f5;
+  padding: 0.24rem 0.6rem;
+  color: #006f72;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.dark .planner-tag {
+  border-color: rgba(94, 213, 215, 0.46);
+  background: rgba(0, 170, 173, 0.14);
+  color: #5ed5d7;
+}
+.planner-action-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 1rem;
+  padding: 0.7rem 0.85rem;
+}
+@media (min-width: 1024px) {
+  .planner-action-dock {
+    position: sticky;
+    z-index: 20;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
+.planner-secondary-button,
+.planner-primary-button {
+  display: inline-flex;
+  min-height: 2.4rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+.planner-secondary-button {
+  border: 1px solid var(--color-grid);
+  background: var(--color-raised);
+  color: var(--color-ink-2);
+}
+.planner-primary-button {
+  border: 1px solid var(--color-action);
+  background: var(--color-action);
+  color: white;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-action) 20%, transparent);
+}
+.dark .planner-primary-button {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: #161619;
+}
+.planner-secondary-button:hover:not(:disabled),
+.planner-primary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.planner-secondary-button:disabled,
+.planner-primary-button:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.42;
+}
+@media (max-width: 639px) {
+  .planner-progress {
+    padding-inline: 0.55rem;
+  }
+  .planner-progress-step {
+    justify-content: center;
+  }
+  .planner-progress-step > span:not(.planner-progress-marker):not(.sr-only) {
+    display: none;
+  }
+  .planner-progress-step:not(:last-child)::after {
+    position: absolute;
+    left: calc(50% + 0.95rem);
+    width: calc(100% - 1.9rem);
+    margin: 0;
+  }
+  .planner-workspace {
+    padding: 0.9rem;
+  }
+  .planner-primary-button,
+  .planner-secondary-button {
+    min-height: 2.75rem;
+  }
+}
+
 /* Solid controls use a minimally darkened, WCAG-AA bright red. Exact primary
    red remains the decorative brand, rail, and focus color. */
 .bg-accent {
