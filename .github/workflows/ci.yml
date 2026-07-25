@@ -74,6 +74,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -100,7 +103,7 @@ jobs:
           npm run typecheck
           npm run build
       - name: Stage deployable LakeMeter assets
-        run: uv run python scripts/stage_lakemeter_app.py
+        run: python scripts/stage_lakemeter_app.py
       - name: Enforce Databricks Apps file limit
         run: |
           ! find apps/platform-console \
