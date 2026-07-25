@@ -61,6 +61,8 @@ resources:
             value: "45"
           - name: DBX_PLATFORM_ENVIRONMENT
             value: ${bundle.target}
+          - name: DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS
+            value: ${var.azure_cost_resource_groups}
           - name: DBX_PLATFORM_APPROVER_GROUP
             value: ${var.approver_group}
           - name: DBX_PLATFORM_OPERATOR_GROUP

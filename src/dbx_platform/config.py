@@ -61,10 +61,14 @@ class Settings:
     # Azure Cost Management (bill ingestion + spike check)
     azure_subscription_id: str = ""
     # Resource groups whose charges are attributable to this workspace.
-    # Empty fails closed instead of relabeling a subscription-wide bill.
-    azure_cost_resource_groups: str = ""
+    # Explicit allowlist prevents relabeling a subscription-wide bill.
+    azure_cost_resource_groups: str = (
+        "rg-databricks-dbx-dev,databricks-rg-rg-databricks-dbx-dev"
+    )
     azure_spike_pct: int = 50
     azure_spike_min_cost: int = 10
+    azure_acceleration_pct: int = 30
+    azure_acceleration_min_cost: int = 25
     # AI catalog (ai_catalog.py): comma-separated Azure subscription IDs to
     # inventory; empty = every subscription the identity can read.
     ai_catalog_subscriptions: str = ""
@@ -94,3 +98,10 @@ class Settings:
 
     def tag_owner_key_list(self) -> list[str]:
         return [t.strip() for t in self.tag_owner_keys.split(",") if t.strip()]
+
+    def azure_cost_resource_group_list(self) -> list[str]:
+        return [
+            group.strip()
+            for group in self.azure_cost_resource_groups.split(",")
+            if group.strip()
+        ]

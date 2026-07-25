@@ -229,6 +229,92 @@ export interface SourceHealth {
   notes?: string | null;
 }
 
+export interface CostTotal {
+  currency: string;
+  cost: number;
+  previous_period_cost: number;
+  period_delta_pct: number | null;
+  cost_basis: "AZURE_ACTUAL" | string;
+}
+
+export interface CostPoint extends Row {
+  usage_date: string;
+  category: string;
+  currency: string;
+  cost: number;
+  cost_basis: "AZURE_ACTUAL" | string;
+}
+
+export interface CostBreakdown extends Row {
+  category?: string;
+  component?: string;
+  owner?: string;
+  cost: number;
+  currency: string;
+  cost_basis: string;
+  share_pct: number;
+}
+
+export interface CostMover extends CostBreakdown {
+  category: string;
+  previous_cost: number;
+  change: number;
+  change_pct: number | null;
+}
+
+export interface CostAnomaly extends Row {
+  id: string;
+  signal: string;
+  day: string;
+  category: string;
+  currency: string;
+  cost_basis: string;
+  cost: number;
+  baseline: number;
+  change_pct: number;
+  severity: string;
+  reason: string;
+}
+
+export interface CostOverview {
+  scope: {
+    label: string;
+    workspace_id: string;
+    environment: string;
+    resource_groups: string[];
+  };
+  period: { days: number; from: string | null; to: string | null };
+  totals: CostTotal[];
+  components: CostBreakdown[];
+  series: CostPoint[];
+  categories: CostBreakdown[];
+  ownership: CostBreakdown[];
+  movers: CostMover[];
+  anomalies: CostAnomaly[];
+  databricks_list: {
+    cost: number;
+    currency: string;
+    cost_basis: string;
+    additive_to_total: false;
+    rows: Row[];
+    status: string;
+    notes: string;
+  };
+  data_health: SourceHealth[];
+}
+
+export interface CostAnomalyDetail {
+  anomaly: CostAnomaly;
+  series: CostPoint[];
+  mover?: CostMover | null;
+  scope: CostOverview["scope"];
+  databricks_list: CostOverview["databricks_list"];
+  investigation: {
+    checks: string[];
+    safe_actions: string[];
+  };
+}
+
 export interface PillarOutcome {
   status?: string;
   score?: number | null;

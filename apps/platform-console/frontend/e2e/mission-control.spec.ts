@@ -273,7 +273,7 @@ async function openMission(page: Page, testInfo: TestInfo, state: MissionState =
     localStorage.setItem("theme", selectedTheme);
   }, theme);
   await mockApi(page, state);
-  await page.goto("/");
+  await page.goto("/mission-control");
   await expect(
     page.getByRole("heading", {
       name: state === "populated" ? "Decisions requiring you." : "No open findings recorded.",
