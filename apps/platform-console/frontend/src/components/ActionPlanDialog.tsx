@@ -675,7 +675,7 @@ export function ActionPlanDialog({
                     </h3>
                     <p className="mt-1 text-xs leading-5 text-ink-2">
                       The approval is recorded against the exact plan. Execution and verification
-                      progress will appear in Action Center.
+                      progress will appear in Review & Approve.
                     </p>
                   </div>
                 </div>

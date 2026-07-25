@@ -37,3 +37,5 @@ resources:
               - ${var.approver_group}
               - --actions-enabled
               - ${var.actions_enabled}
+              - --workspace-name
+              - ${var.workspace_display_name}

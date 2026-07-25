@@ -934,6 +934,7 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
             "scope": {
                 "workspace": workspace_id,
                 "workspace_id": workspace_id,
+                "workspace_name": deps.workspace_display_name(),
                 "environment": environment,
             },
             "outcomes": outcomes,

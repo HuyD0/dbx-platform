@@ -290,12 +290,8 @@ async function openMission(page: Page, testInfo: TestInfo, state: MissionState =
     localStorage.setItem("theme", selectedTheme);
   }, theme);
   await mockApi(page, state);
-  await page.goto("/mission-control");
-  await expect(
-    page.getByRole("heading", {
-      name: state === "populated" ? "Decisions requiring you." : "No open findings recorded.",
-    }),
-  ).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -624,10 +620,10 @@ test("768px layout reflows at the CSS-width equivalent of 200% zoom", async ({
   await openMission(page, testInfo);
 
   await page.setViewportSize({ width: 384, height: 900 });
-  await expect(page.getByRole("heading", { name: "Decisions requiring you." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await assertNoPageOverflow(page);
   const headingBox = await page
-    .getByRole("heading", { name: "Decisions requiring you." })
+    .getByRole("heading", { name: "Overview" })
     .boundingBox();
   expect(headingBox).not.toBeNull();
   expect((headingBox?.x ?? 0) + (headingBox?.width ?? 0)).toBeLessThanOrEqual(384);

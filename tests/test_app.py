@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -281,6 +282,165 @@ def test_health_reports_actions_disabled_by_default(client, monkeypatch):
     body = client.get("/api/health").json()
     assert body["status"] == "ok"
     assert body["actions_enabled"] is False
+    assert "workspace_name" not in body
+    assert "workspace_id" not in body
+
+
+def test_authenticated_context_uses_friendly_workspace_name(client, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_WORKSPACE_DISPLAY_NAME", "Finance Analytics")
+    body = client.get("/api/context").json()
+
+    assert body == {
+        "workspace_name": "Finance Analytics",
+        "workspace_id": "local",
+        "environment": "dev",
+        "roles": ["authenticated", "operator", "proposer", "viewer"],
+        "actions_enabled": False,
+    }
+
+
+def test_cost_overview_keeps_sources_separate_and_actionable(
+    client,
+    monkeypatch,
+):
+    from backend.routers import cost as cost_router
+
+    monkeypatch.setenv("DBX_PLATFORM_WORKSPACE_DISPLAY_NAME", "Finance Analytics")
+    monkeypatch.setattr(
+        cost_router,
+        "_cost_overview",
+        lambda _days, _refresh: (
+            {
+                "scope": {
+                    "workspace_name": "Finance Analytics",
+                    "workspace_id": "local",
+                    "environment": "dev",
+                },
+                "totals": [],
+            },
+            datetime.now(UTC),
+            False,
+        ),
+    )
+    monkeypatch.setattr(
+        cost_router,
+        "_source_cards",
+        lambda _days, _refresh: [
+            {
+                "id": "databricks_list",
+                "status": "healthy",
+                "amount": 12.5,
+                "cost_basis": "DATABRICKS_LIST",
+            },
+            {
+                "id": "azure_actual",
+                "status": "never_run",
+                "refresh_action": {
+                    "action_type": "run-job",
+                    "job_id": 42,
+                    "job_name": "[dbx-platform] azure-cost-pull",
+                },
+            },
+            {"id": "ai_ledger", "status": "no_data"},
+        ],
+    )
+
+    response = client.get("/api/cost/overview?days=30")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["scope"]["workspace_name"] == "Finance Analytics"
+    by_id = {source["id"]: source for source in body["source_cards"]}
+    assert by_id["databricks_list"]["amount"] == 12.5
+    assert by_id["databricks_list"]["cost_basis"] == "DATABRICKS_LIST"
+    assert by_id["azure_actual"]["status"] == "never_run"
+    assert by_id["azure_actual"]["refresh_action"] == {
+        "action_type": "run-job",
+        "job_id": 42,
+        "job_name": "[dbx-platform] azure-cost-pull",
+    }
+    assert by_id["ai_ledger"]["status"] == "no_data"
+    assert "total" not in body
+
+
+def test_cost_overview_supports_every_source_health_state(ws, monkeypatch):
+    from backend.routers import cost as cost_router
+
+    workspace_id = "123"
+    environment = "dev"
+    today = datetime.now(UTC).date().isoformat()
+
+    monkeypatch.setattr(
+        cost_router.cost,
+        "usage_report",
+        lambda *_args, **_kwargs: [{"usage_date": today, "list_cost_usd": "1.25"}],
+    )
+    assert cost_router._databricks_source(30, workspace_id)["status"] == "healthy"
+
+    monkeypatch.setattr(
+        cost_router.cost,
+        "usage_report",
+        lambda *_args, **_kwargs: [
+            {"usage_date": "2000-01-01", "list_cost_usd": "1.25"}
+        ],
+    )
+    assert cost_router._databricks_source(30, workspace_id)["status"] == "stale"
+
+    monkeypatch.setattr(
+        cost_router.llm_cost,
+        "read_llm_cost_daily",
+        lambda *_args, **_kwargs: [],
+    )
+    assert (
+        cost_router._ai_source(30, workspace_id, environment)["status"]
+        == "no_data"
+    )
+
+    monkeypatch.delenv("DBX_PLATFORM_AZURE_SUBSCRIPTION_ID", raising=False)
+    monkeypatch.delenv("DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL", raising=False)
+    monkeypatch.setattr(cost_router, "_azure_job_snapshot", lambda: {})
+    assert (
+        cost_router._azure_source(30, workspace_id, environment)["status"]
+        == "not_configured"
+    )
+
+    monkeypatch.setenv("DBX_PLATFORM_AZURE_SUBSCRIPTION_ID", "configured")
+    monkeypatch.setenv("DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL", "configured")
+    monkeypatch.setattr(
+        deps,
+        "get_settings",
+        lambda: Settings(
+            warehouse_id="wh-test",
+            azure_cost_resource_groups="analytics-rg",
+        ),
+    )
+    monkeypatch.setattr(
+        cost_router.platform_cost,
+        "fetch_scoped_daily",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        cost_router,
+        "_azure_job_snapshot",
+        lambda: {"job_id": 42, "last_run_result": ""},
+    )
+    assert (
+        cost_router._azure_source(30, workspace_id, environment)["status"]
+        == "never_run"
+    )
+
+    cache.clear()
+
+    def unavailable_loader():
+        raise PermissionError("billing access denied")
+
+    assert (
+        cost_router._cached_source(
+            "test/cost/overview/ai_ledger",
+            unavailable_loader,
+            False,
+        )["status"]
+        == "unavailable"
+    )
 
 
 def test_workspace_access_uses_verified_obo_actor(client, monkeypatch):
@@ -465,6 +625,26 @@ def test_run_all_endpoint_is_not_available(client, ws):
 
     assert response.status_code == 404
     assert response.json()["error"] == "capability_not_available"
+    ws.jobs.run_now.assert_not_called()
+
+
+def test_exact_bound_azure_collector_can_only_be_planned(client, ws, monkeypatch):
+    monkeypatch.setenv("DBX_PLATFORM_AZURE_COST_JOB_ID", "93")
+    collector = MagicMock()
+    collector.job_id = 93
+    collector.settings.name = "[dbx-platform] azure-cost-pull"
+    collector.settings.as_dict.return_value = {
+        "name": collector.settings.name,
+        "tasks": [{"task_key": "pull_bill"}],
+    }
+    collector.run_as_user_name = "cost-executor"
+    ws.jobs.list.return_value = [collector]
+    ws.jobs.get.return_value = collector
+
+    response = client.post("/api/jobs/93/run_now")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "approval_required"
     ws.jobs.run_now.assert_not_called()
 
 
@@ -728,12 +908,12 @@ def test_parse_evidence_citations_deduplicates_and_preserves_malformed_markers()
 
 # --- Phase 1 wiring: workspace scope, Azure by=, AI governance ----------------
 
-def test_health_reports_workspace_scope(client):
+def test_workspace_scope_is_authenticated_context_only(client):
     from backend.routers import meta as meta_router
 
     meta_router._workspace_id_cache = None
-    body = client.get("/api/health").json()
-    assert body["workspace_id"] == "local"
+    assert "workspace_id" not in client.get("/api/health").json()
+    assert client.get("/api/context").json()["workspace_id"] == "local"
 
 
 def test_dashboard_links_include_workspace_context(client, ws):
@@ -896,8 +1076,12 @@ def test_ai_governance_monitor_serves_per_app_rollup(client, monkeypatch):
 def test_cost_attribution_serves_tag_dimension(client, monkeypatch):
     captured: dict = {}
 
-    def fake_attribution(w, warehouse, dimension, days):
-        captured.update(dimension=dimension, days=days)
+    def fake_attribution(w, warehouse, dimension, days, workspace_id=None):
+        captured.update(
+            dimension=dimension,
+            days=days,
+            workspace_id=workspace_id,
+        )
         return [
             {
                 "sub_account_id": "local",
@@ -913,6 +1097,7 @@ def test_cost_attribution_serves_tag_dimension(client, monkeypatch):
     monkeypatch.setattr(cost_router.cost, "attribution", fake_attribution)
     body = client.get("/api/cost/attribution?dimension=team&days=30").json()
     assert captured["dimension"] == "team"
+    assert captured["workspace_id"] == "local"
     assert body["data"][0]["x_team"] == "search"
 
 

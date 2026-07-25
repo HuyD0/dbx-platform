@@ -61,6 +61,14 @@ resources:
               ${resources.jobs.ml_serving_report.id},
               ${resources.jobs.platform_digest.id},
               ${resources.jobs.security_audit.id}
+          - name: DBX_PLATFORM_AZURE_COST_JOB_ID
+            value_from: azure-cost-pull
+          - name: DBX_PLATFORM_AZURE_SUBSCRIPTION_ID
+            value: ${var.azure_subscription_id}
+          - name: DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL
+            value: ${var.azure_service_credential}
+          # Exact bundle-bound manual Jobs that Action Center may plan. These
+          # remain protected/outside the Hibernate inventory.
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
             value: ${resources.jobs.cost_forecast_train.id},${resources.jobs.lakemeter_schema_migrations.id}
           - name: DBX_LAKEMETER_ENDPOINT
@@ -79,6 +87,8 @@ resources:
             value: ${bundle.target}
           - name: DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS
             value: ${var.azure_cost_resource_groups}
+          - name: DBX_PLATFORM_WORKSPACE_DISPLAY_NAME
+            value: ${var.workspace_display_name}
           - name: DBX_PLATFORM_APPROVER_GROUP
             value: ${var.approver_group}
           - name: DBX_PLATFORM_OPERATOR_GROUP
@@ -111,6 +121,14 @@ resources:
           job:
             id: ${resources.jobs.action_executor.id}
             permission: CAN_MANAGE_RUN
+        - name: azure-cost-pull
+          description: >
+            Read the exact Azure billing collector definition and run history.
+            A manual run is still submitted only through an approved run-job
+            action and the dedicated executor.
+          job:
+            id: ${resources.jobs.azure_cost_pull.id}
+            permission: CAN_VIEW
         - name: governed-forecast-training
           description: >
             Read the exact protected forecast-training Job definition so

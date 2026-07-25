@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Info, Layers3 } from "lucide-react";
+import { Info, Layers3 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
@@ -8,6 +8,7 @@ import { CostTrendChart } from "../components/CostTrendChart";
 import { DataTable } from "../components/DataTable";
 import { FindingsSection } from "../components/FindingsSection";
 import { LlmCostView } from "../components/LlmCostView";
+import { NamedJobPlanButton } from "../components/NamedJobPlanButton";
 import {
   AsOf,
   Badge,
@@ -18,12 +19,14 @@ import {
   PageHeader,
   SectionTitle,
   Skeleton,
+  statusTone,
 } from "../components/ui";
 import { apiGet } from "../lib/api";
 import { currency } from "../lib/format";
 import type {
   BillingAlignmentRow,
   CostOverview,
+  CostSource,
   Envelope,
   Row,
 } from "../lib/types";
@@ -38,6 +41,77 @@ const ALIGNMENT_FILTERS = [
   "MONETARY_VARIANCE",
   "BASIS_MISMATCH",
 ] as const;
+
+const SOURCE_STATUS_LABELS: Record<string, string> = {
+  healthy: "Current",
+  no_data: "No billed usage",
+  not_configured: "Setup required",
+  never_run: "Not collected yet",
+  stale: "Refresh needed",
+  unavailable: "Unavailable",
+};
+
+function CostSourceCards({ data }: { data: CostOverview }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-grid bg-page/35 p-3 text-xs leading-5 text-ink-2">
+        Each source keeps its original currency and cost basis. Azure billed actuals,
+        Databricks list cost, and AI ledgers may overlap and are never added together.
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {data.source_cards.map((source: CostSource) => {
+          const hasAmount =
+            source.amount !== null &&
+            source.amount !== undefined &&
+            Boolean(source.currency);
+          return (
+            <Card key={source.id} className="flex h-full flex-col">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-muted">{source.title}</p>
+                  <p className="mt-2 text-2xl font-semibold text-ink">
+                    {hasAmount
+                      ? currency(source.amount ?? 0, source.currency ?? "UNKNOWN")
+                      : source.status === "no_data"
+                        ? "No billed usage"
+                        : "No data yet"}
+                  </p>
+                </div>
+                <Badge tone={statusTone(source.status)}>
+                  {SOURCE_STATUS_LABELS[source.status] ?? source.status.replaceAll("_", " ")}
+                </Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-ink-2">{source.notes}</p>
+              <div className="mt-auto pt-3">
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">
+                  {source.cost_basis && <span>{source.cost_basis.replaceAll("_", " ")}</span>}
+                  {source.coverage_start && source.coverage_end && (
+                    <span>
+                      {source.coverage_start} to {source.coverage_end}
+                    </span>
+                  )}
+                </div>
+                {source.refresh_action && (
+                  <div className="mt-3">
+                    <NamedJobPlanButton
+                      expectedName={source.refresh_action.job_name}
+                      label="Plan data refresh"
+                    />
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      <details className="rounded-xl border border-grid px-3 py-2 text-xs text-muted">
+        <summary className="cursor-pointer">Workspace technical details</summary>
+        <p className="mt-2 font-mono">ID {data.scope.workspace_id}</p>
+        <p className="font-mono">Environment {data.scope.environment}</p>
+      </details>
+    </div>
+  );
+}
 
 function alignmentLabel(value: string) {
   return value
@@ -557,8 +631,8 @@ function OwnershipExplorer({ data }: { data: CostOverview }) {
 
 export function CostValue() {
   const [params] = useSearchParams();
-  const requested = params.get("tab") ?? "categories";
-  const active = COST_TABS.some((tab) => tab.id === requested) ? requested : "categories";
+  const requested = params.get("tab") ?? "overview";
+  const active = COST_TABS.some((tab) => tab.id === requested) ? requested : "overview";
   const days = Math.max(1, Math.min(365, Number(params.get("days") ?? 30)));
   const query = useQuery({
     queryKey: ["/api/cost/overview", days],
@@ -570,16 +644,8 @@ export function CostValue() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="FinOps"
-        title="Cost Explorer"
-        description="Move from the bill to its service, ownership and Databricks workload drivers without mixing cost bases."
-        actions={
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-grid px-3 py-2 text-xs font-medium text-ink-2 hover:bg-hairline"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Cost Control
-          </Link>
-        }
+        title="Costs"
+        description="See what was billed, which sources are current, and what to do when data is missing."
       />
       <CostTabs />
       {query.isPending ? (
@@ -590,7 +656,8 @@ export function CostValue() {
         <div role="tabpanel" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
             <span>
-              {query.data.data.scope.label} · {query.data.data.period.from ?? "—"} to{" "}
+              {query.data.data.scope.workspace_name ?? query.data.data.scope.label} ·{" "}
+              {query.data.data.period.from ?? "—"} to{" "}
               {query.data.data.period.to ?? "—"}
             </span>
             <AsOf
@@ -600,6 +667,7 @@ export function CostValue() {
               refreshing={query.isFetching}
             />
           </div>
+          {active === "overview" && <CostSourceCards data={query.data.data} />}
           {active === "categories" && (
             <CategoryExplorer
               data={query.data.data}

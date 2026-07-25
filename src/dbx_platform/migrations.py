@@ -17,7 +17,7 @@ from dbx_platform.control_plane_procedures import (
     procedure_statements,
 )
 from dbx_platform.control_plane_schema import migrate_control_plane_with_spark
-from dbx_platform.dashboards import setup_statements
+from dbx_platform.dashboards import setup_statements, workspace_reference_upsert_sql
 from dbx_platform.llm_cost import migrate_ledger_with_spark
 
 
@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--app-service-principal", required=True)
     parser.add_argument("--operator-group", default="dbx-platform-operators")
     parser.add_argument("--approver-group", default="dbx-platform-approvers")
+    parser.add_argument("--workspace-name", required=True)
     parser.add_argument(
         "--actions-enabled",
         choices=("true", "false"),
@@ -75,6 +76,8 @@ def run_migrations(
     operator_group: str = "dbx-platform-operators",
     approver_group: str = "dbx-platform-approvers",
     actions_enabled: bool = False,
+    workspace_id: str | None = None,
+    workspace_name: str | None = None,
 ) -> list[str]:
     """Apply idempotent internal schema and dashboard-helper migrations."""
 
@@ -83,6 +86,16 @@ def run_migrations(
         spark.sql(sql)
         completed.append(description)
     completed.extend(migrate_ledger_with_spark(spark, catalog, schema))
+    if workspace_id and workspace_name:
+        spark.sql(
+            workspace_reference_upsert_sql(
+                catalog,
+                schema,
+                workspace_id,
+                workspace_name,
+            )
+        )
+        completed.append("workspace_reference current workspace name")
     completed.extend(migrate_control_plane_with_spark(spark, catalog, schema))
     for description, sql in procedure_migration_statements(
         catalog,
@@ -119,9 +132,11 @@ def run_migrations(
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        from databricks.sdk import WorkspaceClient
         from pyspark.sql import SparkSession
 
         spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+        workspace_id = str(WorkspaceClient().get_workspace_id())
         completed = run_migrations(
             spark,
             args.catalog,
@@ -131,6 +146,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             operator_group=args.operator_group,
             approver_group=args.approver_group,
             actions_enabled=args.actions_enabled == "true",
+            workspace_id=workspace_id,
+            workspace_name=args.workspace_name,
         )
         print(
             json.dumps(

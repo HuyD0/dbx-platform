@@ -82,6 +82,19 @@ def control_plane_scope() -> tuple[str, str]:
     return str(get_ws().get_workspace_id()), environment
 
 
+def workspace_display_name() -> str:
+    """Return the deployment-owned human name without deriving it from an ID."""
+
+    value = os.environ.get("DBX_PLATFORM_WORKSPACE_DISPLAY_NAME", "").strip()
+    if value:
+        return value
+    if is_local_or_test():
+        return "Local development workspace"
+    raise RuntimeError(
+        "DBX_PLATFORM_WORKSPACE_DISPLAY_NAME is required in a deployed Platform Console."
+    )
+
+
 @lru_cache(maxsize=1)
 def get_control_plane_repository():
     """Return durable SQL in Databricks and proposal-only memory when local.
@@ -211,6 +224,26 @@ def action_executor_job_id() -> int:
         raise ValueError(
             "DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID must be an integer job ID."
         ) from exc
+
+
+def azure_cost_job_id() -> int | None:
+    raw = os.environ.get("DBX_PLATFORM_AZURE_COST_JOB_ID", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "DBX_PLATFORM_AZURE_COST_JOB_ID must be an integer job ID."
+        ) from exc
+    return value if value > 0 else None
+
+
+def azure_cost_configured() -> bool:
+    return bool(
+        os.environ.get("DBX_PLATFORM_AZURE_SUBSCRIPTION_ID", "").strip()
+        and os.environ.get("DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL", "").strip()
+    )
 
 
 @lru_cache(maxsize=1)

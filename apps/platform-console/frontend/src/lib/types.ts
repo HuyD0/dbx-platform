@@ -221,6 +221,52 @@ export interface HealthResponse {
   workspace_id?: string | null;
 }
 
+export interface AppContext {
+  workspace_name: string;
+  workspace_id: string;
+  environment: string;
+  roles: string[];
+  actions_enabled: boolean;
+}
+
+export interface CostSource {
+  id: "databricks_list" | "azure_actual" | "ai_ledger" | string;
+  title: string;
+  status: "healthy" | "no_data" | "not_configured" | "never_run" | "stale" | "unavailable";
+  amount?: number | null;
+  currency?: string | null;
+  cost_basis?: string | null;
+  coverage_start?: string | null;
+  coverage_end?: string | null;
+  freshness?: string | null;
+  notes: string;
+  series: Array<{ date?: string | null; amount: number; currency?: string | null }>;
+  cached?: boolean;
+  as_of?: string;
+  job?: {
+    job_id?: number;
+    job_name?: string;
+    schedule_status?: string;
+    last_run_result?: string;
+    last_run_started_at?: string | null;
+  };
+  refresh_action?: {
+    action_type: "run-job";
+    job_id: number;
+    job_name: string;
+  } | null;
+}
+
+export interface CostOverviewData {
+  scope: {
+    workspace_name: string;
+    workspace_id: string;
+    environment: string;
+  };
+  days: number;
+  sources: CostSource[];
+}
+
 export interface SourceHealth {
   source: string;
   status: "healthy" | "degraded" | "unavailable" | "unknown" | string;
@@ -329,6 +375,7 @@ export interface BillingAlignmentRow extends Row {
 export interface CostOverview {
   scope: {
     label: string;
+    workspace_name?: string;
     workspace_id: string;
     environment: string;
     resource_groups: string[];
@@ -352,6 +399,7 @@ export interface CostOverview {
   };
   billing_alignment: BillingAlignmentSummary;
   data_health: SourceHealth[];
+  source_cards: CostSource[];
 }
 
 export interface CostAnomalyDetail {

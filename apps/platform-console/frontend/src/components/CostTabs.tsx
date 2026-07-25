@@ -2,13 +2,14 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Tabs } from "./ui";
 
 export const COST_TABS = [
-  { id: "categories", label: "Service categories" },
-  { id: "databricks", label: "Databricks drivers" },
+  { id: "overview", label: "Overview" },
+  { id: "databricks", label: "Databricks" },
+  { id: "categories", label: "Azure" },
+  { id: "llm", label: "AI costs" },
+  { id: "forecast", label: "Budgets & forecasts" },
   { id: "ownership", label: "Ownership" },
   { id: "alignment", label: "Billing alignment" },
-  { id: "forecast", label: "Forecast & budgets" },
-  { id: "coverage", label: "Coverage" },
-  { id: "llm", label: "LLM detail" },
+  { id: "coverage", label: "Data coverage" },
   { id: "estimator", label: "Estimator" },
 ];
 
@@ -16,19 +17,19 @@ export function CostTabs() {
   const location = useLocation();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const requested = params.get("tab") ?? "categories";
+  const requested = params.get("tab") ?? "overview";
   const active = location.pathname.startsWith("/cost/estimator")
     ? "estimator"
     : COST_TABS.some((tab) => tab.id === requested && tab.id !== "estimator")
       ? requested
-      : "categories";
+      : "overview";
 
   const change = (tab: string) => {
     if (tab === "estimator") {
       navigate("/cost/estimator");
       return;
     }
-    navigate(tab === "categories" ? "/cost" : `/cost?tab=${encodeURIComponent(tab)}`);
+    navigate(tab === "overview" ? "/cost" : `/cost?tab=${encodeURIComponent(tab)}`);
   };
 
   return (

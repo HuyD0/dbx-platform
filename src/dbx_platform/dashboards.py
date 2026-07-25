@@ -277,6 +277,28 @@ WHEN NOT MATCHED THEN INSERT (workspace_id, warehouse_id, warehouse_name)
     ]
 
 
+def workspace_reference_upsert_sql(
+    catalog: str,
+    schema: str,
+    workspace_id: str,
+    workspace_name: str,
+) -> str:
+    """Upsert the configured name for the exact deployment workspace."""
+
+    if not str(workspace_id).strip() or not str(workspace_name).strip():
+        raise ValueError("workspace_id and workspace_name are required")
+    quoted_id = str(workspace_id).replace("'", "''")
+    quoted_name = str(workspace_name).replace("'", "''")
+    return f"""MERGE INTO {catalog}.{schema}.workspace_reference AS tgt
+USING (
+  SELECT '{quoted_id}' AS workspace_id, '{quoted_name}' AS workspace_name
+) AS src
+ON tgt.workspace_id = src.workspace_id
+WHEN MATCHED THEN UPDATE SET tgt.workspace_name = src.workspace_name
+WHEN NOT MATCHED THEN INSERT (workspace_id, workspace_name)
+  VALUES (src.workspace_id, src.workspace_name)"""
+
+
 def run_setup(
     w: WorkspaceClient,
     warehouse_id: str,

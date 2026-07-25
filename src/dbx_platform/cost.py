@@ -27,7 +27,12 @@ def usage_report(
     )
 
 
-def product_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def product_spend(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Product/resource list cost for this workspace and the prior period."""
     return run_query(
         w,
@@ -36,18 +41,28 @@ def product_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict
         {
             "current_start_days": max(days - 1, 0),
             "comparison_start_days": max((days * 2) - 1, 0),
-            "workspace_id": str(w.get_workspace_id()),
+            "workspace_id": workspace_id or str(w.get_workspace_id()),
         },
     )
 
 
-def top_jobs(w: WorkspaceClient, warehouse_id: str, days: int, limit: int) -> list[dict]:
+def top_jobs(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    limit: int,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Most expensive jobs in the current workspace by list-price cost."""
     return run_query(
         w,
         load_query("job_run_cost"),
         warehouse_id,
-        {"days": days, "limit": limit, "workspace_id": str(w.get_workspace_id())},
+        {
+            "days": days,
+            "limit": limit,
+            "workspace_id": workspace_id or str(w.get_workspace_id()),
+        },
     )
 
 
@@ -101,14 +116,18 @@ def attribution_sql(dimension: str) -> str:
 
 
 def attribution(
-    w: WorkspaceClient, warehouse_id: str, dimension: str, days: int
+    w: WorkspaceClient,
+    warehouse_id: str,
+    dimension: str,
+    days: int,
+    workspace_id: str | None = None,
 ) -> list[dict]:
     """Workspace spend attributed by team/project tag (or whole-workspace)."""
     return run_query(
         w,
         attribution_sql(dimension),
         warehouse_id,
-        {"days": days, "workspace_id": str(w.get_workspace_id())},
+        {"days": days, "workspace_id": workspace_id or str(w.get_workspace_id())},
     )
 
 
@@ -121,13 +140,18 @@ def _num(value, default: float = 0.0) -> float:
         return default
 
 
-def cluster_utilization(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def cluster_utilization(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Per-cluster CPU/memory utilization with sizing metadata and spend."""
     return run_query(
         w,
         load_query("cluster_utilization"),
         warehouse_id,
-        {"days": days, "workspace_id": str(w.get_workspace_id())},
+        {"days": days, "workspace_id": workspace_id or str(w.get_workspace_id())},
     )
 
 
@@ -179,24 +203,37 @@ def classify_cluster_utilization(
 
 
 def failed_run_waste(
-    w: WorkspaceClient, warehouse_id: str, days: int, limit: int
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    limit: int,
+    workspace_id: str | None = None,
 ) -> list[dict]:
     """List cost burned on failed/timed-out job runs over the last N days."""
     return run_query(
         w,
         load_query("failed_run_cost"),
         warehouse_id,
-        {"days": days, "limit": limit, "workspace_id": str(w.get_workspace_id())},
+        {
+            "days": days,
+            "limit": limit,
+            "workspace_id": workspace_id or str(w.get_workspace_id()),
+        },
     )
 
 
-def warehouse_utilization(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def warehouse_utilization(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Per-warehouse spend vs query volume and queueing over the last N days."""
     return run_query(
         w,
         load_query("warehouse_utilization"),
         warehouse_id,
-        {"days": days, "workspace_id": str(w.get_workspace_id())},
+        {"days": days, "workspace_id": workspace_id or str(w.get_workspace_id())},
     )
 
 

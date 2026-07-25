@@ -136,6 +136,7 @@ jobs:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_AUTH_TYPE: azure-cli
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
+      BUNDLE_VAR_workspace_display_name: ${{ vars.DBX_PLATFORM_WORKSPACE_DISPLAY_NAME }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
       BUNDLE_VAR_lakemeter_migration_executor_service_principal_name: ${{ vars.DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP }}

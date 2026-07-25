@@ -5,7 +5,6 @@ import {
   CircleDollarSign,
   GraduationCap,
   LayoutDashboard,
-  LayoutGrid,
   ListChecks,
   Menu,
   Moon,
@@ -34,7 +33,7 @@ import { Badge } from "./components/ui";
 import { apiGet } from "./lib/api";
 import { AssistantPanelProvider } from "./lib/assistant-panel";
 import { ChatProvider } from "./lib/chat";
-import type { HealthResponse } from "./lib/types";
+import type { AppContext, HealthResponse } from "./lib/types";
 import { ActionCenter } from "./pages/ActionCenter";
 import { AiGovernance } from "./pages/AiGovernance";
 import { Audit } from "./pages/Audit";
@@ -42,14 +41,12 @@ import { Automations } from "./pages/Automations";
 import { Chat } from "./pages/Chat";
 import { CostPlanner } from "./pages/CostPlanner";
 import { CostAnomaly } from "./pages/CostAnomaly";
-import { CostControl } from "./pages/CostControl";
 import { CostValue } from "./pages/CostValue";
 import { DataGovernance } from "./pages/DataGovernance";
 import { Learn } from "./pages/Learn";
 import { LakeMeter } from "./pages/LakeMeter";
 import { MissionControl } from "./pages/MissionControl";
 import { Operations } from "./pages/Operations";
-import { Overview } from "./pages/Overview";
 import { SecurityRisk } from "./pages/SecurityRisk";
 import { Settings as SettingsPage } from "./pages/Settings";
 import { Workspaces } from "./pages/Workspaces";
@@ -62,20 +59,13 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Cost Control", icon: CircleDollarSign, page: <CostControl /> },
-  {
-    to: "/mission-control",
-    label: "Mission Control",
-    icon: LayoutDashboard,
-    page: <MissionControl />,
-  },
-  { to: "/overview", label: "Command Center", icon: LayoutGrid, page: <Overview /> },
-  { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
-  { to: "/cost", label: "Cost Explorer", icon: CircleDollarSign, page: <CostValue /> },
+  { to: "/", label: "Overview", icon: LayoutDashboard, page: <MissionControl /> },
+  { to: "/actions", label: "Review & Approve", icon: ListChecks, page: <ActionCenter /> },
+  { to: "/cost", label: "Costs", icon: CircleDollarSign, page: <CostValue /> },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
   { to: "/data-governance", label: "Data Governance", icon: Tags, page: <DataGovernance /> },
   { to: "/ai-governance", label: "AI Governance", icon: BrainCircuit, page: <AiGovernance /> },
-  { to: "/risk", label: "Risk", icon: ShieldCheck, page: <SecurityRisk /> },
+  { to: "/risk", label: "Security & Risk", icon: ShieldCheck, page: <SecurityRisk /> },
   { to: "/operations", label: "Operations", icon: ServerCog, page: <Operations /> },
   { to: "/automations", label: "Automations", icon: Workflow, page: <Automations /> },
   { to: "/workspaces", label: "Workspaces", icon: Building2, page: <Workspaces /> },
@@ -125,11 +115,13 @@ function Brand() {
 
 function Navigation({
   health,
+  context,
   dark,
   toggleTheme,
   onNavigate,
 }: {
   health?: HealthResponse;
+  context?: AppContext;
   dark: boolean;
   toggleTheme: () => void;
   onNavigate?: () => void;
@@ -166,15 +158,17 @@ function Navigation({
       <div className="mt-5 rounded-xl border border-grid bg-page/35 px-2.5 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[11px] font-medium text-ink">Current workspace</span>
-          <Badge tone="info">{health?.environment ?? "unknown"}</Badge>
+          <Badge tone="info">{context?.environment ?? health?.environment ?? "unknown"}</Badge>
         </div>
-        <p
-          className="mt-1 truncate font-mono text-[10px] text-ink-2"
-          title={health?.workspace_id ?? undefined}
-        >
-          {health?.workspace_id ?? "workspace ID unavailable"}
+        <p className="mt-1 truncate text-xs font-medium text-ink-2">
+          {context?.workspace_name ?? "Current workspace"}
         </p>
-        <p className="mt-0.5 truncate text-[10px] text-muted">Single-workspace control plane</p>
+        {context?.workspace_id && (
+          <details className="mt-1 text-[10px] text-muted">
+            <summary className="cursor-pointer hover:text-ink-2">Technical details</summary>
+            <p className="mt-1 break-all font-mono">ID {context.workspace_id}</p>
+          </details>
+        )}
       </div>
       <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto" aria-label="Primary">
         {links(NAV)}
@@ -216,6 +210,12 @@ export default function App() {
   const health = useQuery({
     queryKey: ["health"],
     queryFn: () => apiGet<HealthResponse>("/api/health"),
+    staleTime: 300_000,
+    retry: false,
+  });
+  const context = useQuery({
+    queryKey: ["context"],
+    queryFn: () => apiGet<AppContext>("/api/context"),
     staleTime: 300_000,
     retry: false,
   });
@@ -288,7 +288,12 @@ export default function App() {
             aria-hidden={assistantOpen || undefined}
             className="glass glass-edge-r fixed inset-y-0 z-30 hidden w-64 flex-col px-3 py-4 lg:flex"
           >
-            <Navigation health={health.data} dark={dark} toggleTheme={toggle} />
+            <Navigation
+              health={health.data}
+              context={context.data}
+              dark={dark}
+              toggleTheme={toggle}
+            />
           </aside>
 
           <header
@@ -333,6 +338,7 @@ export default function App() {
                 </button>
                 <Navigation
                   health={health.data}
+                  context={context.data}
                   dark={dark}
                   toggleTheme={toggle}
                   onNavigate={() => setMobileNavOpen(false)}
@@ -345,9 +351,9 @@ export default function App() {
             id="main-content"
             tabIndex={-1}
             aria-hidden={mobileNavOpen || (assistantOpen && !estimatorRoute) || undefined}
-            className="px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
+            className="min-w-0 overflow-x-hidden px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
           >
-            <div className="mx-auto max-w-7xl">
+            <div className="mx-auto min-w-0 max-w-7xl">
               <Routes>
                 <Route path="/cost/anomalies/:anomalyId" element={<CostAnomaly />} />
                 <Route
@@ -364,6 +370,11 @@ export default function App() {
                   <Route key={to} path={to} element={page} />
                 ))}
                 <Route path="/assistant" element={<Chat />} />
+                <Route path="/overview" element={<Navigate to="/" replace />} />
+                <Route path="/command-center" element={<Navigate to="/" replace />} />
+                <Route path="/mission-control" element={<Navigate to="/" replace />} />
+                <Route path="/action-center" element={<Navigate to="/actions" replace />} />
+                <Route path="/review-and-approve" element={<Navigate to="/actions" replace />} />
                 <Route path="/chat" element={<Navigate to="/assistant" replace />} />
                 <Route path="/security" element={<LegacySecurityRedirect />} />
                 <Route path="/performance" element={<Navigate to="/operations?tab=performance" replace />} />

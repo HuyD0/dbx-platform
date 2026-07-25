@@ -490,7 +490,7 @@ export function Tabs({
       role="tablist"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className="flex gap-1 overflow-x-auto rounded-xl border border-grid bg-hairline/20 p-1"
+      className="flex w-full min-w-0 max-w-full gap-1 overflow-x-auto rounded-xl border border-grid bg-hairline/20 p-1"
     >
       {tabs.map((tab) => (
         <button

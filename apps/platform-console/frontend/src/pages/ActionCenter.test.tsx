@@ -99,23 +99,23 @@ test("tabs use effective status and expose approval readiness", async () => {
   );
 
   const rendered = renderActionCenter();
-  const approvalTab = await screen.findByRole("tab", { name: /Awaiting approval 2/i });
-  const failedTab = screen.getByRole("tab", { name: /Failed \/ rolled back 2/i });
+  const approvalTab = await screen.findByRole("tab", { name: /Needs your review 2/i });
+  const historyTab = screen.getByRole("tab", { name: /History 2/i });
 
   await user.click(approvalTab);
-  expect(await screen.findAllByText("AWAITING APPROVAL")).toHaveLength(2);
+  expect(await screen.findAllByText("awaiting approval")).toHaveLength(2);
   expect(
-    screen.getByRole("button", { name: "Review approval run-job" }),
+    screen.getByRole("button", { name: "Review approval Run a governed platform job" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Review action configure-budget" }),
+    screen.getByRole("button", { name: "Review action Change a cost budget" }),
   ).toBeInTheDocument();
 
-  await user.click(failedTab);
-  expect(await screen.findAllByText("EXPIRED")).toHaveLength(2);
-  expect(screen.queryByText("AWAITING APPROVAL")).not.toBeInTheDocument();
+  await user.click(historyTab);
+  expect(await screen.findAllByText("expired")).toHaveLength(2);
+  expect(screen.queryByText("awaiting approval")).not.toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Review action policy-sync" }),
+    screen.getByRole("button", { name: "Review action Synchronize cluster policies" }),
   ).toBeInTheDocument();
   expect(await axe(rendered.container)).toHaveNoViolations();
 });

@@ -40,13 +40,14 @@ failed precondition invalidates the action without a target mutation.
 
 ## Human approval
 
-1. Open **Action Center → Awaiting Approval**.
+1. Open **Review & Approve → Needs your review**.
 2. Confirm workspace/environment, exact target count, before/after state,
    source freshness, blast radius, rollback, and verification.
 3. Select Approve, then confirm the decision in the separate confirmation step.
 4. Approve or reject. One current member of `dbx-platform-approvers` is
    sufficient and may approve their own proposal.
-5. Follow Activity through execution and verification. Do not retry by
+5. Follow **In progress** through execution and verification, then use
+   **History** for the final outcome. Do not retry by
    resubmitting a payload; create a fresh plan after `STALE`, `EXPIRED`, or a
    changed target.
 
@@ -173,7 +174,7 @@ The scheduled check proposes recoverable termination for running clusters
 over threshold or without auto-termination. Old terminated clusters produce a
 `review-retention` finding only. They are never deleted by v1.
 
-Create a `stale-clusters` plan in Action Center. The executor re-reads state and
+Create a `stale-clusters` plan in Review & Approve. The executor re-reads state and
 can terminate only exact approved cluster IDs that remain eligible.
 
 ### Orphaned jobs

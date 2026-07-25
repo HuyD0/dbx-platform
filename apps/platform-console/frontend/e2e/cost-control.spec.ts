@@ -119,6 +119,50 @@ const overview = {
       money_comparable: false,
       notes: "Coverage and spend-shape alignment.",
     },
+    source_cards: [
+      {
+        id: "azure",
+        title: "Azure billed actuals",
+        status: "healthy",
+        amount: 123.45,
+        currency: "CAD",
+        cost_basis: "AZURE_ACTUAL",
+        coverage_start: "2026-06-22",
+        coverage_end: "2026-07-21",
+        freshness: "2026-07-22T11:00:00Z",
+        last_successful_collection: "2026-07-22T11:00:00Z",
+        notes: "Azure billed costs are current.",
+        refresh_action: null,
+      },
+      {
+        id: "databricks",
+        title: "Databricks list cost",
+        status: "healthy",
+        amount: 88,
+        currency: "USD",
+        cost_basis: "DATABRICKS_LIST",
+        coverage_start: "2026-06-22",
+        coverage_end: "2026-07-20",
+        freshness: "2026-07-22T10:00:00Z",
+        last_successful_collection: "2026-07-22T10:00:00Z",
+        notes: "Databricks list costs are current.",
+        refresh_action: null,
+      },
+      {
+        id: "ai",
+        title: "AI ledger coverage",
+        status: "no_data",
+        amount: null,
+        currency: null,
+        cost_basis: "AI_LEDGER",
+        coverage_start: null,
+        coverage_end: null,
+        freshness: null,
+        last_successful_collection: null,
+        notes: "No AI ledger usage in this period.",
+        refresh_action: null,
+      },
+    ],
     data_health: [{ source: "Azure", status: "healthy", freshness: "1h" }],
   },
   count: null,
@@ -186,30 +230,22 @@ async function assertNoPageOverflow(page: Page) {
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
 }
 
-test("Cost Control and Billing Alignment reflow without clipping", async ({
+test("Costs and Billing Alignment reflow without clipping", async ({
   page,
 }, testInfo: TestInfo) => {
   const width = Number((testInfo.project.metadata as { width?: number }).width);
   test.skip(width > 768, "Focused mobile and reflow coverage.");
   await mockCostApi(page);
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Cost Control" })).toBeVisible();
+  await page.goto("/cost");
+  await expect(page.getByRole("heading", { name: "Costs" })).toBeVisible();
+  await expect(page.getByText("Azure billed actuals", { exact: true })).toBeVisible();
+  await expect(page.getByText("Databricks list cost", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI ledger coverage", { exact: true })).toBeVisible();
   await assertNoPageOverflow(page);
 
-  const dots = page.getByTestId("cost-legend-dot");
-  expect(await dots.count()).toBe(2);
-  const colors = await dots.evaluateAll((elements) =>
-    elements.map(
-      (element) => getComputedStyle(element as HTMLElement).backgroundColor,
-    ),
-  );
-  expect(new Set(colors).size).toBe(2);
-
-  if (width <= 375) {
-    await expect(page.getByText("Signal reason 1")).toBeVisible();
-    await expect(page.getByText("Signal reason 2")).toBeVisible();
-    await expect(page.getByText("Signal reason 3")).toBeHidden();
-  }
+  await page.goto("/cost?tab=categories");
+  await expect(page.getByText("Cost trend by category")).toBeVisible();
+  await assertNoPageOverflow(page);
 
   await page.goto("/cost?tab=alignment");
   await expect(page.getByText("Where variance exists")).toBeVisible();
