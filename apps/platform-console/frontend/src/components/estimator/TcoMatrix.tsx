@@ -287,8 +287,8 @@ export function TcoMatrix({
               onClick={() => onSelectTier(tierKey)}
               className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
                 active
-                  ? "border-brand-mid bg-tint text-brand-mid"
-                  : "border-grid bg-surface text-ink-2 hover:border-brand-mid/50 hover:text-brand-mid"
+                  ? "border-accent bg-tint text-accent"
+                  : "border-grid bg-surface text-ink-2 hover:border-accent/50 hover:text-accent"
               }`}
             >
               {tier.label}
@@ -302,10 +302,10 @@ export function TcoMatrix({
         className="grid gap-4 rounded-xl border border-grid bg-surface p-4 lg:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(0,1fr))]"
       >
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-mid">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
             Selected operating tier
           </p>
-          <h3 className="mt-1 text-lg font-semibold text-brand-maroon">
+          <h3 className="mt-1 text-lg font-semibold text-ink">
             {activeTier.label}
           </h3>
           <p className="mt-1 text-xs leading-5 text-muted">
@@ -324,7 +324,7 @@ export function TcoMatrix({
           <p className="text-xs text-muted">
             {SCENARIO_LABELS[activeSummary.key]}
           </p>
-          <p className="mt-1 text-xl font-semibold tabular-nums text-brand-maroon">
+          <p className="mt-1 text-xl font-semibold tabular-nums text-ink">
             {summaryValue(activeSummary.total, usd)}
           </p>
           <p className="mt-1 text-[11px] text-muted">
@@ -341,7 +341,7 @@ export function TcoMatrix({
               ? SCENARIO_LABELS[alternativeSummary.key]
               : "Alternative scenario"}
           </p>
-          <p className="mt-1 text-xl font-semibold tabular-nums text-brand-maroon">
+          <p className="mt-1 text-xl font-semibold tabular-nums text-ink">
             {alternativeSummary
               ? summaryValue(alternativeSummary.total, usd)
               : "Unavailable"}
@@ -353,7 +353,7 @@ export function TcoMatrix({
 
         <div className="border-t border-grid pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
           <p className="text-xs text-muted">Baseline capacity budget</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums text-brand-maroon">
+          <p className="mt-1 text-xl font-semibold tabular-nums text-ink">
             {safeBaselineHours.toLocaleString("en-US")} h
           </p>
           <p className="mt-1 text-[11px] text-muted">
@@ -385,7 +385,7 @@ export function TcoMatrix({
           aria-expanded={expanded}
           aria-controls={detailsId}
           onClick={() => setExpanded((open) => !open)}
-          className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-brand-mid px-3 py-1.5 text-xs font-semibold text-brand-mid transition-colors hover:bg-tint"
+          className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-accent px-3 py-1.5 text-xs font-semibold text-accent transition-colors hover:bg-tint"
         >
           <span aria-hidden="true" className="text-sm">
             {expanded ? "−" : "+"}
@@ -403,7 +403,7 @@ export function TcoMatrix({
             <caption className="sr-only">
               Detailed cost, compute allocation, and LLM inference comparison
             </caption>
-            <thead className="bg-warning-surface text-left text-xs text-brand-maroon">
+            <thead className="bg-warning-surface text-left text-xs text-ink-2">
               <tr>
                 <th
                   scope="col"
@@ -423,7 +423,7 @@ export function TcoMatrix({
                   >
                     {SCENARIO_LABELS[key]}
                     {key === requestedScenario && (
-                      <span className="ml-2 rounded-full bg-tint px-1.5 py-0.5 text-[10px] text-brand-mid">
+                      <span className="ml-2 rounded-full bg-tint px-1.5 py-0.5 text-[10px] text-accent">
                         active
                       </span>
                     )}

@@ -141,7 +141,7 @@ export function BudgetBar({
               style={{ left: `${withinPct}%`, width: `${overPct}%` }}
             />
             <div
-              className="absolute inset-y-0 w-0.5 bg-brand-maroon transition-[left] duration-300"
+              className="absolute inset-y-0 w-0.5 bg-ink transition-[left] duration-300"
               style={{ left: `${budgetPct}%` }}
               aria-hidden="true"
             />

@@ -8,36 +8,28 @@
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  /* Canonical mission-control palette. Keep these literal aliases available to
-     Tailwind (`bg-teal-accent`, `border-sand-border`, …) so charts and state
-     affordances never depend on an incidental semantic color mapping. */
-  --color-primary-red: #F00037;
-  --color-deep-maroon: #240B15;
-  --color-mid-red: #8B001F;
-  --color-light-background: #FBF7F8;
-  --color-pink-tint: #F9EAED;
+  /* Canonical mission-control palette. Brand red is reserved for identity and
+     decoration; accessible bright-red roles handle text and solid controls. */
+  --color-primary-red: #f00037;
+  --color-action: #ed0037;
+  --color-graphite: #1b1a1f;
   --color-light-gold: #FFF8E1;
   --color-gold-accent: #FFCD67;
   --color-teal-accent: #00AAAD;
   --color-green-accent: #72BF44;
-  --color-muted-rose-grey: #B79AA3;
-  --color-sand-border: #E4D7DB;
+  --color-neutral-border: #e4e4e8;
 
-  --color-page: #FBF7F8;
+  --color-page: #f6f6f7;
   --color-surface: #ffffff;
   --color-raised: #ffffff;
-  --color-tint: #F9EAED;
-  --color-ink: #240B15;
-  --color-ink-2: #4b3f43;
-  --color-muted: #806a72;
-  --color-grid: #E4D7DB;
-  --color-hairline: rgba(36, 11, 21, 0.08);
+  --color-tint: #eff0f3;
+  --color-ink: #1b1a1f;
+  --color-ink-2: #52525b;
+  --color-muted: #676c78;
+  --color-grid: #e4e4e8;
+  --color-hairline: rgba(24, 24, 27, 0.07);
 
   --color-brand-primary: #f00037;
-  --color-brand-maroon: #240b15;
-  --color-brand-mid: #8b001f;
-  --color-rose-grey: #b79aa3;
-  --color-sand: #e4d7db;
   --color-warning-surface: #fff8e1;
   --color-warning-accent: #ffcd67;
   --color-info-surface: #e5f6f5;
@@ -47,7 +39,7 @@
 
   --color-series-1: #006f72;
   --color-series-2: #3f7424;
-  --color-series-3: #8b001f;
+  --color-series-3: #7c3aed;
   --color-series-4: #8a6200;
 
   --color-status-info: #006f72;
@@ -56,9 +48,9 @@
   --color-status-serious: #8a432f;
   --color-status-critical: #b4233e;
 
-  --color-accent: #8b001f;
+  --color-accent: #dc0033;
   --color-blueprint: #006f72;
-  --color-process: #8b001f;
+  --color-process: #f00037;
 
   --color-health-accent: #72bf44;
   --color-active-accent: #00aaad;
@@ -94,7 +86,7 @@
 
   --color-accent: #ff4c70;
   --color-blueprint: #5ed5d7;
-  --color-process: #ff6a88;
+  --color-process: #ff4c70;
 
   /* Decorative accents keep their brand hue but lift slightly for the dark
      canvas; still fills/bars/pulses only. */
@@ -159,7 +151,7 @@ body {
     radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 12%, transparent), transparent 60%);
 }
 
-/* Cards remain exact white/sand surfaces on the light canvas. Dark mode keeps
+/* Cards remain exact white/grey surfaces on the light canvas. Dark mode keeps
    the upstream frosted treatment over its graphite-smoke wash. Forced-colors
    mode resets both treatments below. */
 .glass {
@@ -194,10 +186,10 @@ body {
   }
 }
 
-/* Solid controls and readable light-theme accent text use the deeper red.
-   Bright primary red remains a decorative brand, rail, and focus color. */
+/* Solid controls use a minimally darkened, WCAG-AA bright red. Exact primary
+   red remains the decorative brand, rail, and focus color. */
 .bg-accent {
-  background-color: var(--color-brand-mid);
+  background-color: var(--color-action);
 }
 
 nav a[aria-current="page"] {
@@ -493,8 +485,7 @@ nav a[aria-current="page"] {
   --color-grid: #d6deea;
   --color-hairline: rgba(17, 24, 39, 0.08);
   --color-brand-primary: #2563eb;
-  --color-brand-maroon: #111827;
-  --color-brand-mid: #1d4ed8;
+  --color-action: #1d4ed8;
   --color-accent: #1d4ed8;
   --color-process: #6d28d9;
 }
@@ -509,8 +500,7 @@ nav a[aria-current="page"] {
   --color-grid: #334155;
   --color-hairline: rgba(226, 232, 240, 0.12);
   --color-brand-primary: #60a5fa;
-  --color-brand-maroon: #111827;
-  --color-brand-mid: #3b82f6;
+  --color-action: #3b82f6;
   --color-accent: #93c5fd;
   --color-process: #c4b5fd;
 }

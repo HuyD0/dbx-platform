@@ -130,11 +130,11 @@ export function classifyLiveRates(
 }
 
 const indicatorStyles: Record<RatesStateKind | "loading", string> = {
-  live: "border-green-accent/50 bg-deep-maroon text-green-accent",
-  stale: "border-gold-accent bg-light-gold text-deep-maroon",
-  "no-samples": "border-sand-border bg-surface text-muted",
+  live: "border-green-accent/50 bg-graphite text-green-accent",
+  stale: "border-gold-accent bg-light-gold text-status-warning",
+  "no-samples": "border-neutral-border bg-surface text-muted",
   unavailable: "border-primary-red/35 bg-critical-surface text-status-critical",
-  loading: "border-sand-border bg-surface text-muted",
+  loading: "border-neutral-border bg-surface text-muted",
 };
 
 export function LiveRatesIndicator({ days = 30 }: { days?: number }) {

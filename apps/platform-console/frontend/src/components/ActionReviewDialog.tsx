@@ -350,7 +350,7 @@ export function ActionReviewDialog({
                         type="button"
                         disabled={approve.isPending}
                         onClick={() => setConfirming(true)}
-                        className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-mid px-3 py-2 text-sm font-medium text-white hover:bg-brand-maroon disabled:opacity-40"
+                        className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-lg bg-action px-3 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-40"
                       >
                         <ShieldCheck className="h-4 w-4" />
                         Approve action
@@ -376,7 +376,7 @@ export function ActionReviewDialog({
                           type="button"
                           disabled={approve.isPending}
                           onClick={() => approve.mutate(action)}
-                          className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-mid px-3 py-2 text-sm font-medium text-white hover:bg-brand-maroon disabled:opacity-40"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-action px-3 py-2 text-sm font-medium text-white hover:brightness-95 disabled:opacity-40"
                         >
                           <ShieldCheck className="h-4 w-4" />
                           {approve.isPending ? "Approving…" : "Confirm approval"}
@@ -429,7 +429,7 @@ export function ActionReviewDialog({
             )}
             {expired && (
               <div
-                className="flex items-start gap-2 rounded-lg border border-warning-accent bg-warning-surface p-3 text-xs leading-5 text-brand-maroon dark:text-ink-2"
+                className="flex items-start gap-2 rounded-lg border border-warning-accent bg-warning-surface p-3 text-xs leading-5 text-status-warning dark:text-ink-2"
                 role="status"
               >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
