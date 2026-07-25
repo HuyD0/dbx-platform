@@ -134,8 +134,8 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
             aria-controls={memoryId}
             aria-expanded={memoryOpen}
             aria-label={memoryOpen ? "Hide context memory" : "Show context memory"}
-            className={`rounded-lg p-1.5 hover:bg-[#F9EAED] ${
-              memoryOpen ? "bg-[#F9EAED] text-[#8B001F]" : "text-muted"
+            className={`rounded-lg p-1.5 hover:bg-tint ${
+              memoryOpen ? "bg-tint text-accent" : "text-muted"
             }`}
             title="Context memory"
           >
@@ -199,18 +199,18 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
           <aside
             id={memoryId}
             aria-labelledby={`${memoryId}-title`}
-            className="absolute inset-y-0 right-0 z-10 w-[min(19rem,calc(100%-2rem))] overflow-y-auto border-l border-[#E4D7DB] bg-white shadow-2xl sm:static sm:w-72 sm:shrink-0 sm:shadow-none"
+            className="absolute inset-y-0 right-0 z-10 w-[min(19rem,calc(100%-2rem))] overflow-y-auto border-l border-grid bg-surface shadow-2xl sm:static sm:w-72 sm:shrink-0 sm:shadow-none"
           >
-            <div className="flex items-start justify-between gap-3 border-b border-[#E4D7DB] px-4 py-3">
+            <div className="flex items-start justify-between gap-3 border-b border-grid px-4 py-3">
               <div>
                 <h3
                   id={`${memoryId}-title`}
-                  className="flex items-center gap-2 text-sm font-semibold text-[#240B15]"
+                  className="flex items-center gap-2 text-sm font-semibold text-ink"
                 >
-                  <Brain className="h-4 w-4 text-[#8B001F]" />
+                  <Brain className="h-4 w-4 text-accent" />
                   Context memory
                 </h3>
-                <p className="mt-1 text-[10px] text-[#806A72]">Active bounded constraints</p>
+                <p className="mt-1 text-[10px] text-muted">Active bounded constraints</p>
               </div>
               <button
                 ref={memoryCloseRef}
@@ -220,67 +220,67 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
                   window.requestAnimationFrame(() => memoryToggleRef.current?.focus());
                 }}
                 aria-label="Close context memory"
-                className="rounded-lg p-1 text-[#806A72] hover:bg-[#F9EAED] hover:text-[#240B15]"
+                className="rounded-lg p-1 text-muted hover:bg-tint hover:text-ink"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
 
             <div className="space-y-2 p-3">
-              <div className="rounded-xl border border-[#E4D7DB] bg-[#FBF7F8] p-3">
-                <p className="flex items-center gap-2 text-[11px] font-semibold text-[#240B15]">
-                  <MessageSquare className="h-3.5 w-3.5 text-[#00AAAD]" />
+              <div className="rounded-xl border border-grid bg-page p-3">
+                <p className="flex items-center gap-2 text-[11px] font-semibold text-ink">
+                  <MessageSquare className="h-3.5 w-3.5 text-active-accent" />
                   Session memory
                 </p>
-                <p className="mt-1 text-xs font-medium text-[#4B3F43]">
+                <p className="mt-1 text-xs font-medium text-ink-2">
                   {turns.length > 50
                     ? `Newest 50 of ${turns.length} messages active`
                     : `${turns.length} message${turns.length === 1 ? "" : "s"} active`}{" "}
                   · 50-message request ceiling
                 </p>
-                <p className="mt-1 text-[10px] leading-4 text-[#806A72]">
+                <p className="mt-1 text-[10px] leading-4 text-muted">
                   Conversation state stays in this browser tab and clears with New conversation.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-[#E4D7DB] bg-[#FBF7F8] p-3">
-                <p className="flex items-center gap-2 text-[11px] font-semibold text-[#240B15]">
-                  <MapPin className="h-3.5 w-3.5 text-[#00AAAD]" />
+              <div className="rounded-xl border border-grid bg-page p-3">
+                <p className="flex items-center gap-2 text-[11px] font-semibold text-ink">
+                  <MapPin className="h-3.5 w-3.5 text-active-accent" />
                   Page scope
                 </p>
                 <p
-                  className="mt-1 truncate text-xs font-medium text-[#4B3F43]"
+                  className="mt-1 truncate text-xs font-medium text-ink-2"
                   title={location.pathname}
                 >
                   {location.pathname}
                 </p>
-                <p className="mt-1 text-[10px] leading-4 text-[#806A72]">
+                <p className="mt-1 text-[10px] leading-4 text-muted">
                   {activeFilterCount} of 30 filter slots · 0 of 20 selected resources
                 </p>
               </div>
 
-              <div className="rounded-xl border border-[#E4D7DB] bg-[#FBF7F8] p-3">
-                <p className="flex items-center gap-2 text-[11px] font-semibold text-[#240B15]">
-                  <Database className="h-3.5 w-3.5 text-[#00AAAD]" />
+              <div className="rounded-xl border border-grid bg-page p-3">
+                <p className="flex items-center gap-2 text-[11px] font-semibold text-ink">
+                  <Database className="h-3.5 w-3.5 text-active-accent" />
                   Evidence focus
                 </p>
-                <p className="mt-1 text-xs font-medium text-[#4B3F43]">
+                <p className="mt-1 text-xs font-medium text-ink-2">
                   {focus?.label ?? "No action selected"}
                 </p>
-                <p className="mt-1 text-[10px] leading-4 text-[#806A72]">
+                <p className="mt-1 text-[10px] leading-4 text-muted">
                   Focus IDs are resolved server-side into read-only evidence, never executor input.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-[#E4D7DB] bg-[#F9EAED] p-3">
-                <p className="flex items-center gap-2 text-[11px] font-semibold text-[#240B15]">
-                  <ShieldCheck className="h-3.5 w-3.5 text-[#72BF44]" />
+              <div className="rounded-xl border border-grid bg-tint p-3">
+                <p className="flex items-center gap-2 text-[11px] font-semibold text-ink">
+                  <ShieldCheck className="h-3.5 w-3.5 text-health-accent" />
                   Authority boundary
                 </p>
-                <p className="mt-1 text-xs font-medium text-[#240B15]">
+                <p className="mt-1 text-xs font-medium text-ink">
                   Evidence and proposals only
                 </p>
-                <p className="mt-1 text-[10px] leading-4 text-[#4B3F43]">
+                <p className="mt-1 text-[10px] leading-4 text-ink-2">
                   No target mutations, approvals, or execution authority are available to this
                   agent.
                 </p>
