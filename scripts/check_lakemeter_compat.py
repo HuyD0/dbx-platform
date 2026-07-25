@@ -119,7 +119,7 @@ def check() -> dict[str, object]:
         str(path.relative_to(ROOT))
         for path in (ROOT / "apps" / "platform-console").rglob("*")
         if path.is_file()
-        and "node_modules" not in path.parts
+        and not {".venv", "node_modules", "wheels"}.intersection(path.parts)
         and path.stat().st_size >= 9_500_000
     ]
     if oversized:
