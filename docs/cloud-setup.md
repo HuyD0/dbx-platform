@@ -46,7 +46,7 @@ These exist; nothing to do.
 | GitHub default branch | `main` |
 | GitHub `production` environment | created, no protection rules |
 | Repo secrets | `DATABRICKS_HOST`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
-| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (legacy-named evidence-job identity) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor) |
+| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (legacy-named evidence-job identity), `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor), and `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP` (dedicated Lakebase owner/migrator) |
 
 The keyless CI chain is proven. Mission Control adds a dedicated warehouse,
 five active curated schedules, ten paused on-demand schedules, manual
@@ -71,7 +71,7 @@ making the deployment or action executor a workspace admin.
 
 ## What still needs you
 
-Mission Control requires two platform prerequisites in addition to the two
+Mission Control requires three platform prerequisites in addition to the two
 GitHub/Claude items below:
 
 - create `dbx-platform-approvers` and add the humans allowed to approve plans;
@@ -81,6 +81,10 @@ GitHub/Claude items below:
   only its enabled action-pack permissions, and set
   `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` plus
   `DBX_PLATFORM_ACTION_EXECUTOR_SP` in the GitHub production environment.
+- provision a third service principal for LakeMeter Lakebase ownership and
+  approved schema migrations, then set
+  `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP`. It must not be shared with
+  either general executor.
 
 For a temporary proposal-only bootstrap, both variables may reference the
 deployment identity only when `DBX_PLATFORM_ACTIONS_ENABLED=false` and

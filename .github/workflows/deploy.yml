@@ -35,6 +35,8 @@ concurrency:
 #                                     evidence-job service principal
 #   DBX_PLATFORM_ACTION_EXECUTOR_SP   application ID of the separate
 #                                     allowlisted remediation executor
+#   DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP
+#                                     application ID of the Lakebase owner
 #   DBX_PLATFORM_APPROVER_GROUP_ID    immutable SCIM ID of the approver group
 #
 # There is no skip-when-unconfigured guard: a deploy that cannot authenticate
@@ -56,6 +58,7 @@ jobs:
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      BUNDLE_VAR_lakemeter_migration_executor_service_principal_name: ${{ vars.DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP }}
       BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
       SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -115,7 +118,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/platform-console/frontend/package-lock.json
+          cache-dependency-path: |
+            apps/platform-console/frontend/package-lock.json
+            integrations/lakemeter/frontend/package-lock.json
       - name: Build the Platform Console frontend
         # Databricks Apps never run npm — the SPA is built here into the
         # git-ignored static/ dir, which databricks.yml sync.include ships.
@@ -123,6 +128,16 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Build the isolated LakeMeter microfrontend
+        working-directory: integrations/lakemeter/frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Stage the pinned LakeMeter backend and pricing bundle
+        run: |
+          uv run python scripts/check_lakemeter_compat.py
+          uv run python scripts/stage_lakemeter_app.py
       - name: Validate
         run: databricks bundle validate -t prod
       - name: Deploy
@@ -162,6 +177,7 @@ jobs:
             --select jobs.governance_check \
             --select jobs.housekeeping_report \
             --select jobs.llm_cost_rollup \
+            --select jobs.lakemeter_schema_migrations \
             --select jobs.ml_hygiene_report \
             --select jobs.ml_serving_report \
             --select jobs.platform_digest \

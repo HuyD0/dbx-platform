@@ -29,6 +29,7 @@ sync:
     - apps/platform-console/wheels/**/*.whl
     - apps/platform-console/static/**
     - apps/platform-console/build_info.json
+    - apps/platform-console/lakemeter_vendor/**
 
 artifacts:
   default:
@@ -102,6 +103,24 @@ variables:
       Application/client ID of the separate remediation executor. It must not
       be the evidence-job identity and receives only the permissions for
       explicitly enabled non-runtime action packs.
+
+  lakemeter_migration_executor_service_principal_name:
+    description: >
+      Application/client ID of the dedicated LakeMeter schema-migration
+      executor. This identity owns the LakeMeter database and is deliberately
+      separate from the read-only App and general action executor identities.
+
+  lakemeter_project_id:
+    description: >
+      Stable Lakebase Autoscaling project ID. Provisioning and reconciliation
+      are selected only by the approved infrastructure workflow.
+    default: dbx-platform-lakemeter-dev
+
+  lakemeter_model_endpoint:
+    description: >
+      Databricks Model Serving endpoint used by LakeMeter's contextual
+      estimate assistant. The App receives CAN_QUERY only.
+    default: databricks-claude-opus-4-6
 
   azure_subscription_id:
     description: >
@@ -233,6 +252,8 @@ targets:
   #     service_principal_name: b74a6820-d0ac-454f-8c32-02141cba3c8a
   prod:
     mode: production
+    variables:
+      lakemeter_project_id: dbx-platform-lakemeter
     workspace:
       # Keep deployed source out of /Workspace/Shared, which is writable by
       # every workspace user and would undermine immutable-plan execution.

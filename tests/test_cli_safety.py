@@ -48,6 +48,7 @@ def test_shared_executor_bootstrap_requires_proposal_only_exception():
     common = {
         "BUNDLE_VAR_runtime_executor_service_principal_name": "shared",
         "BUNDLE_VAR_action_executor_service_principal_name": "shared",
+        "BUNDLE_VAR_lakemeter_migration_executor_service_principal_name": "lakemeter",
     }
     assert _executor_policy(**common).returncode == 1
     assert (
@@ -71,6 +72,7 @@ def test_distinct_executor_identities_need_no_bootstrap_exception():
     result = _executor_policy(
         BUNDLE_VAR_runtime_executor_service_principal_name="runtime",
         BUNDLE_VAR_action_executor_service_principal_name="action",
+        BUNDLE_VAR_lakemeter_migration_executor_service_principal_name="lakemeter",
         BUNDLE_VAR_actions_enabled="true",
         BUNDLE_VAR_approver_group_id="152821564284515",
     )
@@ -81,6 +83,7 @@ def test_enabled_actions_require_exact_numeric_approver_group_id():
     common = {
         "BUNDLE_VAR_runtime_executor_service_principal_name": "runtime",
         "BUNDLE_VAR_action_executor_service_principal_name": "action",
+        "BUNDLE_VAR_lakemeter_migration_executor_service_principal_name": "lakemeter",
         "BUNDLE_VAR_actions_enabled": "true",
     }
 
@@ -92,6 +95,18 @@ def test_enabled_actions_require_exact_numeric_approver_group_id():
         ).returncode
         == 1
     )
+
+
+def test_lakemeter_migration_executor_must_be_dedicated():
+    result = _executor_policy(
+        BUNDLE_VAR_runtime_executor_service_principal_name="runtime",
+        BUNDLE_VAR_action_executor_service_principal_name="action",
+        BUNDLE_VAR_lakemeter_migration_executor_service_principal_name="action",
+        BUNDLE_VAR_actions_enabled="false",
+    )
+
+    assert result.returncode == 1
+    assert "LakeMeter migration executor must be a dedicated identity" in result.stderr
 
 
 @pytest.mark.parametrize(

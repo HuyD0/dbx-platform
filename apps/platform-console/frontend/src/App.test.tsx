@@ -69,6 +69,59 @@ test("Cost Planner uses one header assistant action instead of the floating laun
   expect(screen.getByRole("button", { name: "Ask agent" })).not.toHaveClass("fixed");
 });
 
+test("LakeMeter route stays in the Mission Control shell while setup is pending", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "dev",
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/lakemeter/status")) {
+        return new Response(
+          JSON.stringify({
+            status: "unavailable",
+            ready: false,
+            database_ready: false,
+            frontend_ready: true,
+            reason: "schema_migration_required",
+            schema_version: 0,
+            required_schema_version: 1,
+            upstream_version: "v0.1.0",
+            pricing_version: "test-pricing",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+
+  renderApp("/cost/estimator/pricing");
+
+  expect(
+    await screen.findByRole("heading", { name: "Estimator setup required" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Estimator" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "Ask estimator" })).toBeInTheDocument();
+  expect(screen.queryByText("Ask agent")).not.toBeInTheDocument();
+});
+
 test("skip link and mobile drawer are keyboard complete", async () => {
   const user = userEvent.setup();
   vi.stubGlobal(

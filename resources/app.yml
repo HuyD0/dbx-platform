@@ -62,7 +62,11 @@ resources:
               ${resources.jobs.platform_digest.id},
               ${resources.jobs.security_audit.id}
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
-            value_from: governed-forecast-training
+            value: ${resources.jobs.cost_forecast_train.id},${resources.jobs.lakemeter_schema_migrations.id}
+          - name: DBX_LAKEMETER_ENDPOINT
+            value: projects/${var.lakemeter_project_id}/branches/production/endpoints/primary
+          - name: CLAUDE_MODEL_ENDPOINT
+            value_from: lakemeter-claude
           # Cap interactive system-table queries below the Databricks Apps HTTP
           # gateway request timeout. Without this the app blocks on a cold /
           # stopped warehouse until the gateway aborts with an opaque 502; this
@@ -114,4 +118,24 @@ resources:
             directly; execution is submitted only through action-executor.
           job:
             id: ${resources.jobs.cost_forecast_train.id}
+            permission: CAN_VIEW
+        - name: lakemeter-database
+          description: >
+            OAuth-only connection to LakeMeter's dedicated Lakebase database.
+            This binding cannot provision the project or run schema migrations.
+          postgres:
+            branch: projects/${var.lakemeter_project_id}/branches/production
+            database: projects/${var.lakemeter_project_id}/branches/production/databases/lakemeter
+            permission: CAN_CONNECT_AND_CREATE
+        - name: lakemeter-claude
+          description: LakeMeter estimate assistant model endpoint
+          serving_endpoint:
+            name: ${var.lakemeter_model_endpoint}
+            permission: CAN_QUERY
+        - name: governed-lakemeter-migrations
+          description: >
+            Read the exact unscheduled schema-migration Job definition so
+            Action Center can hash and revalidate it. The App cannot run it.
+          job:
+            id: ${resources.jobs.lakemeter_schema_migrations.id}
             permission: CAN_VIEW

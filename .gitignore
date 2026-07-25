@@ -17,6 +17,10 @@ apps/platform-console/wheels/
 # Frontend build output (CI builds it; bundle sync re-includes it) — never commit
 apps/platform-console/static/
 apps/platform-console/frontend/node_modules/
+# Deployment staging for the pinned LakeMeter backend. The canonical,
+# reviewable source remains under vendor/lakemeter.
+apps/platform-console/lakemeter_vendor/
+integrations/lakemeter/frontend/node_modules/
 # Deploy-time build stamp (bundle sync re-includes it) — never commit
 apps/platform-console/build_info.json
 
