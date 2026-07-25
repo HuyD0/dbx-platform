@@ -147,22 +147,32 @@ def _policy_drift(w: WorkspaceClient) -> list[dict]:
 def _llm_efficiency_findings(
     w: WorkspaceClient, warehouse_id: str, days: int
 ) -> list[dict]:
+    workspace_id = str(w.get_workspace_id())
     try:
         cost_rows = llm_cost.databricks_cost(
-            w, warehouse_id, days, gateway_enriched=True
+            w, warehouse_id, days, workspace_id, gateway_enriched=True
         )
     except Exception:  # noqa: BLE001 - compatibility schema
         cost_rows = llm_cost.databricks_cost(
-            w, warehouse_id, days, gateway_enriched=False
+            w, warehouse_id, days, workspace_id, gateway_enriched=False
         )
     try:
-        usage_rows = llm_cost.gateway_usage(w, warehouse_id, min(days, 90))
+        usage_rows = llm_cost.gateway_usage(
+            w, warehouse_id, min(days, 90), workspace_id
+        )
     except Exception:  # noqa: BLE001 - compatibility schema
-        usage_rows = llm_cost.endpoint_usage(w, warehouse_id, min(days, 90))
+        usage_rows = llm_cost.endpoint_usage(
+            w, warehouse_id, min(days, 90), workspace_id
+        )
     costs = llm_cost.normalize_cost_rows(
-        cost_rows, "system.billing.usage", "DATABRICKS_LIST"
+        cost_rows,
+        "system.billing.usage",
+        "DATABRICKS_LIST",
+        workspace_id=workspace_id,
     )
-    usage = llm_cost.normalize_usage_rows(usage_rows, "model usage")
+    usage = llm_cost.normalize_usage_rows(
+        usage_rows, "model usage", workspace_id=workspace_id
+    )
     return llm_cost.efficiency(costs, usage)["recommendations"]
 
 

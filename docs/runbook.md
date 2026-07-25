@@ -236,7 +236,22 @@ every remediation below is a manual owner action:
 
 ## LLM Cost & Value operations
 
-`llm-cost-rollup` writes provider-aware daily cost and hourly usage ledgers.
+`llm-cost-rollup` writes workspace-scoped, provider-aware daily AI cost and
+hourly serving-usage ledgers. Databricks list-cost coverage includes model
+serving, agent evaluation, vector search, online tables, and foundation-model
+training. `workload_type` preserves the Databricks billing origin; lowercase
+`project`, `app`/`application`, `team`, and `use_case` billing tags are stored
+without inferring missing values.
+
+For a Databricks App such as `agent-eval`, assign a serverless usage policy
+containing `project=agent-eval` and `app=agent-eval`. Policy changes apply only
+to future usage; historical untagged rows stay visibly `unallocated`, and new
+billing rows can take up to 24 hours to arrive.
+
+After deploying a ledger schema expansion, run `schema_migrations`, then create
+and approve one exact `run-job` action for `[dbx-platform] llm-cost-backfill`.
+The unscheduled Job has a fixed 400-day window and accepts no caller-controlled
+lookback. The normal scheduled rollup remains fixed at three days.
 Interpret labels literally:
 
 - `Azure actual`: Azure billing, including later adjustments;
@@ -260,6 +275,10 @@ Do not add currencies without a documented conversion source/rate/time.
 Request telemetry allocates billed totals to workloads but does not claim
 invoice-accurate per-request cost. Keep an explicit `unallocated/uncovered`
 bucket.
+
+Cost/request and token unit economics use only `MODEL_SERVING` financial rows.
+Agent-evaluation and other AI product costs remain in total spend but are never
+divided by serving request or token counts.
 
 When preview sources such as AI Gateway usage/cost tables are absent, the UI
 must show `unavailable` and the fallback source. Verify actual/detail

@@ -4,6 +4,7 @@ from dbx_platform import cost
 from dbx_platform.cost import (
     classify_cluster_utilization,
     classify_warehouse_utilization,
+    usage_report,
 )
 from dbx_platform.housekeeping import find_jobs_on_all_purpose
 from dbx_platform.system_tables import load_query
@@ -65,6 +66,23 @@ def test_all_cost_page_queries_are_scoped_to_the_current_workspace():
         "failed_run_cost",
     ):
         assert ":workspace_id" in load_query(name), name
+
+
+def test_usage_report_is_workspace_scoped(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "dbx_platform.cost.run_query",
+        lambda _w, sql, _warehouse, params=None: calls.append((sql, params)) or [],
+    )
+
+    usage_report(object(), "warehouse", 30, workspace_id="w1")
+
+    sql, params = calls[0]
+    assert "u.workspace_id = :workspace_id" in sql
+    assert "AS workload_type" in sql
+    assert "AS project" in sql
+    assert "AS app" in sql
+    assert params == {"days": 30, "workspace_id": "w1"}
 
 # --- classify_cluster_utilization ----------------------------------------------
 # Rows arrive from the Statement Execution API, so values are strings.

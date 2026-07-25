@@ -852,9 +852,11 @@ def _validation_windows(
 # --- reporting ----------------------------------------------------------------
 
 _REPORT_DIMENSIONS = {
-    "bucket": "service_bucket",
-    "service": "service_name",
-    "resource-group": "resource_group",
+    "bucket": ("azure_costs", "service_bucket"),
+    "service": ("azure_costs", "service_name"),
+    "resource-group": ("azure_costs", "resource_group"),
+    "resource": ("azure_cost_details", "resource_id"),
+    "meter": ("azure_cost_details", "meter_name"),
 }
 
 
@@ -864,10 +866,11 @@ def report_sql(catalog: str, schema: str, by: str) -> str:
     ``by`` is validated against a whitelist because identifiers cannot be
     bound as statement parameters.
     """
-    dim = _REPORT_DIMENSIONS.get(by)
-    if not dim:
+    selected = _REPORT_DIMENSIONS.get(by)
+    if not selected:
         raise ValueError(f"--by must be one of {sorted(_REPORT_DIMENSIONS)}")
-    fq = f"{catalog}.{schema}.azure_costs"
+    table, dim = selected
+    fq = f"{catalog}.{schema}.{table}"
     return (
         "WITH current_scope AS ("
         "SELECT subscription_id, scope_filter "

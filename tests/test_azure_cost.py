@@ -632,6 +632,13 @@ def test_report_sql_whitelists_dimension():
     assert "environment = :environment" in sql
     assert "COALESCE(scope_filter, '') <> ''" in sql
     assert "c.scope_filter = s.scope_filter" in sql
+    resource_sql = report_sql("main", "dbx_platform", "resource")
+    meter_sql = report_sql("main", "dbx_platform", "meter")
+    assert "FROM main.dbx_platform.azure_cost_details" in resource_sql
+    assert "GROUP BY c.resource_id" in resource_sql
+    assert "GROUP BY c.meter_name" in meter_sql
+    assert "workspace_id = :workspace_id" in resource_sql
+    assert "environment = :environment" in resource_sql
     try:
         report_sql("main", "dbx_platform", "usage_date; DROP TABLE x")
     except ValueError:

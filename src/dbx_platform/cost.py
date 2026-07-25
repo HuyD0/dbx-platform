@@ -13,13 +13,17 @@ from databricks.sdk import WorkspaceClient
 from dbx_platform.system_tables import load_query, run_query
 
 
-def usage_report(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
-    """DBU and list-price cost by SKU for the current workspace."""
+def usage_report(
+    w: WorkspaceClient, warehouse_id: str, days: int, workspace_id: str | None = None
+) -> list[dict]:
+    """DBU and list-price cost by product, SKU and billing tags."""
+
+    workspace_id = workspace_id or str(w.get_workspace_id())
     return run_query(
         w,
         load_query("usage_last_30d"),
         warehouse_id,
-        {"days": days, "workspace_id": str(w.get_workspace_id())},
+        {"days": days, "workspace_id": workspace_id},
     )
 
 

@@ -30,22 +30,27 @@ COST_BASES = {"DATABRICKS_LIST", "AZURE_ACTUAL", "PROVIDER_ESTIMATE"}
 _SOURCE_STATUSES = {"available", "partial", "unavailable"}
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 BREAKDOWN_DIMENSIONS = {
+    "workload_type",
     "provider",
     "model",
     "endpoint",
     "principal",
+    "project",
+    "app",
     "team",
     "use_case",
     "workspace_id",
 }
 COST_ROW_SCHEMA = (
     "array<struct<usage_date:date,workspace_id:string,environment:string,provider:string,"
-    "model:string,endpoint:string,principal:string,team:string,use_case:string,"
+    "workload_type:string,model:string,endpoint:string,principal:string,"
+    "project:string,app:string,team:string,use_case:string,"
     "cost:double,currency:string,cost_basis:string,source:string>>"
 )
 USAGE_ROW_SCHEMA = (
     "array<struct<usage_hour:timestamp,workspace_id:string,environment:string,provider:string,"
-    "model:string,endpoint:string,principal:string,team:string,use_case:string,"
+    "workload_type:string,model:string,endpoint:string,principal:string,"
+    "project:string,app:string,team:string,use_case:string,"
     "requests:bigint,successful_requests:bigint,invocations:bigint,"
     "input_tokens:bigint,output_tokens:bigint,"
     "cached_tokens:bigint,reasoning_tokens:bigint,errors:bigint,retries:bigint,"
@@ -93,9 +98,9 @@ def databricks_cost(
     w: WorkspaceClient,
     warehouse_id: str,
     days: int,
+    workspace_id: str | None = None,
     *,
     gateway_enriched: bool = True,
-    workspace_id: str | None = None,
 ) -> list[dict]:
     """Daily Databricks-hosted model cost at list price.
 
@@ -113,6 +118,7 @@ def databricks_cost(
             "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
+        row_limit=100_000,
     )
 
 
@@ -120,7 +126,6 @@ def gateway_usage(
     w: WorkspaceClient,
     warehouse_id: str,
     days: int,
-    *,
     workspace_id: str | None = None,
 ) -> list[dict]:
     """Request, token, retry and latency metrics from Unity AI Gateway."""
@@ -133,6 +138,7 @@ def gateway_usage(
             "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
+        row_limit=100_000,
     )
 
 
@@ -140,7 +146,6 @@ def endpoint_usage(
     w: WorkspaceClient,
     warehouse_id: str,
     days: int,
-    *,
     workspace_id: str | None = None,
 ) -> list[dict]:
     """Compatibility usage query for the legacy serving usage table."""
@@ -153,17 +158,27 @@ def endpoint_usage(
             "days": _inclusive_lookback(days),
             "workspace_id": _current_workspace_id(w, workspace_id),
         },
+        row_limit=100_000,
     )
 
 
-def external_model_spend(w: WorkspaceClient, warehouse_id: str, days: int) -> list[dict]:
+def external_model_spend(
+    w: WorkspaceClient,
+    warehouse_id: str,
+    days: int,
+    workspace_id: str | None = None,
+) -> list[dict]:
     """Hourly external-provider estimates aggregated to daily cost."""
 
     return run_query(
         w,
         load_query("llm_external_model_spend"),
         warehouse_id,
-        {"days": _inclusive_lookback(days)},
+        {
+            "days": _inclusive_lookback(days),
+            "workspace_id": _current_workspace_id(w, workspace_id),
+        },
+        row_limit=100_000,
     )
 
 
@@ -229,8 +244,9 @@ def create_ledger_table_statements(catalog: str, schema: str) -> list[tuple[str,
             f"table {fq}.llm_cost_daily",
             f"CREATE TABLE IF NOT EXISTS {fq}.llm_cost_daily ("
             "usage_date DATE, workspace_id STRING, environment STRING, "
-            "provider STRING, model STRING, "
-            "endpoint STRING, principal STRING, team STRING, use_case STRING, "
+            "provider STRING, workload_type STRING, model STRING, "
+            "endpoint STRING, principal STRING, project STRING, app STRING, "
+            "team STRING, use_case STRING, "
             "cost DOUBLE, currency STRING, cost_basis STRING, source STRING, "
             "ingested_at TIMESTAMP) "
             "COMMENT 'Normalized LLM cost; financial bases are never mixed'",
@@ -239,8 +255,9 @@ def create_ledger_table_statements(catalog: str, schema: str) -> list[tuple[str,
             f"table {fq}.llm_usage_hourly",
             f"CREATE TABLE IF NOT EXISTS {fq}.llm_usage_hourly ("
             "usage_hour TIMESTAMP, workspace_id STRING, environment STRING, "
-            "provider STRING, model STRING, "
-            "endpoint STRING, principal STRING, team STRING, use_case STRING, "
+            "provider STRING, workload_type STRING, model STRING, "
+            "endpoint STRING, principal STRING, project STRING, app STRING, "
+            "team STRING, use_case STRING, "
             "requests BIGINT, successful_requests BIGINT, invocations BIGINT, "
             "input_tokens BIGINT, "
             "output_tokens BIGINT, cached_tokens BIGINT, reasoning_tokens BIGINT, "
@@ -275,6 +292,46 @@ def create_ledger_table_statements(catalog: str, schema: str) -> list[tuple[str,
             "COMMENT 'Feature detection, freshness and coverage for persisted LLM ledgers'",
         ),
     ]
+
+
+LEDGER_MIGRATION_COLUMNS = {
+    "llm_cost_daily": {
+        "workload_type": "STRING",
+        "project": "STRING",
+        "app": "STRING",
+    },
+    "llm_usage_hourly": {
+        "workload_type": "STRING",
+        "project": "STRING",
+        "app": "STRING",
+    },
+}
+
+
+def migrate_ledger_with_spark(spark: Any, catalog: str, schema: str) -> list[str]:
+    """Idempotently extend existing ledger tables under the deployment identity."""
+
+    if not all(_IDENTIFIER_RE.fullmatch(value) for value in (catalog, schema)):
+        raise ValueError("Unsafe Unity Catalog ledger identifier.")
+    fq = f"`{catalog}`.`{schema}`"
+    completed: list[str] = []
+    for table, required in LEDGER_MIGRATION_COLUMNS.items():
+        described = spark.sql(f"DESCRIBE TABLE {fq}.`{table}`").collect()
+        existing = {
+            str(row.asDict(recursive=True).get("col_name") or "").strip("`").lower()
+            for row in described
+            if row.asDict(recursive=True).get("col_name")
+            and not str(row.asDict(recursive=True)["col_name"]).startswith("#")
+        }
+        missing = [
+            f"`{name}` {data_type}"
+            for name, data_type in required.items()
+            if name.lower() not in existing
+        ]
+        if missing:
+            spark.sql(f"ALTER TABLE {fq}.`{table}` ADD COLUMNS ({', '.join(missing)})")
+            completed.append(f"migrated table {catalog}.{schema}.{table}")
+    return completed
 
 
 def budget_rows(
@@ -416,9 +473,12 @@ def merge_cost_rows_sql(catalog: str, schema: str) -> str:
         "workspace_id",
         "environment",
         "provider",
+        "workload_type",
         "model",
         "endpoint",
         "principal",
+        "project",
+        "app",
         "team",
         "use_case",
         "currency",
@@ -453,9 +513,12 @@ def merge_usage_rows_sql(catalog: str, schema: str) -> str:
         "workspace_id",
         "environment",
         "provider",
+        "workload_type",
         "model",
         "endpoint",
         "principal",
+        "project",
+        "app",
         "team",
         "use_case",
         "source",
@@ -663,7 +726,7 @@ def normalize_cost_rows(
     basis: str,
     *,
     environment: str = "prod",
-    workspace_id: str = "current",
+    workspace_id: str | None = None,
 ) -> list[dict]:
     """Coerce query results into the canonical cost row shape."""
 
@@ -671,6 +734,12 @@ def normalize_cost_rows(
         raise ValueError(f"unsupported cost basis: {basis}")
     out: list[dict] = []
     for row in rows:
+        source_workspace_id = str(row.get("workspace_id") or "")
+        expected_workspace_id = str(workspace_id or source_workspace_id)
+        if not source_workspace_id or source_workspace_id != expected_workspace_id:
+            raise ValueError(
+                "Cost row workspace does not match the exact requested workspace."
+            )
         cost = _number(row.get("cost"))
         # Never invent USD for a provider row whose billing currency is absent.
         # UNKNOWN remains a separate, visibly uncovered ledger bucket.
@@ -678,12 +747,15 @@ def normalize_cost_rows(
         out.append(
             {
                 "usage_date": _date_text(row.get("usage_date")),
-                "workspace_id": workspace_id,
+                "workspace_id": source_workspace_id,
                 "environment": environment,
                 "provider": str(row.get("provider") or "unallocated"),
+                "workload_type": str(row.get("workload_type") or "unallocated"),
                 "model": str(row.get("model") or "unallocated"),
                 "endpoint": str(row.get("endpoint") or "unallocated"),
                 "principal": str(row.get("principal") or "unallocated"),
+                "project": str(row.get("project") or "unallocated"),
+                "app": str(row.get("app") or "unallocated"),
                 "team": str(row.get("team") or "unallocated"),
                 "use_case": str(row.get("use_case") or "unallocated"),
                 "cost": round(cost, 8),
@@ -700,22 +772,31 @@ def normalize_usage_rows(
     source: str,
     *,
     environment: str = "prod",
-    workspace_id: str = "current",
+    workspace_id: str | None = None,
 ) -> list[dict]:
     """Coerce usage results without manufacturing unavailable metrics."""
 
     out: list[dict] = []
     for row in rows:
+        source_workspace_id = str(row.get("workspace_id") or "")
+        expected_workspace_id = str(workspace_id or source_workspace_id)
+        if not source_workspace_id or source_workspace_id != expected_workspace_id:
+            raise ValueError(
+                "Usage row workspace does not match the exact requested workspace."
+            )
         out.append(
             {
                 "usage_date": _date_text(row.get("usage_date")),
                 "usage_hour": _hour_text(row.get("usage_hour") or row.get("usage_date")),
-                "workspace_id": workspace_id,
+                "workspace_id": source_workspace_id,
                 "environment": environment,
                 "provider": str(row.get("provider") or "unallocated"),
+                "workload_type": str(row.get("workload_type") or "unallocated"),
                 "model": str(row.get("model") or "unallocated"),
                 "endpoint": str(row.get("endpoint") or "unallocated"),
                 "principal": str(row.get("principal") or "unallocated"),
+                "project": str(row.get("project") or "unallocated"),
+                "app": str(row.get("app") or "unallocated"),
                 "team": str(row.get("team") or "unallocated"),
                 "use_case": str(row.get("use_case") or "unallocated"),
                 "requests": _integer(row.get("requests")),
@@ -813,11 +894,18 @@ def summarize(
             }
         )
 
+    request_cost_rows = [
+        row for row in mtd_cost_rows if row.get("workload_type") == "MODEL_SERVING"
+    ]
+    request_cost_groups: dict[tuple[str, str], float] = defaultdict(float)
+    for row in request_cost_rows:
+        request_cost_groups[(row["currency"], row["cost_basis"])] += _number(row.get("cost"))
+
     cost_per_request = None
     cost_per_successful_task = None
     cost_per_million_tokens = None
-    if len(totals) == 1:
-        amount = totals[0]["cost"]
+    if len(request_cost_groups) == 1:
+        amount = next(iter(request_cost_groups.values()))
         if metrics["requests"]:
             cost_per_request = round(amount / metrics["requests"], 6)
         if metrics["successful_requests"]:
@@ -839,6 +927,7 @@ def summarize(
         "cost_per_request": cost_per_request,
         "cost_per_successful_task": cost_per_successful_task,
         "cost_per_million_tokens": cost_per_million_tokens,
+        "unit_economics_scope": "MODEL_SERVING",
         "forecasts": forecasts,
         "forecast": forecasts[0] if len(forecasts) == 1 else None,
     }
@@ -851,6 +940,7 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
     for row in cost_rows:
         key = (
             row["usage_date"],
+            row.get("workload_type", "unallocated"),
             row["provider"],
             row["model"],
             row["endpoint"],
@@ -861,6 +951,7 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
             key,
             {
                 "usage_date": row["usage_date"],
+                "workload_type": row.get("workload_type", "unallocated"),
                 "provider": row["provider"],
                 "model": row["model"],
                 "endpoint": row["endpoint"],
@@ -877,11 +968,17 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
         )
         item["cost"] += _number(row.get("cost"))
 
-    usage_by_day_provider: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    usage_by_day_product_provider: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for row in usage_rows:
-        usage_by_day_provider[(row["usage_date"], row["provider"])].append(row)
+        usage_by_day_product_provider[
+            (
+                row["usage_date"],
+                str(row.get("workload_type") or "unallocated"),
+                row["provider"],
+            )
+        ].append(row)
 
-    usage_metrics: dict[tuple[str, str], dict[str, int | None]] = {
+    usage_metrics: dict[tuple[str, str, str], dict[str, int | None]] = {
         key: _aggregate_metrics(
             rows,
             (
@@ -893,15 +990,15 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
                 "reasoning_tokens",
             ),
         )
-        for key, rows in usage_by_day_provider.items()
+        for key, rows in usage_by_day_product_provider.items()
     }
 
     # Usage cannot be allocated safely across several financial rows. Attach it
     # only when a day/provider has exactly one cost row; otherwise expose a
     # separate usage-only row.
-    cost_keys_by_usage: dict[tuple[str, str], list[tuple]] = defaultdict(list)
+    cost_keys_by_usage: dict[tuple[str, str, str], list[tuple]] = defaultdict(list)
     for key in groups:
-        cost_keys_by_usage[(key[0], key[1])].append(key)
+        cost_keys_by_usage[(key[0], key[1], key[2])].append(key)
     for usage_key, metrics in usage_metrics.items():
         keys = cost_keys_by_usage.get(usage_key, [])
         if len(keys) == 1:
@@ -910,7 +1007,8 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
         key = (*usage_key, "all", "all", "", "USAGE_ONLY")
         groups[key] = {
             "usage_date": usage_key[0],
-            "provider": usage_key[1],
+            "workload_type": usage_key[1],
+            "provider": usage_key[2],
             "model": "all",
             "endpoint": "all",
             "currency": None,
@@ -927,6 +1025,7 @@ def time_series(cost_rows: list[dict], usage_rows: list[dict]) -> list[dict]:
         rows,
         key=lambda r: (
             r["usage_date"],
+            str(r.get("workload_type")),
             r["provider"],
             str(r.get("model")),
             str(r.get("cost_basis")),
@@ -1026,8 +1125,11 @@ def tokenomics_lens(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
         else None
     )
 
+    request_cost_rows = [
+        row for row in cost_rows if row.get("workload_type") == "MODEL_SERVING"
+    ]
     cost_groups: dict[tuple[str, str], float] = defaultdict(float)
-    for row in cost_rows:
+    for row in request_cost_rows:
         cost_groups[(str(row.get("currency") or "UNKNOWN"), str(row.get("cost_basis")))] += _number(
             row.get("cost")
         )
@@ -1091,13 +1193,16 @@ def tokenomics_lens(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
             }
         )
 
-    cost_sources = sorted({str(row.get("source")) for row in cost_rows if row.get("source")})
+    cost_sources = sorted(
+        {str(row.get("source")) for row in request_cost_rows if row.get("source")}
+    )
     usage_sources = sorted({str(row.get("source")) for row in usage_rows if row.get("source")})
 
     return {
         "scope": {
             "description": (
-                "Workspace-level LLM ledger coverage, not only platform-console app traffic"
+                "Workspace-level model-serving ledger coverage, not only "
+                "platform-console app traffic"
             ),
             "covered_when_ingested": [
                 "Databricks-hosted models and Foundation Model APIs",
@@ -1195,6 +1300,8 @@ def efficiency(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
         if "unallocated"
         in {
             str(r.get("endpoint")),
+            str(r.get("project")),
+            str(r.get("app")),
             str(r.get("team")),
             str(r.get("use_case")),
         }
@@ -1204,8 +1311,11 @@ def efficiency(cost_rows: list[dict], usage_rows: list[dict]) -> dict:
             {
                 "type": "unallocated-spend",
                 "severity": "medium",
-                "evidence": "some spend is missing endpoint, team, or use-case attribution",
-                "action_type": "add-ai-gateway-request-tags",
+                "evidence": (
+                    "some spend is missing endpoint, project, app, team, or "
+                    "use-case attribution"
+                ),
+                "action_type": "apply-serverless-usage-policy-or-request-tags",
                 "requires_approval": True,
             }
         )
@@ -1378,8 +1488,11 @@ def read_llm_cost_daily(
     lookback_days = max(0, min(int(days), 400) - 1)
     return run_query(
         w,
-        "SELECT usage_date, workspace_id, environment, provider, model, "
-        "endpoint, principal, team, use_case, cost, currency, cost_basis, "
+        "SELECT usage_date, workspace_id, environment, provider, "
+        "COALESCE(workload_type, 'unallocated') AS workload_type, model, "
+        "endpoint, principal, COALESCE(project, 'unallocated') AS project, "
+        "COALESCE(app, 'unallocated') AS app, team, use_case, "
+        "cost, currency, cost_basis, "
         "source, ingested_at "
         f"FROM {_platform_table(catalog, schema, 'llm_cost_daily')} "
         "WHERE workspace_id = :workspace_id "
@@ -1411,8 +1524,12 @@ def read_llm_usage_hourly(
     return run_query(
         w,
         "SELECT usage_hour, CAST(usage_hour AS DATE) AS usage_date, "
-        "workspace_id, environment, provider, model, endpoint, principal, "
-        "team, use_case, requests, successful_requests, invocations, "
+        "workspace_id, environment, provider, "
+        "COALESCE(workload_type, 'unallocated') AS workload_type, "
+        "model, endpoint, principal, "
+        "COALESCE(project, 'unallocated') AS project, "
+        "COALESCE(app, 'unallocated') AS app, team, use_case, "
+        "requests, successful_requests, invocations, "
         "input_tokens, output_tokens, cached_tokens, reasoning_tokens, "
         "errors, retries, p95_latency_ms, source, ingested_at "
         f"FROM {_platform_table(catalog, schema, 'llm_usage_hourly')} "

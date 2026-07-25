@@ -56,7 +56,10 @@ with tab_bill:
         pivot = frame.pivot_table(index="usage_date", columns="service_bucket",
                                   values="cost", aggfunc="sum").fillna(0)
         st.bar_chart(pivot)
-        by = st.selectbox("Break down by", ["bucket", "service", "resource-group"])
+        by = st.selectbox(
+            "Break down by",
+            ["bucket", "service", "resource-group", "resource", "meter"],
+        )
         show_rows(
             azure_cost.report(
                 client(),

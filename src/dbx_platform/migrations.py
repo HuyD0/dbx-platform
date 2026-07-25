@@ -18,6 +18,7 @@ from dbx_platform.control_plane_procedures import (
 )
 from dbx_platform.control_plane_schema import migrate_control_plane_with_spark
 from dbx_platform.dashboards import setup_statements
+from dbx_platform.llm_cost import migrate_ledger_with_spark
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +82,7 @@ def run_migrations(
     for description, sql in setup_statements(catalog, schema, team_tags):
         spark.sql(sql)
         completed.append(description)
+    completed.extend(migrate_ledger_with_spark(spark, catalog, schema))
     completed.extend(migrate_control_plane_with_spark(spark, catalog, schema))
     for description, sql in procedure_migration_statements(
         catalog,

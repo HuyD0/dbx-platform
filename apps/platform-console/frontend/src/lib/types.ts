@@ -582,6 +582,7 @@ export interface LlmCostSummary {
   reasoning_tokens?: number;
   cost_per_request?: number | null;
   cost_per_million_tokens?: number | null;
+  unit_economics_scope?: "MODEL_SERVING" | string;
   forecast?: {
     month_end?: number | null;
     lower?: number | null;
@@ -608,8 +609,8 @@ export interface LlmCostPoint {
 export interface LlmBreakdown {
   dimension: string;
   key: string;
-  cost: number;
-  currency: string;
+  cost: number | null;
+  currency: string | null;
   cost_basis: string;
   requests?: number;
   input_tokens?: number;

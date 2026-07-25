@@ -7,7 +7,7 @@ page load never reaches into preview system tables or Azure billing directly.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 
@@ -155,7 +155,23 @@ def timeseries(days: int = 30, refresh: bool = False) -> dict:
 
 
 @router.get("/breakdown")
-def cost_breakdown(dimension: str = "all", days: int = 30, refresh: bool = False) -> dict:
+def cost_breakdown(
+    dimension: Literal[
+        "all",
+        "workload_type",
+        "provider",
+        "model",
+        "endpoint",
+        "principal",
+        "project",
+        "app",
+        "team",
+        "use_case",
+        "workspace_id",
+    ] = "all",
+    days: int = 30,
+    refresh: bool = False,
+) -> dict:
     days = deps.clamp_days(days, 1, 400)
     ledger, as_of, hit = _ledger(days, refresh)
     dimensions = sorted(llm_cost.BREAKDOWN_DIMENSIONS) if dimension == "all" else [dimension]

@@ -4,6 +4,7 @@ SELECT
   DATE(event_time)                                               AS usage_date,
   DATE_TRUNC('HOUR', event_time)                                 AS usage_hour,
   workspace_id                                                   AS workspace_id,
+  'MODEL_SERVING'                                                AS workload_type,
   CASE
     WHEN UPPER(destination_model) LIKE '%CLAUDE%' THEN 'anthropic'
     WHEN UPPER(destination_model) LIKE '%GPT%' THEN 'openai'
@@ -13,14 +14,24 @@ SELECT
   COALESCE(endpoint_name, 'unallocated')                          AS endpoint,
   COALESCE(requester, 'unallocated')                              AS principal,
   COALESCE(
+    NULLIF(TRIM(request_tags['project']), ''),
+    NULLIF(TRIM(endpoint_tags['project']), ''),
+    'unallocated'
+  )                                                              AS project,
+  COALESCE(
+    NULLIF(TRIM(request_tags['app']), ''),
+    NULLIF(TRIM(request_tags['application']), ''),
+    NULLIF(TRIM(endpoint_tags['app']), ''),
+    NULLIF(TRIM(endpoint_tags['application']), ''),
+    'unallocated'
+  )                                                              AS app,
+  COALESCE(
     request_tags['team'],
     endpoint_tags['team'],
     'unallocated'
   )                                                              AS team,
   COALESCE(
     request_tags['use_case'],
-    request_tags['project'],
-    endpoint_tags['project'],
     'unallocated'
   )                                                              AS use_case,
   COUNT(DISTINCT request_id)                                      AS requests,
@@ -41,10 +52,13 @@ GROUP BY
   usage_date,
   usage_hour,
   workspace_id,
+  workload_type,
   provider,
   model,
   endpoint,
   principal,
+  project,
+  app,
   team,
   use_case
 ORDER BY usage_date, input_tokens + output_tokens DESC

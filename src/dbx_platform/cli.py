@@ -258,12 +258,16 @@ def cmd_llm_cost_rollup(args) -> int:
     source_health: list[dict] = []
 
     try:
-        databricks_rows = llm_cost.databricks_cost(w, warehouse, days, gateway_enriched=True)
+        databricks_rows = llm_cost.databricks_cost(
+            w, warehouse, days, workspace_id, gateway_enriched=True
+        )
         billing_status = "available"
         billing_note = "Unity AI Gateway billing attribution available"
     except Exception as enriched_error:  # noqa: BLE001 - feature detection
         try:
-            databricks_rows = llm_cost.databricks_cost(w, warehouse, days, gateway_enriched=False)
+            databricks_rows = llm_cost.databricks_cost(
+                w, warehouse, days, workspace_id, gateway_enriched=False
+            )
             billing_status = "partial"
             billing_note = (
                 "Cost available without Gateway model/tag attribution "
@@ -312,13 +316,20 @@ def cmd_llm_cost_rollup(args) -> int:
             coverage_start=(window_start.isoformat() if billing_status != "unavailable" else None),
             coverage_end=(window_end.isoformat() if billing_status != "unavailable" else None),
             row_count=len(databricks_rows),
-            available_metrics=["cost", "currency", "cost_basis"],
+            available_metrics=[
+                "cost",
+                "currency",
+                "cost_basis",
+                "workload_type",
+                "project",
+                "app",
+            ],
             notes=billing_note,
         )
     )
 
     try:
-        external = llm_cost.external_model_spend(w, warehouse, days)
+        external = llm_cost.external_model_spend(w, warehouse, days, workspace_id)
         normalized_external = llm_cost.normalize_cost_rows(
             external,
             "system.ai_gateway.external_model_spend",
@@ -364,7 +375,14 @@ def cmd_llm_cost_rollup(args) -> int:
                 window_end.isoformat() if external_status != "unavailable" else None
             ),
             row_count=len(external),
-            available_metrics=["cost", "currency", "cost_basis"],
+            available_metrics=[
+                "cost",
+                "currency",
+                "cost_basis",
+                "workload_type",
+                "project",
+                "app",
+            ],
             notes=external_note,
         )
     )
@@ -431,7 +449,9 @@ def cmd_llm_cost_rollup(args) -> int:
     )
 
     try:
-        request_rows = llm_cost.gateway_usage(w, warehouse, min(days, 90))
+        request_rows = llm_cost.gateway_usage(
+            w, warehouse, min(days, 90), workspace_id
+        )
         usage = llm_cost.normalize_usage_rows(
             request_rows,
             "system.ai_gateway.usage",
@@ -467,10 +487,15 @@ def cmd_llm_cost_rollup(args) -> int:
             "errors",
             "retries",
             "p95_latency_ms",
+            "workload_type",
+            "project",
+            "app",
         ]
     except Exception as gateway_error:  # noqa: BLE001 - feature detection
         try:
-            request_rows = llm_cost.endpoint_usage(w, warehouse, min(days, 90))
+            request_rows = llm_cost.endpoint_usage(
+                w, warehouse, min(days, 90), workspace_id
+            )
             usage = llm_cost.normalize_usage_rows(
                 request_rows,
                 "system.serving.endpoint_usage",
@@ -2371,7 +2396,11 @@ def build_parser() -> argparse.ArgumentParser:
     x.set_defaults(func=cmd_azure_cost_pull)
     x = pa.add_parser("report", parents=[common], help="Azure spend from the ingested bill")
     x.add_argument("--days", type=int, default=None)
-    x.add_argument("--by", choices=["bucket", "service", "resource-group"], default="bucket")
+    x.add_argument(
+        "--by",
+        choices=["bucket", "service", "resource-group", "resource", "meter"],
+        default="bucket",
+    )
     x.set_defaults(func=cmd_azure_cost_report)
     x = pa.add_parser(
         "spikes",

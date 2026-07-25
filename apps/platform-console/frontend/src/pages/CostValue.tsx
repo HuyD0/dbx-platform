@@ -475,23 +475,51 @@ function DatabricksDrivers({ data }: { data: CostOverview }) {
 
 function OwnershipExplorer({ data }: { data: CostOverview }) {
   const [dimension, setDimension] = useState("team");
+  const [azureDimension, setAzureDimension] = useState("service");
   const dimensions = [
     { id: "team", label: "Team" },
     { id: "project", label: "Project" },
     { id: "workspace", label: "Workspace" },
   ];
+  const azureDimensions = [
+    { id: "service", label: "Service" },
+    { id: "resource-group", label: "Resource group" },
+    { id: "resource", label: "Resource" },
+    { id: "meter", label: "Meter" },
+  ];
   return (
     <div className="space-y-4">
       <Card>
         <SectionTitle
-          title="Azure ownership allocation"
-          subtitle="Resource group is the current bill-of-record fallback"
+          title="Azure actual cost"
+          subtitle="Exact Cost Management actuals by service, resource group, resource, or meter"
         />
-        <DataTable
-          rows={data.ownership}
-          columns={["owner", "cost", "currency", "share_pct", "cost_basis"]}
-          caption="Azure actual cost by owner"
-          exportName="azure-cost-by-owner"
+        <div
+          className="mb-3 flex flex-wrap items-center gap-1"
+          role="group"
+          aria-label="Azure cost dimension"
+        >
+          {azureDimensions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setAzureDimension(option.id)}
+              aria-pressed={azureDimension === option.id}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                azureDimension === option.id
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <FindingsSection
+          title={`Azure billed actuals by ${azureDimension}`}
+          path="/api/cost/azure"
+          params={{ by: azureDimension, days: data.period.days }}
+          emptyMessage="No Azure billing rows are available in this window."
         />
       </Card>
       <Card>

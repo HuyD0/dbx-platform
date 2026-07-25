@@ -3,6 +3,7 @@
 SELECT
   u.usage_date                                                   AS usage_date,
   u.workspace_id                                                 AS workspace_id,
+  COALESCE(u.billing_origin_product, 'unallocated')               AS workload_type,
   CASE
     WHEN u.billing_origin_product = 'GENIE' THEN 'databricks'
     WHEN UPPER(u.sku_name) LIKE '%ANTHROPIC%' THEN 'anthropic'
@@ -15,12 +16,16 @@ SELECT
   END                                                            AS model,
   COALESCE(u.usage_metadata.endpoint_name, 'unallocated')         AS endpoint,
   COALESCE(u.identity_metadata.run_as, 'unallocated')             AS principal,
-  COALESCE(u.custom_tags['team'], 'unallocated')                  AS team,
+  COALESCE(NULLIF(TRIM(u.custom_tags['project']), ''),
+           'unallocated')                                        AS project,
   COALESCE(
-    u.custom_tags['use_case'],
-    u.custom_tags['project'],
+    NULLIF(TRIM(u.custom_tags['app']), ''),
+    NULLIF(TRIM(u.custom_tags['application']), ''),
     'unallocated'
-  )                                                              AS use_case,
+  )                                                              AS app,
+  COALESCE(u.custom_tags['team'], 'unallocated')                  AS team,
+  COALESCE(NULLIF(TRIM(u.custom_tags['use_case']), ''),
+           'unallocated')                                        AS use_case,
   ROUND(SUM(u.usage_quantity * COALESCE(
     p.pricing.effective_list.default,
     p.pricing.default
@@ -35,7 +40,10 @@ LEFT JOIN system.billing.list_prices p
 WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
   AND u.workspace_id = :workspace_id
   AND (
-    u.billing_origin_product = 'MODEL_SERVING'
+    u.billing_origin_product IN (
+      'MODEL_SERVING', 'VECTOR_SEARCH', 'ONLINE_TABLES',
+      'AGENT_EVALUATION', 'FOUNDATION_MODEL_TRAINING'
+    )
     OR u.billing_origin_product = 'GENIE'
     OR u.sku_name LIKE '%INFERENCE%'
     OR u.sku_name LIKE '%SERVING%'
@@ -43,10 +51,13 @@ WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
 GROUP BY
   u.usage_date,
   u.workspace_id,
+  workload_type,
   provider,
   model,
   endpoint,
   principal,
+  project,
+  app,
   team,
   use_case
 ORDER BY usage_date, cost DESC

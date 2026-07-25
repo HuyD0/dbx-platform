@@ -9,6 +9,7 @@ from dbx_platform.llm_cost import (
     breakdown,
     coverage_record,
     create_ledger_table_statements,
+    databricks_cost,
     efficiency,
     evaluate_budgets,
     mark_source_stale,
@@ -16,6 +17,7 @@ from dbx_platform.llm_cost import (
     merge_cost_rows_sql,
     merge_source_health_sql,
     merge_usage_rows_sql,
+    migrate_ledger_with_spark,
     normalize_cost_rows,
     normalize_usage_rows,
     read_llm_cost_daily,
@@ -33,10 +35,13 @@ def _cost(**overrides):
     base = {
         "usage_date": "2026-07-01",
         "workspace_id": "w1",
+        "workload_type": "MODEL_SERVING",
         "provider": "anthropic",
         "model": "claude-opus",
         "endpoint": "chat",
         "principal": "person@example.com",
+        "project": "agent-eval",
+        "app": "agent-eval",
         "team": "platform",
         "use_case": "assistant",
         "cost": 12.5,
@@ -49,10 +54,13 @@ def _usage(**overrides):
     base = {
         "usage_date": "2026-07-01",
         "workspace_id": "w1",
+        "workload_type": "MODEL_SERVING",
         "provider": "anthropic",
         "model": "claude-opus",
         "endpoint": "chat",
         "principal": "person@example.com",
+        "project": "agent-eval",
+        "app": "agent-eval",
         "team": "platform",
         "use_case": "assistant",
         "requests": 10,
@@ -75,7 +83,7 @@ def test_live_llm_sources_bind_the_current_workspace(monkeypatch):
 
     calls = []
 
-    def read(_workspace, sql, warehouse_id, parameters):
+    def read(_workspace, sql, warehouse_id, parameters, **_kwargs):
         calls.append((sql, warehouse_id, parameters))
         return []
 
@@ -113,7 +121,7 @@ def test_live_llm_sources_honor_an_explicit_workspace_scope(monkeypatch):
     monkeypatch.setattr(
         llm_cost,
         "run_query",
-        lambda _workspace, _sql, _warehouse, parameters: (
+        lambda _workspace, _sql, _warehouse, parameters, **_kwargs: (
             seen_parameters.append(parameters) or []
         ),
     )
@@ -208,6 +216,29 @@ def test_normalize_cost_rejects_unknown_basis():
         normalize_cost_rows([_cost()], "billing", "MIXED_TOTAL")
 
 
+def test_databricks_ai_cost_is_workspace_scoped_and_includes_agent_evaluation(
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setattr(
+        "dbx_platform.llm_cost.run_query",
+        lambda _w, sql, _warehouse, params=None, **kwargs: (
+            calls.append((sql, params, kwargs)) or []
+        ),
+    )
+
+    databricks_cost(object(), "warehouse", 30, "w1")
+
+    sql, params, kwargs = calls[0]
+    assert "u.workspace_id = :workspace_id" in sql
+    assert "'AGENT_EVALUATION'" in sql
+    assert "AS workload_type" in sql
+    assert "custom_tags['project']" in sql
+    assert "custom_tags['app']" in sql
+    assert params == {"days": 29, "workspace_id": "w1"}
+    assert kwargs["row_limit"] == 100_000
+
+
 def test_normalize_usage_preserves_unavailable_preview_metrics():
     row = _usage()
     row.pop("cached_tokens")
@@ -226,22 +257,36 @@ def test_normalize_usage_does_not_invent_success_or_error_metrics():
     assert normalized["errors"] is None
 
 
-def test_normalization_forces_current_deployment_scope():
+def test_normalization_preserves_exact_workspace_and_rejects_mismatch():
     cost = normalize_cost_rows(
-        [_cost(workspace_id="stale", environment="old")],
+        [_cost(environment="old")],
         "billing",
         "DATABRICKS_LIST",
-        workspace_id="w-current",
+        workspace_id="w1",
         environment="prod",
     )[0]
     usage = normalize_usage_rows(
-        [_usage(workspace_id="stale", environment="old")],
+        [_usage(environment="old")],
         "usage",
-        workspace_id="w-current",
+        workspace_id="w1",
         environment="prod",
     )[0]
-    assert (cost["workspace_id"], cost["environment"]) == ("w-current", "prod")
-    assert (usage["workspace_id"], usage["environment"]) == ("w-current", "prod")
+    assert (cost["workspace_id"], cost["environment"]) == ("w1", "prod")
+    assert (usage["workspace_id"], usage["environment"]) == ("w1", "prod")
+
+    with pytest.raises(ValueError, match="exact requested workspace"):
+        normalize_cost_rows(
+            [_cost(workspace_id="other")],
+            "billing",
+            "DATABRICKS_LIST",
+            workspace_id="w1",
+        )
+    with pytest.raises(ValueError, match="exact requested workspace"):
+        normalize_usage_rows(
+            [_usage(workspace_id="other")],
+            "usage",
+            workspace_id="w1",
+        )
 
 
 def test_summary_does_not_mix_financial_bases():
@@ -266,6 +311,24 @@ def test_summary_single_basis_calculates_unit_economics():
     assert result["cost_per_request"] == 3.0
     assert result["cost_per_million_tokens"] == 12000.0
     assert result["forecast"]["method"] == "month-to-date run rate"
+
+
+def test_summary_includes_agent_evaluation_but_excludes_it_from_unit_economics():
+    costs = normalize_cost_rows(
+        [
+            _cost(cost=12),
+            _cost(workload_type="AGENT_EVALUATION", model="AGENT_EVAL", cost=8),
+        ],
+        "billing",
+        "DATABRICKS_LIST",
+    )
+    usage = normalize_usage_rows([_usage(requests=4)], "usage")
+
+    result = summarize(costs, usage, 30, today=date(2026, 7, 15))
+
+    assert result["totals"][0]["cost"] == 20
+    assert result["cost_per_request"] == 3
+    assert result["unit_economics_scope"] == "MODEL_SERVING"
 
 
 def test_summary_mtd_excludes_prior_month_cost_and_usage():
@@ -339,7 +402,7 @@ def test_tokenomics_lens_keeps_unit_costs_separate_and_flags_context_tax():
         ("DATABRICKS_LIST", 666.67),
     ]
     assert result["scope"]["description"] == (
-        "Workspace-level LLM ledger coverage, not only platform-console app traffic"
+        "Workspace-level model-serving ledger coverage, not only platform-console app traffic"
     )
     assert result["scope"]["cost_sources"] == ["azure_cost_details", "system.billing.usage"]
     assert result["scope"]["usage_sources"] == ["gateway"]
@@ -371,6 +434,17 @@ def test_breakdown_masks_requester_identity():
 def test_breakdown_dimension_is_allowlisted():
     with pytest.raises(ValueError, match="dimension must be"):
         breakdown([], [], "cost; DROP TABLE x")
+
+
+@pytest.mark.parametrize("dimension", ["workload_type", "project", "app"])
+def test_breakdown_supports_ai_attribution_dimensions(dimension):
+    rows = breakdown(
+        normalize_cost_rows([_cost()], "billing", "DATABRICKS_LIST"),
+        normalize_usage_rows([_usage()], "usage"),
+        dimension,
+    )
+
+    assert rows[0]["key"] == _cost()[dimension]
 
 
 def test_efficiency_finds_retry_cache_and_attribution_issues():
@@ -457,6 +531,48 @@ def test_ledger_ddl_creates_cost_usage_budget_and_source_health_tables():
     assert " DEFAULT " not in sql
     assert "coverage_start DATE" in sql
     assert "last_success_at TIMESTAMP" in sql
+    assert "workload_type STRING" in sql
+    assert "project STRING" in sql
+    assert "app STRING" in sql
+
+
+def test_ledger_migration_adds_only_missing_attribution_columns():
+    class Row:
+        def __init__(self, name):
+            self.name = name
+
+        def asDict(self, recursive=True):  # noqa: N802 - Spark API shape
+            del recursive
+            return {"col_name": self.name}
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def collect(self):
+            return self.rows
+
+    class Spark:
+        def __init__(self):
+            self.calls = []
+
+        def sql(self, sql):
+            self.calls.append(sql)
+            if sql.startswith("DESCRIBE TABLE"):
+                return Result([Row("workspace_id"), Row("workload_type")])
+            return Result([])
+
+    spark = Spark()
+    completed = migrate_ledger_with_spark(spark, "main", "dbx_platform")
+
+    alters = [sql for sql in spark.calls if sql.startswith("ALTER TABLE")]
+    assert len(alters) == 2
+    assert all("`project` STRING" in sql and "`app` STRING" in sql for sql in alters)
+    assert all("`workload_type` STRING" not in sql for sql in alters)
+    assert completed == [
+        "migrated table main.dbx_platform.llm_cost_daily",
+        "migrated table main.dbx_platform.llm_usage_hourly",
+    ]
 
 
 def test_persisted_ledger_reads_are_exactly_workspace_scoped(monkeypatch):
@@ -673,7 +789,6 @@ def test_store_ledger_rejects_undeclared_workspace_without_writing(monkeypatch):
         "system.billing.usage",
         "DATABRICKS_LIST",
         environment="prod",
-        workspace_id="w2",
     )
     with pytest.raises(ValueError, match="undeclared reconciliation scopes"):
         store_ledger(
@@ -687,7 +802,7 @@ def test_store_ledger_rejects_undeclared_workspace_without_writing(monkeypatch):
             window_end="2026-07-17",
             cost_scopes=[
                 {
-                    "workspace_id": "w1",
+                    "workspace_id": "w2",
                     "environment": "prod",
                     "source": "system.billing.usage",
                     "cost_basis": "DATABRICKS_LIST",

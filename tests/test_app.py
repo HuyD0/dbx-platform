@@ -226,6 +226,12 @@ def test_cost_routes_are_registered(client):
     }.issubset(paths)
 
 
+def test_cost_breakdown_dimensions_are_request_validated(client):
+    assert client.get("/api/llm-cost/breakdown?dimension=project").status_code != 422
+    assert client.get("/api/llm-cost/breakdown?dimension=not-a-dimension").status_code == 422
+    assert client.get("/api/cost/azure?by=not-a-dimension").status_code == 422
+
+
 def _iter_routes(container):
     """Walk app routes, unwrapping FastAPI's included-router containers."""
     for route in getattr(container, "routes", []):
@@ -788,8 +794,8 @@ def test_azure_cost_passes_validated_by_dimension(client, monkeypatch):
     from backend.routers import cost as cost_router
 
     monkeypatch.setattr(cost_router.azure_cost, "report", fake_report)
-    body = client.get("/api/cost/azure?by=bucket").json()
-    assert captured["by"] == "bucket"
+    body = client.get("/api/cost/azure?by=resource").json()
+    assert captured["by"] == "resource"
     assert captured["workspace_id"]
     assert captured["environment"]
     assert body["data"][0]["service_bucket"] == "foundry_ai"
@@ -831,9 +837,8 @@ def test_cost_reconciliation_is_workspace_scoped(client, monkeypatch):
 
 
 def test_azure_cost_rejects_unknown_dimension(client):
-    response = client.get("/api/cost/azure?by=meter")
-    assert response.status_code == 400
-    assert response.json()["error"] == "bad_request"
+    response = client.get("/api/cost/azure?by=bucket")
+    assert response.status_code == 422
 
 
 def test_ai_governance_catalog_serves_persisted_inventory(client, monkeypatch):
