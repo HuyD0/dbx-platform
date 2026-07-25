@@ -43,17 +43,19 @@ and grant matrix.
 The console navigation is organized around decisions rather than source
 systems:
 
-1. **Mission Control** — scope, source health, cost/security/risk/performance
-   outcomes, pending approvals, what changed, and the top decisions.
-2. **Action Center** — recommendations, awaiting approval, activity, failures,
-   and rollback outcomes.
-3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, unit
-   economics, and the native LakeMeter Estimator.
+1. **Overview** — friendly workspace scope, data connections,
+   cost/security/risk/performance outcomes, pending approvals, and recommended
+   next steps.
+2. **Review & Approve** — recommendations, requests needing a human decision,
+   in-progress execution, verification, and complete history.
+3. **Costs** — source-by-source Databricks list cost, Azure billed actuals,
+   LLM/AI ledgers, budgets, forecasts, the native LakeMeter Estimator, and
+   explicit setup/freshness states.
 4. **Security & Risk** — identity, credentials, grants, ownership, policies,
    egress, and audit anomalies.
 5. **Performance** — job/query regressions, queueing, retry waste,
    utilization, serving latency/errors, and SLO risk.
-6. **Operations** — performance regressions and compute hygiene.
+6. **Resources & Runtime** — performance regressions and compute hygiene.
 7. **Automations** — report schedules, monitors, and playbooks.
 8. **Assistant**, with Settings and Audit available globally.
 

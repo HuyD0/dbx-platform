@@ -52,7 +52,21 @@ def health() -> dict:
         "build": _build_info(),
         "actions_enabled": deps.actions_enabled(),
         "environment": os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev"),
-        "workspace_id": _workspace_id(),
+    }
+
+
+@router.get("/api/context")
+def context(request: Request) -> dict:
+    """Authenticated, non-secret deployment and viewer context for the SPA."""
+
+    actor = deps.require_verified_user(request)
+    workspace_id, environment = deps.control_plane_scope()
+    return {
+        "workspace_name": deps.workspace_display_name(),
+        "workspace_id": workspace_id,
+        "environment": environment,
+        "roles": sorted(actor.roles),
+        "actions_enabled": deps.actions_enabled(),
     }
 
 

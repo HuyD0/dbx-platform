@@ -61,11 +61,15 @@ def _platform_jobs() -> list[dict]:
         and str(resource.get("ownership") or "").upper() == "BUNDLE"
         and not _as_bool(resource.get("protected"))
     }
-    # Manual stateful Jobs (for example forecast training) may still be planned
-    # through Action Center. Their exact
+    # Stateful Jobs may still be planned through Review & Approve. Their exact
     # bundle resource IDs are injected into the app; no name-based discovery
     # or broad workspace scan can add a runnable target.
     owned_ids.update(_governed_job_ids())
+    azure_cost_job = deps.azure_cost_job_id()
+    if azure_cost_job:
+        # The app resource binding is an exact deployment-owned capability.
+        # It may be planned even before the runtime inventory's first refresh.
+        owned_ids.add(azure_cost_job)
     out = []
     for j in deps.get_ws().jobs.list():
         settings = j.settings
@@ -161,6 +165,6 @@ def run_now(job_id: int) -> JSONResponse:
         content=payload(
             "approval_required",
             "Manual job runs require an approved immutable action request.",
-            "Create action type 'run-job' with this job_id in Action Center.",
+            "Create action type 'run-job' with this job ID in Review & Approve.",
         ),
     )

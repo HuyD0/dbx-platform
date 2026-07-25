@@ -1,13 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  BadgeCheck,
+  CheckCircle2,
   CircleDotDashed,
-  FileSearch,
   Fingerprint,
-  History,
-  Play,
   ShieldCheck,
-  UserCheck,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { PlanActionButton } from "../components/ActionPlanDialog";
@@ -27,14 +23,30 @@ import {
   statusTone,
 } from "../components/ui";
 import { apiGet, isUnavailable } from "../lib/api";
-import type { ActionRequest, ActionStatus, Envelope, Row } from "../lib/types";
+import type { ActionRequest, ActionStatus, Envelope } from "../lib/types";
 
 const TABS = [
+  { id: "needs_review", label: "Needs your review" },
   { id: "recommendations", label: "Recommendations" },
-  { id: "approval", label: "Awaiting approval" },
-  { id: "activity", label: "Activity" },
-  { id: "failed", label: "Failed / rolled back" },
+  { id: "in_progress", label: "In progress" },
+  { id: "history", label: "History" },
 ];
+
+const ACTION_LABELS: Record<string, string> = {
+  "stale-clusters": "Clean up stale clusters",
+  "orphaned-jobs": "Pause orphaned job schedules",
+  "token-revoke": "Revoke old access tokens",
+  "policy-sync": "Synchronize cluster policies",
+  "run-job": "Run a governed platform job",
+  "configure-budget": "Change a cost budget",
+  "runtime.hibernate": "Hibernate platform resources",
+  "runtime.wake": "Wake platform resources",
+};
+
+function actionLabel(value: unknown): string {
+  const key = String(value ?? "");
+  return ACTION_LABELS[key] ?? key.replaceAll("-", " ").replaceAll("_", " ");
+}
 
 const LEGACY_ACTIONS = [
   {
@@ -62,36 +74,6 @@ const LEGACY_ACTIONS = [
     risk: "medium",
   },
 ];
-
-const ACTION_LIFECYCLE = [
-  {
-    label: "Evidence",
-    description: "Canonical finding and current state",
-    icon: FileSearch,
-  },
-  {
-    label: "Immutable plan",
-    description: "Exact targets, hash, TTL and rollback",
-    icon: Fingerprint,
-  },
-  {
-    label: "Human approval",
-    description: "Current membership and explicit confirmation",
-    icon: UserCheck,
-  },
-  {
-    label: "Execution",
-    description: "Dedicated least-privileged executor",
-    icon: Play,
-    tone: "process",
-  },
-  {
-    label: "Verification",
-    description: "Revalidated outcome and append-only events",
-    icon: BadgeCheck,
-    tone: "complete",
-  },
-] as const;
 
 function rowsFromEnvelope(
   envelope: Envelope<ActionRequest[] | { items?: ActionRequest[] }>,
@@ -130,33 +112,30 @@ function canApprove(row: ActionRequest): boolean {
 
 function matchesTab(row: ActionRequest, tab: string): boolean {
   const status = effectiveStatus(row);
-  const awaitingApproval = status === "AWAITING_APPROVAL";
-  const failed = ["FAILED", "ROLLED_BACK", "REJECTED", "EXPIRED", "STALE"].includes(status);
-
   if (tab === "recommendations") return false;
-  if (tab === "approval") return awaitingApproval;
-  if (tab === "failed") return failed;
-  return !awaitingApproval && !failed;
+  if (tab === "needs_review") return status === "AWAITING_APPROVAL";
+  if (tab === "in_progress") {
+    return ["APPROVED", "EXECUTING", "VERIFYING"].includes(status);
+  }
+  return !["AWAITING_APPROVAL", "APPROVED", "EXECUTING", "VERIFYING"].includes(status);
 }
 
-/** Adapt strict action records only at the generic legacy table boundary. */
-function actionTableRows(actions: ActionRequest[]): Row[] {
+function actionTableRows(actions: ActionRequest[]) {
   return actions.map((action) => ({
-    action_id: action.action_id,
-    action_type: action.action_type,
-    effective_status: effectiveStatus(action),
+    request: actionLabel(action.action_type),
+    state: effectiveStatus(action).replaceAll("_", " ").toLowerCase(),
     can_approve: canApprove(action),
     risk: action.risk,
-    target_count: action.target_count ?? action.targets.length,
-    proposer_email: action.proposer_email,
+    affected_resources: action.target_count ?? action.targets.length,
+    requested_by: action.proposer_email,
     created_at: action.created_at,
     expires_at: action.expires_at,
-    plan_hash: action.plan_hash,
+    _action_id: action.action_id,
   }));
 }
 
 export function ActionCenter() {
-  const [tab, setTab] = useState("recommendations");
+  const [tab, setTab] = useState("needs_review");
   const [reviewId, setReviewId] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["action-requests"],
@@ -181,9 +160,9 @@ export function ActionCenter() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Governed operations"
-        title="Action Center"
-        description="One place to review evidence, approve an immutable plan, and verify what actually changed."
+        eyebrow="Governed changes"
+        title="Review & Approve"
+        description="Review recommended changes, approve one exact plan, and confirm the outcome. Nothing runs automatically."
         actions={
           query.data ? (
             <AsOf
@@ -196,75 +175,59 @@ export function ActionCenter() {
         }
       />
 
-      <Card>
-        <SectionTitle
-          title="Governed action lifecycle"
-          subtitle="Every mutation follows the same fail-closed sequence."
-          right={<Badge tone="info">Required control path</Badge>}
-        />
-        <ol className="blueprint-process" aria-label="Governed action lifecycle">
-          {ACTION_LIFECYCLE.map((step, index) => {
-            const Icon = step.icon;
-            const tone = "tone" in step ? step.tone : undefined;
-            return (
-              <li
-                key={step.label}
-                className="blueprint-process-step"
-                data-tone={tone}
-              >
-                <span className="blueprint-process-node" aria-hidden="true">
-                  <span>{index + 1}</span>
-                </span>
-                <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                  <span className="text-xs font-semibold text-ink">{step.label}</span>
-                </div>
-                <p className="mt-1 text-[11px] leading-4 text-muted">{step.description}</p>
-              </li>
-            );
-          })}
-        </ol>
-      </Card>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <div className="flex items-center gap-2">
             <CircleDotDashed className="h-4 w-4 text-status-warning" />
-            <span className="text-xs text-muted">Awaiting approval</span>
+            <span className="text-xs font-medium text-muted">1 · Review</span>
           </div>
-          <div className="mt-2 text-2xl font-semibold text-ink">
-            {rows.filter((row) => matchesTab(row, "approval")).length || "—"}
-          </div>
+          <p className="mt-2 text-sm font-medium text-ink">
+            {rows.filter((row) => matchesTab(row, "needs_review")).length} waiting for you
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            Understand the evidence, exact targets, impact and risk.
+          </p>
         </Card>
         <Card>
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-status-good" />
-            <span className="text-xs text-muted">Control</span>
+            <ShieldCheck className="h-4 w-4 text-status-warning" />
+            <span className="text-xs font-medium text-muted">2 · Approve</span>
           </div>
-          <p className="mt-2 text-sm font-medium text-ink">One human, exact plan</p>
-          <p className="mt-1 text-[11px] text-muted">15-minute TTL · single use · revalidated</p>
+          <p className="mt-2 text-sm font-medium text-ink">Authorize one exact plan</p>
+          <p className="mt-1 text-[11px] text-muted">
+            Plans expire after 15 minutes, are single-use and are rechecked.
+          </p>
         </Card>
         <Card>
           <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-accent" />
-            <span className="text-xs text-muted">Audit trail</span>
+            <CheckCircle2 className="h-4 w-4 text-status-good" />
+            <span className="text-xs font-medium text-muted">3 · Verify</span>
           </div>
-          <p className="mt-2 text-sm font-medium text-ink">Append-only outcomes</p>
-          <p className="mt-1 text-[11px] text-muted">Plan → approval → execution → verification</p>
+          <p className="mt-2 text-sm font-medium text-ink">Confirm what changed</p>
+          <p className="mt-1 text-[11px] text-muted">
+            Execution and verification are recorded in an append-only history.
+          </p>
         </Card>
       </div>
 
-      <Tabs tabs={tabs} active={tab} onChange={setTab} label="Action Center views" />
+      <Tabs tabs={tabs} active={tab} onChange={setTab} label="Review and approve views" />
 
       <Card>
         <SectionTitle
           title={TABS.find((item) => item.id === tab)?.label ?? "Actions"}
-          subtitle="AI prose cannot alter the server-generated targets, impact, rollback or verification."
+          subtitle={
+            tab === "needs_review"
+              ? "Open a request to review its exact targets and decide whether it should run."
+              : "Every request keeps its complete plan, decision and outcome history."
+          }
           right={
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted">
-              <Fingerprint className="h-3.5 w-3.5" />
-              SHA-256 plan binding
-            </span>
+            <details className="text-[11px] text-muted">
+              <summary className="cursor-pointer">Technical safeguards</summary>
+              <span className="mt-1 inline-flex items-center gap-1">
+                <Fingerprint className="h-3.5 w-3.5" />
+                SHA-256 plan binding
+              </span>
+            </details>
           }
         />
         {query.isPending ? (
@@ -279,7 +242,7 @@ export function ActionCenter() {
         ) : filtered.length === 0 ? (
           <EmptyState
             message={
-              tab === "approval"
+              tab === "needs_review"
                 ? "No plan is waiting for approval."
                 : `No ${TABS.find((item) => item.id === tab)?.label.toLowerCase()} to show.`
             }
@@ -290,27 +253,24 @@ export function ActionCenter() {
             exportName={`action-center-${tab}`}
             caption={`${tab} action requests`}
             columns={[
-              "action_type",
-              "effective_status",
-              "can_approve",
+              "request",
+              "state",
               "risk",
-              "target_count",
-              "proposer_email",
+              "affected_resources",
+              "requested_by",
               "created_at",
               "expires_at",
-              "plan_hash",
             ]}
             rowAction={(row) => {
-              const id = typeof row.action_id === "string" ? row.action_id : "";
-              const readyForApproval =
-                row.can_approve === true && row.effective_status === "AWAITING_APPROVAL";
+              const id = typeof row._action_id === "string" ? row._action_id : "";
+              const readyForApproval = row.can_approve === true;
               return (
                 <button
                   type="button"
                   disabled={!id}
                   onClick={() => setReviewId(id)}
                   aria-label={`${readyForApproval ? "Review approval" : "Review action"} ${String(
-                    row.action_type ?? id,
+                    row.request ?? id,
                   )}`}
                   className="min-h-8 rounded-lg border border-grid px-2.5 py-1 text-xs font-medium text-ink hover:bg-hairline disabled:opacity-40"
                 >
@@ -326,10 +286,10 @@ export function ActionCenter() {
         <section aria-labelledby="available-plans-title">
           <div className="mb-3">
             <h2 id="available-plans-title" className="text-sm font-semibold text-ink">
-              Available deterministic planners
+              Create a plan
             </h2>
             <p className="mt-0.5 text-xs text-muted">
-              Planning is read-only. Approval remains disabled when the executor is not configured.
+              Creating a plan only prepares exact targets for review. It never executes a change.
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">

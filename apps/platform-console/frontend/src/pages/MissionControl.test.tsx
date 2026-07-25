@@ -277,10 +277,10 @@ test("renders the approval queue first and opens an accessible evidence sheet", 
   const rendered = renderMission({ onAskDecision });
 
   expect(
-    await screen.findByRole("heading", { name: "Decisions requiring you." }),
+    await screen.findByRole("heading", { name: "Overview" }),
   ).toBeInTheDocument();
-  const queueHeading = screen.getByRole("heading", { name: "Approval queue" });
-  const postureHeading = screen.getByRole("heading", { name: "Operational posture" });
+  const queueHeading = screen.getByRole("heading", { name: "Recommended next steps" });
+  const postureHeading = screen.getByRole("heading", { name: "Outcomes by domain" });
   expect(
     queueHeading.compareDocumentPosition(postureHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
@@ -425,7 +425,7 @@ test("manual refresh bypasses the Mission Control cache", async () => {
   const user = userEvent.setup();
   renderMission();
 
-  await screen.findByRole("heading", { name: "Decisions requiring you." });
+  await screen.findByRole("heading", { name: "Overview" });
   await user.click(screen.getByRole("button", { name: "Refresh" }));
   expect(screen.getByText("Refreshing data.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
@@ -528,7 +528,7 @@ test("uses cautious language for a degraded zero state", async () => {
   const rendered = renderMission();
 
   expect(
-    await screen.findByRole("heading", { name: "No open findings recorded." }),
+    await screen.findByRole("heading", { name: "Overview" }),
   ).toBeInTheDocument();
   expect(screen.getByText("No approval request is waiting.")).toBeInTheDocument();
   expect(screen.getByText(/not that every possible check passed/i)).toBeInTheDocument();
@@ -582,7 +582,7 @@ test("does not tell operators to restore coverage when every reported source is 
   vi.stubGlobal("fetch", vi.fn(async () => response(completeZero)));
   renderMission();
 
-  await screen.findByRole("heading", { name: "No open findings recorded." });
+  await screen.findByRole("heading", { name: "Overview" });
   expect(screen.getByText(/wait for the next normalized collection/i)).toBeInTheDocument();
   expect(screen.queryByText(/restore incomplete source coverage/i)).not.toBeInTheDocument();
 });
@@ -618,7 +618,7 @@ test("keeps ranked findings in a separate compatibility path", async () => {
   renderMission();
 
   expect(
-    await screen.findByRole("heading", { name: "Open evidence needs review." }),
+    await screen.findByRole("heading", { name: "Overview" }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { name: "Synchronize managed policies" }),
@@ -633,7 +633,7 @@ test("renders loading and fail-closed error states", async () => {
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
   const loading = renderMission();
   expect(
-    screen.getByRole("heading", { name: "Loading decision records…" }),
+    screen.getByRole("heading", { name: "Loading overview…" }),
   ).toBeInTheDocument();
   loading.unmount();
 
@@ -651,7 +651,7 @@ test("renders loading and fail-closed error states", async () => {
   );
   renderMission();
   expect(
-    await screen.findByRole("heading", { name: "Decision records are unavailable." }),
+    await screen.findByRole("heading", { name: "Overview is unavailable." }),
   ).toBeInTheDocument();
   expect(screen.getByText("Decision storage cannot be read.")).toBeInTheDocument();
 });
@@ -704,7 +704,7 @@ test("excludes expired plans from approval work and reports them cautiously", as
   const rendered = renderMission();
 
   expect(
-    await screen.findByRole("heading", { name: "No open findings recorded." }),
+    await screen.findByRole("heading", { name: "Overview" }),
   ).toBeInTheDocument();
   expect(
     screen.queryByRole("button", {

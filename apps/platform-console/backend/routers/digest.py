@@ -50,6 +50,6 @@ def generate() -> JSONResponse:
         content=payload(
             "approval_required",
             "Manual digest generation requires an approved job action.",
-            "Plan the bundle-owned digest job through Action Center.",
+            "Plan the bundle-owned digest job through Review & Approve.",
         ),
     )

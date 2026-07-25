@@ -40,6 +40,13 @@ artifacts:
     build: uv run python -m build --wheel
 
 variables:
+  workspace_display_name:
+    description: >
+      Human-readable name shown in the Platform Console and dashboard workspace
+      lookups. Production deployments must set
+      BUNDLE_VAR_workspace_display_name; numeric workspace IDs remain available
+      only as technical identifiers.
+
   platform_console_name:
     description: >
       Stable Databricks App resource name used across bundle targets and
@@ -161,6 +168,8 @@ targets:
   dev:
     default: true
     mode: development
+    variables:
+      workspace_display_name: "Local development workspace"
     resources:
       jobs:
         llm_cost_rollup:

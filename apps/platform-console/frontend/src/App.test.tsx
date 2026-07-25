@@ -57,6 +57,18 @@ test("Cost Planner uses one header assistant action instead of the floating laun
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
+      if (String(input).startsWith("/api/context")) {
+        return new Response(
+          JSON.stringify({
+            workspace_name: "Production analytics",
+            workspace_id: "7405609799238491",
+            environment: "prod",
+            roles: ["viewer"],
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({ error: "dependency_unavailable", message: "Unavailable." }),
         { status: 503, headers: { "Content-Type": "application/json" } },
@@ -138,6 +150,18 @@ test("skip link and mobile drawer are keyboard complete", async () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
+      if (String(input).startsWith("/api/context")) {
+        return new Response(
+          JSON.stringify({
+            workspace_name: "Finance Analytics",
+            workspace_id: "123456789",
+            environment: "dev",
+            roles: ["viewer"],
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           error: "dependency_unavailable",
@@ -149,6 +173,8 @@ test("skip link and mobile drawer are keyboard complete", async () => {
   );
   renderApp();
 
+  expect(await screen.findByText("Finance Analytics")).toBeInTheDocument();
+  expect(screen.getByText(/ID 123456789/)).toBeInTheDocument();
   await user.click(screen.getByRole("link", { name: "Skip to main content" }));
   expect(screen.getByRole("main")).toHaveFocus();
 
@@ -315,7 +341,7 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
   renderApp("/mission-control");
 
   expect(
-    await screen.findByRole("heading", { name: "Operational posture" }),
+    await screen.findByRole("heading", { name: "Outcomes by domain" }),
   ).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Cost" })).toBeInTheDocument();
   expect(
@@ -378,6 +404,18 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
+      if (String(input).startsWith("/api/context")) {
+        return new Response(
+          JSON.stringify({
+            workspace_name: "Production analytics",
+            workspace_id: "7405609799238491",
+            environment: "prod",
+            roles: ["viewer"],
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
         { status: 503, headers: { "Content-Type": "application/json" } },
@@ -388,23 +426,22 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
 
   const nav = screen.getByRole("navigation", { name: "Primary" });
   for (const label of [
-    "Cost Control",
-    "Mission Control",
-    "Command Center",
-    "Cost Explorer",
+    "Overview",
+    "Review & Approve",
+    "Costs",
     "Data Governance",
     "AI Governance",
-    "Risk",
+    "Security & Risk",
     "Operations",
     "Learn",
   ]) {
     expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
   }
-  expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
+  expect(await screen.findByText("Production analytics")).toBeInTheDocument();
+  expect(screen.getByText(/ID 7405609799238491/)).toBeInTheDocument();
 });
 
-test("Command Center and Mission Control remain available beside Cost Control", async () => {
-  const user = userEvent.setup();
+test("legacy overview URL redirects to the task-oriented Overview", async () => {
   const now = new Date();
   const observedAt = now.toISOString();
   const usageDate = observedAt.slice(0, 10);
@@ -516,24 +553,63 @@ test("Command Center and Mission Control remain available beside Cost Control", 
   vi.stubGlobal("fetch", fetchMock);
   renderApp("/overview");
 
-  expect(await screen.findByRole("heading", { name: "Command center" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   const nav = screen.getByRole("navigation", { name: "Primary" });
-  const commandCenter = within(nav).getByRole("link", { name: "Command Center" });
-  const missionControl = within(nav).getByRole("link", { name: "Mission Control" });
-  expect(commandCenter).toHaveAttribute("aria-current", "page");
-  expect(missionControl).not.toHaveAttribute("aria-current");
-  expect(document.title).toBe("Command Center · dbx-platform");
+  const overview = within(nav).getByRole("link", { name: "Overview" });
+  expect(overview).toHaveAttribute("aria-current", "page");
+  expect(document.title).toBe("Overview · dbx-platform");
   expect(
     fetchMock.mock.calls.filter(([input]) =>
       String(input).startsWith("/api/performance/ai-gateway-telemetry"),
     ),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
+});
 
-  await user.click(missionControl);
-  expect(await screen.findByRole("heading", { name: "Operational posture" })).toBeInTheDocument();
-  expect(missionControl).toHaveAttribute("aria-current", "page");
-  expect(commandCenter).not.toHaveAttribute("aria-current");
-  expect(document.title).toBe("Mission Control · dbx-platform");
+test.each([
+  ["/command-center", "Overview", "Overview · dbx-platform"],
+  ["/mission-control", "Overview", "Overview · dbx-platform"],
+  ["/action-center", "Review & Approve", "Review & Approve · dbx-platform"],
+  ["/review-and-approve", "Review & Approve", "Review & Approve · dbx-platform"],
+])("legacy route %s redirects to %s", async (path, linkName, title) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({ status: "ok", version: "test", actions_enabled: false }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/context")) {
+        return new Response(
+          JSON.stringify({
+            workspace_name: "Finance Analytics",
+            workspace_id: "123",
+            environment: "dev",
+            roles: ["viewer"],
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Unavailable in test." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+
+  renderApp(path);
+
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  await waitFor(() =>
+    expect(within(nav).getByRole("link", { name: linkName })).toHaveAttribute(
+      "aria-current",
+      "page",
+    ),
+  );
+  expect(document.title).toBe(title);
 });
 
 test("legacy governance and security URLs land on the split governance pages", async () => {

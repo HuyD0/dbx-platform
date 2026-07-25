@@ -267,6 +267,7 @@ Then wire the bundle variables and deploy:
 export BUNDLE_VAR_azure_subscription_id=ea936670-dda1-4884-8467-49c225bf3e83
 export BUNDLE_VAR_azure_cost_resource_groups=<workspace-rg>,<managed-databricks-rg>,<allocated-ai-rg>
 export BUNDLE_VAR_azure_service_credential=dbx_dev
+export BUNDLE_VAR_workspace_display_name="Finance Analytics"
 databricks bundle deploy -t prod
 ```
 
@@ -280,7 +281,7 @@ The job identity also needs `ACCESS` on the UC service credential, plus the
 `dbx_dev.dbx_platform` schema grants above (the ingest MERGEs into
 `dbx_dev.dbx_platform.azure_costs`).
 
-First-run order (stateful/costly manual runs go through Action Center):
+First-run order (stateful/costly manual runs go through **Review & Approve**):
 
 1. For a historical backfill, make a reviewed temporary bundle change from the
    Job’s 3-day window to 365 days, deploy it, plan/approve the exact changed

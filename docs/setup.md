@@ -85,6 +85,7 @@ supported billing scope. See [secrets.md](secrets.md).
 ```bash
 export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-client-id>
+export BUNDLE_VAR_workspace_display_name="Finance Analytics"
 # actions_enabled defaults to false
 
 uv run ruff check .
@@ -159,6 +160,7 @@ Enable action submission through a reviewed bundle change:
 
 ```bash
 export BUNDLE_VAR_actions_enabled=true
+export BUNDLE_VAR_workspace_display_name="Finance Analytics"
 databricks bundle validate -t prod
 databricks bundle deploy -t prod
 databricks bundle run schema_migrations -t prod

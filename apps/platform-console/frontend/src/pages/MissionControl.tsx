@@ -707,9 +707,9 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
     return (
       <div className="space-y-5">
         <PageHeader
-          eyebrow="AI Mission Control"
-          title="Loading decision records…"
-          description="Reading immutable approvals, current evidence, and source coverage."
+          eyebrow="Mission Control"
+          title="Loading overview…"
+          description="Reading pending decisions, current evidence, and data connections."
         />
         <Card>
           <Skeleton rows={9} />
@@ -722,9 +722,9 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
     return (
       <div className="space-y-5">
         <PageHeader
-          eyebrow="AI Mission Control"
-          title="Decision records are unavailable."
-          description="Mission Control fails closed when evidence or control-plane data cannot be read."
+          eyebrow="Mission Control"
+          title="Overview is unavailable."
+          description="Decision and evidence data could not be read safely."
         />
         <ErrorState error={query.error} />
       </div>
@@ -818,9 +818,9 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="AI Mission Control"
-        title={heading}
-        description={description}
+        eyebrow="Mission Control"
+        title="Overview"
+        description={`${heading} ${description}`}
         actions={
           <AsOf
             asOf={envelope.as_of}
@@ -853,7 +853,7 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 id="decision-queue-title" className="text-base font-semibold text-ink">
-              {activeQueueItems.length > 0 ? "Approval queue" : "Decision work"}
+              Recommended next steps
             </h2>
             <p className="mt-0.5 text-xs text-muted">
               {activeQueueItems.length > 0
@@ -865,7 +865,7 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
             to="/actions"
             className="inline-flex min-h-11 items-center gap-1 px-1 text-xs font-semibold text-accent hover:underline"
           >
-            Open Action Center
+            Review and approve
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </Link>
         </div>
@@ -950,7 +950,7 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 id="operational-posture-title" className="text-sm font-semibold text-ink">
-              Operational posture
+              Outcomes by domain
             </h2>
             <p className="mt-0.5 text-xs text-muted">
               Compact domain counts from the latest stored reporting cycle.
@@ -1005,8 +1005,8 @@ export function MissionControl({ onAskDecision }: MissionControlProps = {}) {
       <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
         <Card className="min-w-0">
           <SectionTitle
-            title="Source reachability"
-            subtitle="Freshness and partial coverage qualify every conclusion"
+            title="Data connections"
+            subtitle="See which sources are current, delayed, or unavailable"
             right={
               <Badge
                 tone={

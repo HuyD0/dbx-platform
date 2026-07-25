@@ -12,6 +12,7 @@ from dbx_platform.dashboards import (
     dependency_health,
     render_template,
     setup_statements,
+    workspace_reference_upsert_sql,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,6 +68,19 @@ def test_setup_statements_cover_all_dashboard_dependencies():
     ):
         assert f"c.s.{obj}" in fq_objects
     assert "CREATE SCHEMA" not in fq_objects
+
+
+def test_workspace_reference_uses_configured_name_for_exact_workspace():
+    sql = workspace_reference_upsert_sql(
+        "main",
+        "dbx_platform",
+        "123",
+        "Finance's workspace",
+    )
+    assert "MERGE INTO main.dbx_platform.workspace_reference" in sql
+    assert "'123' AS workspace_id" in sql
+    assert "'Finance''s workspace' AS workspace_name" in sql
+    assert "WHEN MATCHED THEN UPDATE" in sql
 
 
 def test_direct_setup_is_disabled_without_querying(monkeypatch):
