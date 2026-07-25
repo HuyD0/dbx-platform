@@ -60,6 +60,16 @@ test("mobile context memory isolates the covered chat and restores focus on clos
   expect(screen.getByText("/security")).toBeInTheDocument();
   expect(screen.getByText("1 of 30 filter slots · 0 of 20 selected resources")).toBeInTheDocument();
   expect(screen.getByText("Evidence and proposals only")).toBeInTheDocument();
+  const memoryPanel = screen.getByRole("heading", { name: "Context memory" }).closest("aside");
+  expect(memoryPanel).toHaveClass("border-grid", "bg-surface");
+  expect(screen.getByText("Session memory").closest("div")).toHaveClass(
+    "border-grid",
+    "bg-page",
+  );
+  expect(screen.getByText("Authority boundary").closest("div")).toHaveClass(
+    "border-grid",
+    "bg-tint",
+  );
   expect(screen.getByRole("button", { name: "Close context memory" })).toHaveFocus();
   await user.tab();
   expect(chatSurface).not.toContainElement(document.activeElement as HTMLElement);
