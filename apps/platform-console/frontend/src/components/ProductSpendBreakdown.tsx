@@ -472,12 +472,12 @@ function NodeColumn({
 }) {
   const styles = {
     gold: "border-warning-accent bg-warning-surface",
-    rose: "border-brand-mid/30 bg-tint",
+    rose: "border-series-3/30 bg-tint",
     teal: "border-status-info/30 bg-info-surface",
   };
   const bars = {
     gold: "bg-warning-accent",
-    rose: "bg-brand-mid",
+    rose: "bg-series-3",
     teal: "bg-series-1",
   };
   return (
@@ -620,7 +620,7 @@ function CostAttributionChart({
         className="flex flex-wrap items-start justify-between gap-3"
       >
         <div>
-          <h3 className="text-sm font-semibold text-brand-maroon">
+          <h3 className="text-sm font-semibold text-ink">
             Cross-cloud cost attribution
           </h3>
           <p className="mt-0.5 text-xs text-muted">
@@ -671,7 +671,7 @@ function CostAttributionChart({
               className="rounded-xl border border-grid bg-surface p-3"
             >
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className="text-xs font-semibold text-brand-maroon">
+                <h3 className="text-xs font-semibold text-ink">
                   {partition.currency} attribution flow
                 </h3>
                 <span className="text-xs tabular-nums text-ink-2">
@@ -956,7 +956,7 @@ export function ProductSpendBreakdown({
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-grid bg-warning-surface text-brand-maroon">
+              <thead className="border-b border-grid bg-warning-surface text-ink-2">
                 <tr>
                   {selected.key === "__OTHER__" && (
                     <th className="px-2 py-2 font-medium">Product</th>

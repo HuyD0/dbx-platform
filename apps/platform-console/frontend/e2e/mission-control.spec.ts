@@ -410,6 +410,66 @@ test("responsive theme is reflow-safe and has no serious accessibility violation
   expect(severe).toEqual([]);
 });
 
+test("themes use grey neutrals and accessible brand-red roles without legacy maroon", async ({
+  page,
+}, testInfo) => {
+  const { theme, width } = project(testInfo);
+  test.skip(width !== 1440, "Desktop light and dark projects cover theme tokens.");
+  await openMission(page, testInfo);
+
+  const activeNavigation = page.locator('nav a[aria-current="page"]').first();
+  const primaryAction = page.getByRole("button", { name: "Review exact plan" }).first();
+  await expect(activeNavigation).toBeVisible();
+  await expect(primaryAction).toBeVisible();
+
+  const colors = await page.evaluate(() => {
+    const active = document.querySelector<HTMLElement>('nav a[aria-current="page"]');
+    const action = Array.from(document.querySelectorAll<HTMLElement>("button")).find(
+      (button) => button.innerText.trim() === "Review exact plan",
+    );
+    if (!active || !action) throw new Error("Theme regression targets are unavailable.");
+    const activeStyle = getComputedStyle(active);
+    return {
+      page: getComputedStyle(document.body).backgroundColor,
+      activeBackground: activeStyle.backgroundColor,
+      activeText: activeStyle.color,
+      activeRail: activeStyle.boxShadow,
+      actionBackground: getComputedStyle(action).backgroundColor,
+      legacyMaroonElements: Array.from(document.querySelectorAll<HTMLElement>("*"))
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = getComputedStyle(element);
+          const colorsToCheck = [
+            style.color,
+            style.backgroundColor,
+            style.borderTopColor,
+            style.borderRightColor,
+            style.borderBottomColor,
+            style.borderLeftColor,
+            style.fill,
+            style.stroke,
+          ];
+          return colorsToCheck.some((color) =>
+            ["rgb(36, 11, 21)", "rgb(139, 0, 31)"].includes(color),
+          );
+        })
+        .map((element) => element.outerHTML.slice(0, 160)),
+    };
+  });
+
+  expect(colors.page).toBe(theme === "light" ? "rgb(246, 246, 247)" : "rgb(22, 22, 25)");
+  expect(colors.activeBackground).toBe(
+    theme === "light" ? "rgb(239, 240, 243)" : "rgb(38, 38, 46)",
+  );
+  expect(colors.activeText).toBe(
+    theme === "light" ? "rgb(220, 0, 51)" : "rgb(255, 76, 112)",
+  );
+  expect(colors.activeRail).toContain("rgb(240, 0, 55)");
+  expect(colors.actionBackground).toBe("rgb(237, 0, 55)");
+  expect(colors.legacyMaroonElements).toEqual([]);
+});
+
 test("AI Cost Planner wizard renders and has no serious accessibility violations", async ({
   page,
 }, testInfo) => {

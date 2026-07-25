@@ -129,7 +129,7 @@ function PipelineTimeline({
           {index < steps.length - 1 && (
             <span
               aria-hidden="true"
-              className="absolute bottom-0 left-[0.6875rem] top-6 w-px bg-[#E4D7DB]"
+              className="absolute bottom-0 left-[0.6875rem] top-6 w-px bg-grid"
             />
           )}
           <span
@@ -138,7 +138,7 @@ function PipelineTimeline({
                 ? "border-[#72BF44]"
                 : step.state === "executing"
                   ? "border-[#FFCD67]"
-                  : "border-[#E4D7DB]"
+                  : "border-grid"
             }`}
           >
             {step.state === "completed" ? (
@@ -146,12 +146,12 @@ function PipelineTimeline({
             ) : step.state === "executing" ? (
               <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#FFCD67]" />
             ) : (
-              <Circle className="h-2.5 w-2.5 text-[#B79AA3]" />
+              <Circle className="h-2.5 w-2.5 text-muted" />
             )}
           </span>
           <div className="min-w-0 pt-0.5">
-            <p className="text-xs font-semibold text-[#240B15]">{step.label}</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-[#806A72]">{step.detail}</p>
+            <p className="text-xs font-semibold text-ink">{step.label}</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-muted">{step.detail}</p>
             <span className="sr-only">
               {step.state === "completed"
                 ? "Completed"
@@ -216,20 +216,20 @@ function diffPreviewLines(plan: PlanResponse): Array<{ tone: DiffTone; text: str
 
 function PlanDiffPreview({ plan }: { plan: PlanResponse }) {
   const toneClasses: Record<DiffTone, string> = {
-    file: "text-[#B79AA3]",
+    file: "text-[#A7ACB6]",
     hunk: "text-[#FFCD67]",
     addition: "text-[#00AAAD]",
     removal: "text-[#FF8DA0]",
-    context: "text-[#FBF7F8]",
+    context: "text-white",
   };
   return (
-    <figure className="mt-3 overflow-hidden rounded-xl border border-[#E4D7DB] bg-[#240B15]">
+    <figure className="mt-3 overflow-hidden rounded-xl border border-grid bg-graphite">
       <figcaption className="flex items-center justify-between gap-3 border-b border-white/15 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
         <span className="inline-flex items-center gap-1.5">
           <Code2 className="h-3.5 w-3.5 text-[#FFCD67]" />
           IaC diff preview
         </span>
-        <span className="font-normal normal-case tracking-normal text-[#B79AA3]">
+        <span className="font-normal normal-case tracking-normal text-[#A7ACB6]">
           exact plan payload
         </span>
       </figcaption>
@@ -425,11 +425,11 @@ export function ActionPlanDialog({
       >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <p className="mb-1 border-l-2 border-[#F00037] pl-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8B001F]">
+            <p className="mb-1 border-l-2 border-primary-red pl-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
               Human approval required
             </p>
             <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold text-ink">
-              <ShieldAlert className="h-4 w-4 text-[#F00037]" />
+              <ShieldAlert className="h-4 w-4 text-primary-red" />
               {title}
             </h2>
           </div>
@@ -445,12 +445,12 @@ export function ActionPlanDialog({
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-          <aside className="self-start rounded-xl border border-[#E4D7DB] bg-[#FBF7F8] p-4 lg:sticky lg:top-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8B001F]">
+          <aside className="self-start rounded-xl border border-grid bg-page p-4 lg:sticky lg:top-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
               Deployment pipeline
             </p>
-            <h3 className="mt-1 text-sm font-semibold text-[#240B15]">Approval control path</h3>
-            <p className="mt-1 text-[10px] leading-4 text-[#806A72]">
+            <h3 className="mt-1 text-sm font-semibold text-ink">Approval control path</h3>
+            <p className="mt-1 text-[10px] leading-4 text-muted">
               Every stage binds to one expiring, immutable plan. No stage grants authority to the
               assistant.
             </p>
@@ -580,7 +580,7 @@ export function ActionPlanDialog({
                             confirmingRef.current = true;
                             setConfirming(true);
                           }}
-                          className="shrink-0 rounded-lg bg-[#8B001F] px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="shrink-0 rounded-lg bg-action px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {isJobRun ? "Approve and run once" : "Approve action"}
                         </button>
@@ -605,7 +605,7 @@ export function ActionPlanDialog({
                         </p>
                         <p
                           id={confirmationWarningId}
-                          className="mt-2 text-[11px] font-medium leading-5 text-[#8B001F]"
+                          className="mt-2 text-[11px] font-medium leading-5 text-accent"
                         >
                           Your next click records approval for this hash and authorizes the
                           dedicated executor to revalidate the target before acting.

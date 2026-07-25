@@ -83,7 +83,7 @@ function Radar({ metrics }: { metrics: ComplianceMetric[] }) {
             points={polygonPoints(new Array(ordered.length).fill(level), 78)}
             fill={level === 100 ? "var(--color-light-gold)" : "none"}
             fillOpacity={level === 100 ? 0.42 : undefined}
-            stroke="var(--color-sand-border)"
+            stroke="var(--color-neutral-border)"
             strokeWidth={level === 100 ? 1.5 : 1}
           />
         ))}
@@ -96,7 +96,7 @@ function Radar({ metrics }: { metrics: ComplianceMetric[] }) {
               y1="130"
               x2={end.x}
               y2={end.y}
-              stroke="var(--color-sand-border)"
+              stroke="var(--color-neutral-border)"
             />
           );
         })}
@@ -112,7 +112,7 @@ function Radar({ metrics }: { metrics: ComplianceMetric[] }) {
           const position = point(index, ordered.length, 78 * ((metric.value_pct ?? 0) / 100));
           const fill =
             metric.value_pct == null
-              ? "var(--color-muted-rose-grey)"
+              ? "var(--color-muted)"
               : metric.value_pct >= 80
                 ? "var(--color-green-accent)"
                 : metric.value_pct >= 50
@@ -139,7 +139,7 @@ function Radar({ metrics }: { metrics: ComplianceMetric[] }) {
               y={label.y}
               textAnchor="middle"
               dominantBaseline="middle"
-              fill="var(--color-brand-maroon)"
+              fill="var(--color-ink)"
               className="text-[8px] font-semibold dark:fill-ink"
             >
               {RADAR_LABELS[metric.id]}
@@ -152,10 +152,10 @@ function Radar({ metrics }: { metrics: ComplianceMetric[] }) {
         {ordered.map((metric) => (
           <li
             key={metric.id}
-            className="rounded-xl border border-sand-border bg-light-background/60 p-3"
+            className="rounded-xl border border-grid bg-page/60 p-3"
           >
             <div className="flex items-baseline justify-between gap-3">
-              <span className="text-xs font-semibold text-deep-maroon dark:text-ink">
+              <span className="text-xs font-semibold text-ink">
                 {metric.label}
               </span>
               <strong className={`text-lg tabular-nums ${metricTone(metric.value_pct)}`}>
@@ -219,7 +219,7 @@ function UnverifiedZdrNotice({ count }: { count: number }) {
       <div className="flex items-start gap-3">
         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
         <div>
-          <h3 className="text-sm font-bold text-deep-maroon">
+          <h3 className="text-sm font-bold text-ink">
             ZDR requires evidence for {count} resource{count === 1 ? "" : "s"}
           </h3>
           <p className="mt-1 text-xs leading-5 text-ink-2">
@@ -252,7 +252,7 @@ export function ZdrEnforcer() {
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
           <div>
-            <h3 className="text-sm font-bold text-deep-maroon">No ZDR posture is attested</h3>
+            <h3 className="text-sm font-bold text-ink">No ZDR posture is attested</h3>
             <p className="mt-1 text-xs leading-5 text-ink-2">
               Run the AI catalog sync and attach explicit ZDR evidence before treating any
               endpoint or workspace as compliant.
@@ -268,7 +268,7 @@ export function ZdrEnforcer() {
     }
     return (
       <div className="rounded-2xl border border-green-accent bg-success-surface p-4" role="status">
-        <div className="flex items-center gap-2 text-sm font-bold text-deep-maroon dark:text-ink">
+        <div className="flex items-center gap-2 text-sm font-bold text-ink">
           <CheckCircle2 className="h-5 w-5 text-green-accent" />
           ZDR is attested across every evaluated AI resource
         </div>
@@ -293,7 +293,7 @@ export function ZdrEnforcer() {
             </span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-extrabold text-deep-maroon dark:text-ink">
+                <h3 className="text-sm font-extrabold text-ink">
                   ZDR disabled · {alert.resource_name}
                 </h3>
                 <span className="rounded-full border border-primary-red bg-critical-surface px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-status-critical">
@@ -303,7 +303,9 @@ export function ZdrEnforcer() {
               <p className="mt-1 text-xs text-muted">
                 {alert.provider} {alert.scope} · {alert.resource_id}
               </p>
-              <p className="mt-3 text-xs font-semibold text-mid-red">Required remediation</p>
+              <p className="mt-3 text-xs font-semibold text-status-critical">
+                Required remediation
+              </p>
               <p className="mt-1 text-xs leading-5 text-ink-2">{alert.remediation}</p>
               <p className="mt-2 text-[11px] leading-4 text-muted">
                 This console remains read-only. Any routing or configuration change still needs

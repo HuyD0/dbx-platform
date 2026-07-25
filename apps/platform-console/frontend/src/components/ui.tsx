@@ -209,7 +209,7 @@ const badgeTones: Record<string, string> = {
   critical: "border border-status-critical/30 bg-critical-surface text-status-critical",
   serious: "border border-status-serious/30 bg-serious-surface text-status-serious",
   warning:
-    "border border-warning-accent bg-warning-surface text-brand-maroon dark:text-status-warning",
+    "border border-warning-accent bg-warning-surface text-status-warning",
   good: "border border-status-good/30 bg-success-surface text-status-good",
   info: "border border-status-info/30 bg-info-surface text-status-info",
 };

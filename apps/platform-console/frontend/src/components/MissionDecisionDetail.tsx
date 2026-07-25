@@ -604,7 +604,7 @@ export function MissionDecisionDetail({
         </p>
       )}
       {!item.can_approve && item.effective_status.toUpperCase() !== "EXPIRED" && (
-        <p className="mx-4 mb-3 rounded-lg border border-warning-accent bg-warning-surface p-3 text-xs leading-5 text-brand-maroon dark:text-status-warning">
+        <p className="mx-4 mb-3 rounded-lg border border-warning-accent bg-warning-surface p-3 text-xs leading-5 text-status-warning">
           {detail?.actions_enabled === false
             ? "This deployment is proposal-only. You can inspect the immutable request, but approval remains unavailable until the governed executor and approver controls are connected."
             : detail
@@ -617,7 +617,7 @@ export function MissionDecisionDetail({
         <button
           type="button"
           onClick={onReview}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-mid px-4 py-2 text-sm font-semibold text-white hover:bg-brand-maroon"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 py-2 text-sm font-semibold text-white hover:brightness-95"
         >
           <ShieldCheck className="h-4 w-4" aria-hidden="true" />
           Review exact plan

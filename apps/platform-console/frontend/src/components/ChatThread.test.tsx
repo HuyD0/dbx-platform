@@ -116,8 +116,8 @@ test("sends focused action context and preserves structured citations after focu
   const observed = screen.getByTitle("2026-07-18T12:00:00Z");
   expect(observed).toHaveAttribute("datetime", "2026-07-18T12:00:00Z");
   expect(screen.getByText("Explain this exact plan.")).toHaveClass(
-    "bg-[#F9EAED]",
-    "text-[#240B15]",
+    "bg-tint",
+    "text-ink",
   );
 
   await user.click(screen.getByRole("button", { name: /Agent execution flamegraph/ }));

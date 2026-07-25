@@ -71,8 +71,8 @@ test("job plan explains the decision and requires a separate confirmation click"
     screen.getByText("This starts one new run now. It does not change the job or its schedule."),
   ).toBeInTheDocument();
   expect(screen.getByText("Human approval required")).toHaveClass(
-    "border-[#F00037]",
-    "text-[#8B001F]",
+    "border-primary-red",
+    "text-accent",
   );
   expect(
     screen.getByRole("list", { name: "Approval and deployment pipeline" }),

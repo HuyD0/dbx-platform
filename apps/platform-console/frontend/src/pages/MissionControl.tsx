@@ -542,7 +542,7 @@ function LegacyEvidenceList({
                 ) : (
                   <Link
                     to="/actions"
-                    className="inline-flex min-h-11 items-center rounded-lg bg-brand-mid px-3 py-2 text-xs font-semibold text-white hover:bg-brand-maroon"
+                    className="inline-flex min-h-11 items-center rounded-lg bg-action px-3 py-2 text-xs font-semibold text-white hover:brightness-95"
                   >
                     Review in Action Center
                   </Link>
