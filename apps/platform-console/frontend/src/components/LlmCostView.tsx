@@ -170,15 +170,15 @@ export function LlmCostView() {
         <AsOf
           asOf={summary.data.as_of}
           cached={summary.data.cached}
-          onRefresh={() => {
-            void Promise.all([
+          onRefresh={() =>
+            Promise.all([
               summary.refetch(),
               timeseries.refetch(),
               breakdown.refetch(),
               efficiency.refetch(),
               health.refetch(),
-            ]);
-          }}
+            ])
+          }
           refreshing={
             summary.isFetching ||
             timeseries.isFetching ||

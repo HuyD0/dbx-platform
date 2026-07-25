@@ -11,15 +11,29 @@ import {
   Skeleton,
 } from "../components/ui";
 import { apiGet } from "../lib/api";
-import type { ActionRequest, Envelope } from "../lib/types";
+import type { ActionRequest, Envelope, Row } from "../lib/types";
 
-function rows(data: ActionRequest[] | { items?: ActionRequest[] }): ActionRequest[] {
+function actions(data: ActionRequest[] | { items?: ActionRequest[] }): ActionRequest[] {
   const items = Array.isArray(data) ? data : (data.items ?? []);
   return items.map((row) => ({
     ...row,
-    target_count:
-      row.target_count ??
-      (Array.isArray(row.targets) ? row.targets.length : undefined),
+    target_count: row.target_count ?? row.targets.length,
+  }));
+}
+
+/** Adapt strict action records only at the generic legacy table boundary. */
+function actionAuditRows(items: ActionRequest[]): Row[] {
+  return items.map((action) => ({
+    action_type: action.action_type,
+    status: action.status,
+    risk: action.risk,
+    target_count: action.target_count ?? action.targets.length,
+    proposer_email: action.proposer_email,
+    created_at: action.created_at,
+    updated_at: action.updated_at,
+    expires_at: action.expires_at,
+    terminal_reason: action.terminal_reason,
+    plan_hash: action.plan_hash,
   }));
 }
 
@@ -82,9 +96,9 @@ export function Audit() {
           <Skeleton rows={7} />
         ) : query.isError ? (
           <ErrorState error={query.error} />
-        ) : rows(query.data.data).length > 0 ? (
+        ) : actions(query.data.data).length > 0 ? (
           <DataTable
-            rows={rows(query.data.data)}
+            rows={actionAuditRows(actions(query.data.data))}
             exportName="action-audit"
             caption="Action request and event audit history"
             columns={[

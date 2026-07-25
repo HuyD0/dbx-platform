@@ -29,6 +29,7 @@ sync:
     - apps/platform-console/wheels/**/*.whl
     - apps/platform-console/static/**
     - apps/platform-console/build_info.json
+    - apps/platform-console/lakemeter_vendor/**
 
 artifacts:
   default:
@@ -41,10 +42,16 @@ artifacts:
 variables:
   platform_console_name:
     description: >
-      Stable Databricks App resource name shared with the out-of-band runtime
-      controller. Keeping this as configuration avoids an App ↔ controller Job
-      dependency cycle while preserving an exact, non-discovered target.
+      Stable Databricks App resource name used across bundle targets and
+      deployment automation.
     default: platform-console
+
+  chat_model:
+    description: >
+      Databricks-hosted foundation-model endpoint queried by the read-only
+      Mission Control assistant. The App receives only CAN_QUERY through its
+      resource binding.
+    default: databricks-claude-sonnet-4-5
 
   actions_enabled:
     description: >
@@ -68,8 +75,15 @@ variables:
   approver_group:
     description: >
       Workspace group allowed to review and approve exact Mission Control
-      action plans and launch the out-of-band power controller.
+      action plans and launch governed executor jobs.
     default: dbx-platform-approvers
+
+  approver_group_id:
+    description: >
+      Exact SCIM ID of dbx-platform-approvers. The least-privileged action
+      executor compares this immutable value with the resolved user's current
+      memberships without enumerating the workspace group directory.
+    default: ""
 
   operator_group:
     description: >
@@ -80,14 +94,33 @@ variables:
   runtime_executor_service_principal_name:
     description: >
       Application/client ID of the dedicated, least-privileged service
-      principal that runs the power controller. This deliberately has no
-      default: a deployment must explicitly name the executor identity.
+      principal that runs scheduled evidence and reporting jobs. This
+      deliberately has no default: a deployment must explicitly name the
+      executor identity.
 
   action_executor_service_principal_name:
     description: >
       Application/client ID of the separate remediation executor. It must not
-      be the runtime controller identity and receives only the permissions for
+      be the evidence-job identity and receives only the permissions for
       explicitly enabled non-runtime action packs.
+
+  lakemeter_migration_executor_service_principal_name:
+    description: >
+      Application/client ID of the dedicated LakeMeter schema-migration
+      executor. This identity owns the LakeMeter database and is deliberately
+      separate from the read-only App and general action executor identities.
+
+  lakemeter_project_id:
+    description: >
+      Stable Lakebase Autoscaling project ID. Provisioning and reconciliation
+      are selected only by the approved infrastructure workflow.
+    default: dbx-platform-lakemeter-dev
+
+  lakemeter_model_endpoint:
+    description: >
+      Databricks Model Serving endpoint used by LakeMeter's contextual
+      estimate assistant. The App receives CAN_QUERY only.
+    default: databricks-claude-opus-4-6
 
   azure_subscription_id:
     description: >
@@ -96,6 +129,14 @@ variables:
       role on it (see docs/cloud-setup.md). Set via
       BUNDLE_VAR_azure_subscription_id.
     default: ""
+
+  azure_cost_resource_groups:
+    description: >
+      Comma-separated allowlist of Azure resource groups whose billed charges
+      belong to this Databricks workspace. Ingestion fails closed when empty.
+      Include the Databricks managed resource group and Azure AI resource
+      groups intentionally allocated to this workspace.
+    default: "rg-databricks-dbx-dev,databricks-rg-rg-databricks-dbx-dev"
 
   azure_service_credential:
     description: >
@@ -119,23 +160,122 @@ targets:
   dev:
     default: true
     mode: development
+    resources:
+      jobs:
+        llm_cost_rollup:
+          performance_target: STANDARD
+        schema_migrations:
+          performance_target: STANDARD
+        ai_monitor_rollup:
+          performance_target: STANDARD
+        ai_catalog_sync:
+          performance_target: STANDARD
+        ml_serving_report:
+          performance_target: STANDARD
+        ml_hygiene_report:
+          performance_target: STANDARD
+        dashboards_setup:
+          performance_target: STANDARD
+        azure_cost_pull:
+          performance_target: STANDARD
+        security_audit:
+          performance_target: STANDARD
+        cost_forecast_train:
+          performance_target: STANDARD
+        cost_forecast_daily:
+          performance_target: STANDARD
+        cost_usage_report:
+          performance_target: STANDARD
+        housekeeping_report:
+          performance_target: STANDARD
+        action_executor:
+          performance_target: STANDARD
+        platform_digest:
+          performance_target: STANDARD
+        governance_check:
+          performance_target: STANDARD
 
-  # Production: real names, schedules deployed paused, identity-owned root.
-  # The power controller proposes reconciliation; a human approves the exact
-  # plan before the warehouse's ON/SLEEPING state is restored. The Platform
-  # Console app is the exception: it deploys started: true (resources/app.yml),
-  # so CI starts it directly on deploy without an approved plan.
+  # UAT: mirrors production semantics in the dedicated UAT workspace, but keeps
+  # serverless jobs on the cost-optimized STANDARD target and isolates durable
+  # control-plane data from dev/prod. Schedules remain paused from the resource
+  # definitions, and the managed warehouse remains 2X-Small with a 5 minute
+  # auto-stop (resources/warehouse.yml).
+  uat:
+    mode: production
+    workspace:
+      host: https://adb-7405613180844632.12.azuredatabricks.net
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      state_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}/state
+    variables:
+      control_plane_catalog: dbx_uat
+    resources:
+      jobs:
+        llm_cost_rollup:
+          performance_target: STANDARD
+        schema_migrations:
+          performance_target: STANDARD
+        ai_monitor_rollup:
+          performance_target: STANDARD
+        ai_catalog_sync:
+          performance_target: STANDARD
+        ml_serving_report:
+          performance_target: STANDARD
+        ml_hygiene_report:
+          performance_target: STANDARD
+        dashboards_setup:
+          performance_target: STANDARD
+        azure_cost_pull:
+          performance_target: STANDARD
+        security_audit:
+          performance_target: STANDARD
+        cost_forecast_train:
+          performance_target: STANDARD
+        cost_forecast_daily:
+          performance_target: STANDARD
+        cost_usage_report:
+          performance_target: STANDARD
+        housekeeping_report:
+          performance_target: STANDARD
+        action_executor:
+          performance_target: STANDARD
+        platform_digest:
+          performance_target: STANDARD
+        governance_check:
+          performance_target: STANDARD
+
+  # Production: real names, five curated schedules enabled, identity-owned
+  # root. The Platform Console app deploys started and its dedicated serverless
+  # warehouse starts on demand, then auto-stops after five idle minutes.
   # CI deploys here as github-actions-dbx-platform via keyless OIDC. To make
   # scheduled jobs run as it too, rather than as a human (see docs/cloud-setup.md):
   #   run_as:
   #     service_principal_name: b74a6820-d0ac-454f-8c32-02141cba3c8a
   prod:
     mode: production
+    variables:
+      lakemeter_project_id: dbx-platform-lakemeter
     workspace:
-      # Keep controller source out of /Workspace/Shared, which is writable by
+      # Keep deployed source out of /Workspace/Shared, which is writable by
       # every workspace user and would undermine immutable-plan execution.
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
       # Preserve the existing production deployment lineage while source and
       # artifacts move to the identity-owned root. Move the state itself only
       # through a separately rehearsed bundle-state migration.
       state_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}/state
+    resources:
+      jobs:
+        azure_cost_pull:
+          schedule:
+            pause_status: UNPAUSED
+        cost_usage_report:
+          schedule:
+            pause_status: UNPAUSED
+        security_audit:
+          schedule:
+            pause_status: UNPAUSED
+        governance_check:
+          schedule:
+            pause_status: UNPAUSED
+        platform_digest:
+          schedule:
+            pause_status: UNPAUSED

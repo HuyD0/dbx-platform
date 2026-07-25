@@ -1,4 +1,4 @@
-import { BookOpenCheck, CalendarClock, FileText, Workflow } from "lucide-react";
+import { BookOpenCheck, FileText, Workflow } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { PlanActionButton } from "../components/ActionPlanDialog";
 import { NamedJobPlanButton } from "../components/NamedJobPlanButton";
@@ -13,13 +13,6 @@ const TABS = [
 ];
 
 const PLAYBOOKS = [
-  {
-    icon: CalendarClock,
-    title: "Hibernate toolkit",
-    description: "Pause owned schedules, drain runs, stop the dedicated warehouse, then stop the app.",
-    action: "hibernate",
-    tone: "danger" as const,
-  },
   {
     icon: BookOpenCheck,
     title: "Synchronize policies",
@@ -92,8 +85,8 @@ export function Automations() {
                   <h2 className="text-sm font-semibold text-ink">Autonomy boundary</h2>
                   <p className="mt-1 text-xs leading-5 text-ink-2">
                     Scheduled jobs may read platform state and append findings, telemetry and audit
-                    records. Training, promotion, configuration, remediation and runtime control
-                    always produce an expiring plan for an authorized human.
+                    records. Training, promotion, configuration and remediation always produce
+                    an expiring plan for an authorized human.
                   </p>
                 </div>
               </div>

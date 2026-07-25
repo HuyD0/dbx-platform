@@ -2,48 +2,96 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — dark is the default theme (html.dark), light via toggle.
-   Palette follows the validated reference instance: categorical slots in
-   fixed order, reserved status colors, recessive chrome. */
+/* Mission-control brand system. Red identifies the product and primary
+   actions, while operational states keep their own semantic colors. Light is
+   the first-visit theme and dark remains user-selectable. */
 @theme {
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-page: #f9f9f7;
-  --color-surface: #fcfcfb;
-  --color-ink: #0b0b0b;
-  --color-ink-2: #52514e;
-  --color-muted: #898781;
-  --color-grid: #e1e0d9;
-  --color-hairline: rgba(11, 11, 11, 0.1);
+  /* Canonical mission-control palette. Brand red is reserved for identity and
+     decoration; accessible bright-red roles handle text and solid controls. */
+  --color-primary-red: #f00037;
+  --color-action: #ed0037;
+  --color-graphite: #1b1a1f;
+  --color-light-gold: #FFF8E1;
+  --color-gold-accent: #FFCD67;
+  --color-teal-accent: #00AAAD;
+  --color-green-accent: #72BF44;
+  --color-neutral-border: #e4e4e8;
 
-  --color-series-1: #2a78d6;
-  --color-series-2: #008300;
-  --color-series-3: #e87ba4;
-  --color-series-4: #eda100;
+  --color-page: #f6f6f7;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-tint: #eff0f3;
+  --color-ink: #1b1a1f;
+  --color-ink-2: #52525b;
+  --color-muted: #676c78;
+  --color-grid: #e4e4e8;
+  --color-hairline: rgba(24, 24, 27, 0.07);
 
-  --color-status-good: #0ca30c;
-  --color-status-warning: #fab219;
-  --color-status-serious: #ec835a;
-  --color-status-critical: #d03b3b;
+  --color-brand-primary: #f00037;
+  --color-warning-surface: #fff8e1;
+  --color-warning-accent: #ffcd67;
+  --color-info-surface: #e5f6f5;
+  --color-success-surface: #edf6e8;
+  --color-serious-surface: #fbeee9;
+  --color-critical-surface: #fce9ed;
 
-  --color-accent: #2a78d6;
+  --color-series-1: #006f72;
+  --color-series-2: #3f7424;
+  --color-series-3: #7c3aed;
+  --color-series-4: #8a6200;
+
+  --color-status-info: #006f72;
+  --color-status-good: #3f7424;
+  --color-status-warning: #6e4d00;
+  --color-status-serious: #8a432f;
+  --color-status-critical: #b4233e;
+
+  --color-accent: #dc0033;
+  --color-blueprint: #006f72;
+  --color-process: #f00037;
+
+  --color-health-accent: #72bf44;
+  --color-active-accent: #00aaad;
 }
 
 .dark {
-  --color-page: #0d0d0d;
-  --color-surface: #1a1a19;
-  --color-ink: #ffffff;
-  --color-ink-2: #c3c2b7;
-  --color-muted: #898781;
-  --color-grid: #2c2c2a;
-  --color-hairline: rgba(255, 255, 255, 0.1);
+  --color-page: #161619;
+  --color-surface: #1e1e23;
+  --color-raised: #27272d;
+  --color-tint: #26262e;
+  --color-ink: #f4f4f6;
+  --color-ink-2: #c2c2cb;
+  --color-muted: #a7acb6;
+  --color-grid: #34343b;
+  --color-hairline: rgba(244, 244, 246, 0.09);
 
-  --color-series-1: #3987e5;
-  --color-series-2: #008300;
-  --color-series-3: #d55181;
-  --color-series-4: #c98500;
+  --color-warning-surface: #382d17;
+  --color-info-surface: #173537;
+  --color-success-surface: #26351f;
+  --color-serious-surface: #402922;
+  --color-critical-surface: #44212a;
 
-  --color-accent: #3987e5;
+  --color-series-1: #5ed5d7;
+  --color-series-2: #9ad878;
+  --color-series-3: #ff6a88;
+  --color-series-4: #ffcd67;
+
+  --color-status-info: #5ed5d7;
+  --color-status-good: #9ad878;
+  --color-status-warning: #ffcd67;
+  --color-status-serious: #ffad91;
+  --color-status-critical: #ff8da0;
+
+  --color-accent: #ff4c70;
+  --color-blueprint: #5ed5d7;
+  --color-process: #ff4c70;
+
+  /* Decorative accents keep their brand hue but lift slightly for the dark
+     canvas; still fills/bars/pulses only. */
+  --color-health-accent: #9ad878;
+  --color-active-accent: #5ed5d7;
 }
 
 html,
@@ -77,57 +125,198 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-brand-primary);
   outline-offset: 2px;
 }
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  background: color-mix(in srgb, var(--color-brand-primary) 28%, transparent);
 }
 
-/* Ambient glows behind the glass — without depth to blur, glassmorphism
-   reads as flat gray. Fixed so scrolling content slides over the light. */
+/* Graphite-smoke ambient wash: a low-saturation slate/steel field with only a
+   faint brand-red halo behind the top of the shell, so the frosted surfaces
+   have something restrained to refract. */
 body {
   background-image:
-    radial-gradient(900px 520px at 12% -8%, rgba(42, 120, 214, 0.1), transparent 60%),
-    radial-gradient(760px 480px at 92% 4%, rgba(74, 58, 167, 0.07), transparent 60%),
-    radial-gradient(700px 520px at 50% 110%, rgba(27, 175, 122, 0.05), transparent 60%);
+    radial-gradient(48% 54% at 12% 2%, rgba(51, 65, 85, 0.1), transparent 60%),
+    radial-gradient(42% 48% at 92% 8%, rgba(100, 116, 139, 0.09), transparent 62%),
+    radial-gradient(40% 44% at 74% 98%, rgba(71, 85, 105, 0.08), transparent 62%),
+    radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 6%, transparent), transparent 60%);
   background-attachment: fixed;
 }
 .dark body {
   background-image:
-    radial-gradient(900px 520px at 12% -8%, rgba(57, 135, 229, 0.16), transparent 60%),
-    radial-gradient(760px 480px at 92% 4%, rgba(144, 133, 233, 0.1), transparent 60%),
-    radial-gradient(700px 520px at 50% 110%, rgba(25, 158, 112, 0.07), transparent 60%);
+    radial-gradient(48% 54% at 12% 2%, rgba(71, 85, 105, 0.4), transparent 60%),
+    radial-gradient(42% 48% at 92% 8%, rgba(100, 116, 139, 0.28), transparent 62%),
+    radial-gradient(40% 44% at 74% 98%, rgba(51, 65, 85, 0.34), transparent 62%),
+    radial-gradient(30% 30% at 50% -4%, color-mix(in srgb, var(--color-brand-primary) 12%, transparent), transparent 60%);
 }
 
-/* Frosted surfaces. --alpha-* are per-mode so light glass stays readable. */
+/* Cards remain exact white/grey surfaces on the light canvas. Dark mode keeps
+   the upstream frosted treatment over its graphite-smoke wash. Forced-colors
+   mode resets both treatments below. */
 .glass {
-  background: rgba(252, 252, 251, 0.6);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid rgba(11, 11, 11, 0.08);
+  background: var(--color-surface);
+  border: 1px solid var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(24, 24, 27, 0.06);
 }
 .dark .glass {
-  background: rgba(26, 26, 25, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--color-surface) 87%, transparent);
+  border-color: var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
-/* Higher-opacity variant for modals/panels that sit over busy content. */
+/* Raised dialogs and drawers are opaque in light mode so dense JSON/tables hold contrast. */
 .glass-strong {
-  background: rgba(252, 252, 251, 0.85);
-  backdrop-filter: blur(28px) saturate(1.4);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4);
-  border: 1px solid rgba(11, 11, 11, 0.1);
+  background: var(--color-raised);
+  border: 1px solid var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 .dark .glass-strong {
-  background: rgba(22, 22, 21, 0.82);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-raised) 93%, transparent);
+  border-color: var(--color-grid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .dark .glass {
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    backdrop-filter: saturate(160%) blur(14px);
+  }
+  .dark .glass-strong {
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    backdrop-filter: saturate(180%) blur(22px);
+  }
 }
 
-/* These glass rules are unlayered, so Tailwind's layered utilities
-   (border-y-0, hover:border-accent/40, …) can never override them — the
-   cascade-layers spec puts any unlayered rule above any layered one. Edge
-   and hover variants therefore live here, after the base rules, where plain
-   source order settles it deterministically. */
+/* Solid controls use a minimally darkened, WCAG-AA bright red. Exact primary
+   red remains the decorative brand, rail, and focus color. */
+.bg-accent {
+  background-color: var(--color-action);
+}
+
+nav a[aria-current="page"] {
+  box-shadow: inset 4px 0 var(--color-brand-primary);
+}
+
+.brand-diamond {
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 58%, var(--color-grid));
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--color-brand-primary) 9%, var(--color-surface));
+  color: var(--color-brand-primary);
+  box-shadow: none;
+  transform: rotate(45deg) scale(0.78);
+}
+.brand-diamond > svg {
+  transform: rotate(-45deg) scale(1.16);
+}
+
+.blueprint-domain-card {
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+.group:hover .blueprint-domain-card,
+.group:focus-visible .blueprint-domain-card {
+  border-color: color-mix(in srgb, var(--color-accent) 42%, transparent);
+  box-shadow: 0 14px 34px rgba(26, 28, 31, 0.09);
+  transform: translateY(-2px);
+}
+.blueprint-priority {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-process) 38%, var(--color-grid));
+}
+.blueprint-priority::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--color-process);
+  content: "";
+}
+.blueprint-proposal {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-process) 34%, var(--color-grid));
+}
+.blueprint-proposal::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--color-process);
+  content: "";
+}
+
+.blueprint-process {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 0.75rem;
+  padding-top: 0.45rem;
+}
+.blueprint-process-step {
+  position: relative;
+  min-width: 0;
+  border-top: 2px solid color-mix(in srgb, var(--color-blueprint) 58%, var(--color-grid));
+  padding: 1rem 0.75rem 0 0;
+}
+.blueprint-process-step:last-child {
+  border-top-color: color-mix(in srgb, var(--color-status-good) 58%, var(--color-grid));
+}
+.blueprint-process-step[data-tone="process"] {
+  border-top-color: color-mix(in srgb, var(--color-process) 70%, var(--color-grid));
+}
+.blueprint-process-node {
+  position: absolute;
+  top: 0;
+  left: 0.15rem;
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border: 2px solid var(--color-blueprint);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 0.62rem;
+  font-weight: 700;
+  transform: translateY(-50%) rotate(45deg);
+}
+.blueprint-process-node > span {
+  transform: rotate(-45deg);
+}
+.blueprint-process-step[data-tone="process"] .blueprint-process-node {
+  border-color: var(--color-process);
+}
+.blueprint-process-step:last-child .blueprint-process-node {
+  border-color: var(--color-status-good);
+}
+
+@media (max-width: 640px) {
+  .blueprint-process {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-top: 0;
+  }
+  .blueprint-process-step,
+  .blueprint-process-step:last-child,
+  .blueprint-process-step[data-tone="process"] {
+    border-top: 0;
+    border-left: 2px solid color-mix(in srgb, var(--color-blueprint) 58%, var(--color-grid));
+    padding: 0.35rem 0 1rem 1.5rem;
+  }
+  .blueprint-process-step[data-tone="process"] {
+    border-left-color: color-mix(in srgb, var(--color-process) 70%, var(--color-grid));
+  }
+  .blueprint-process-step:last-child {
+    border-left-color: color-mix(in srgb, var(--color-status-good) 58%, var(--color-grid));
+    padding-bottom: 0.25rem;
+  }
+  .blueprint-process-node {
+    top: 0.6rem;
+    left: 0;
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+}
+
+/* These surface rules are unlayered, so Tailwind's layered utilities cannot
+   override their edges. Keep edge variants here for the shell. */
 .glass-edge-r {
   border-width: 0 1px 0 0; /* full-height left sidebar: right edge only */
 }
@@ -145,6 +334,24 @@ body {
    override the unlayered glass border anyway. */
 .glass-focus-accent:focus-within {
   border-color: var(--color-accent);
+}
+
+/* Glass mode intentionally keeps ambient blur on modal scrims and sticky
+   surfaces, so the legacy backdrop-blur utilities are left to apply. */
+
+@media (forced-colors: active) {
+  .glass,
+  .glass-strong,
+  .brand-diamond,
+  .blueprint-priority {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .blueprint-priority::before {
+    background: Highlight;
+  }
 }
 
 /* Suggestion-chip icon colors. The light categorical steps for magenta and
@@ -190,6 +397,70 @@ body {
 .prose-console strong { font-weight: 600; }
 .prose-console a { color: var(--color-accent); text-decoration: underline; }
 
+/* Functional micro-interactions for deployment/approval execution. A calm
+   teal pulse maps to active, healthy processing; a hard snap to primary red
+   signals a failure. Both are decorative fills, so they use the bright accent
+   tokens rather than text colors. The reduced-motion block below neutralizes
+   the animation while keeping the static color state. */
+@keyframes pulse-active {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scaleY(0.72);
+  }
+}
+
+.progress-track {
+  position: relative;
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-hairline);
+}
+.progress-track > .progress-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left center;
+}
+.progress-active > .progress-fill {
+  background: var(--color-active-accent);
+  animation: pulse-active 1.15s ease-in-out infinite;
+}
+.progress-error > .progress-fill {
+  background: var(--color-brand-primary);
+  animation: none;
+}
+
+/* A small breathing dot for the same active-processing signal in tight rows. */
+.pulse-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-active-accent);
+  animation: pulse-active 1.15s ease-in-out infinite;
+}
+.pulse-dot[data-state="error"] {
+  background: var(--color-brand-primary);
+  animation: none;
+}
+
+@media (forced-colors: active) {
+  .progress-active > .progress-fill,
+  .pulse-dot {
+    background: Highlight;
+  }
+  .progress-error > .progress-fill,
+  .pulse-dot[data-state="error"] {
+    background: LinkText;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -199,4 +470,37 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Action reviews present dense approval JSON, so scope the calmer accessible
+   palette there first without moving the whole shell's visual baselines. */
+.action-review-theme {
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-page: #f7f9fc;
+  --color-tint: #eaf2ff;
+  --color-ink: #111827;
+  --color-ink-2: #374151;
+  --color-muted: #667085;
+  --color-grid: #d6deea;
+  --color-hairline: rgba(17, 24, 39, 0.08);
+  --color-brand-primary: #2563eb;
+  --color-action: #1d4ed8;
+  --color-accent: #1d4ed8;
+  --color-process: #6d28d9;
+}
+.dark .action-review-theme {
+  --color-page: #0f172a;
+  --color-surface: #111827;
+  --color-raised: #1f2937;
+  --color-tint: #172554;
+  --color-ink: #f8fafc;
+  --color-ink-2: #dbe4f0;
+  --color-muted: #a8b3c7;
+  --color-grid: #334155;
+  --color-hairline: rgba(226, 232, 240, 0.12);
+  --color-brand-primary: #60a5fa;
+  --color-action: #3b82f6;
+  --color-accent: #93c5fd;
+  --color-process: #c4b5fd;
 }

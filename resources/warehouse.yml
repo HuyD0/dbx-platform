@@ -1,0 +1,35 @@
+# Dedicated, bundle-owned serverless SQL compute for the Platform Console and
+# evidence jobs. It starts on first use and auto-stops after five idle minutes.
+resources:
+  sql_warehouses:
+    platform_console_warehouse:
+      name: "[dbx-platform] mission-control"
+      cluster_size: "2X-Small"
+      warehouse_type: PRO
+      enable_serverless_compute: true
+      enable_photon: true
+      min_num_clusters: 1
+      max_num_clusters: 1
+      auto_stop_mins: 5
+      lifecycle:
+        prevent_destroy: true
+        started: false
+      tags:
+        custom_tags:
+          - key: project
+            value: dbx-platform
+          - key: team
+            value: platform
+          - key: ownership
+            value: bundle
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          # Scheduled evidence jobs query through this warehouse and need no
+          # permission to stop or edit it.
+          level: CAN_USE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          # Approved forecast and evidence Jobs query through this dedicated
+          # warehouse; they do not need permission to stop or edit it.
+          level: CAN_USE
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_USE

@@ -1,0 +1,142 @@
+{
+  "version": "2026.07.1",
+  "_comment": "Solution-pattern catalog for the AI Cost Planner. Labels, descriptions and blueprint text are user-facing and must stay jargon-free (enforced by tests/test_estimator.py). Numeric defaults are per-request shape assumptions a non-expert should not have to guess; every one can be overridden in the review screen.",
+  "shared_blueprint": [
+    {
+      "title": "How quality is checked",
+      "body": "Every answer passes automated code-based checks (format, safety rules, response time) at near-zero cost. Depending on the tier you choose, a share of answers also gets an AI-graded review - a second AI model grades the answer against a rubric. The cost of these reviews is shown separately as the checking cost, so you always see what running the system costs versus what checking it costs."
+    },
+    {
+      "title": "How it stays reviewable",
+      "body": "Every request writes an activity record, and each step the system takes is recorded separately with its inputs and outputs. That step-by-step record is what makes it possible to review not just the final answer but how the system got there - required for the compliance tier, and priced into the storage line so it is never a surprise."
+    },
+    {
+      "title": "Where it can run",
+      "body": "The estimate shows the same solution priced two ways: run mostly inside Databricks (search index, model serving and working state as managed Databricks services) or mostly on Azure services (managed search, Kubernetes hosting and a managed database). Both are legitimate; the comparison shows what each choice costs at each tier."
+    }
+  ],
+  "patterns": {
+    "doc_chat": {
+      "label": "Chat with your documents",
+      "description": "People ask questions in plain language and get answers grounded in your own files - PDFs, wikis, policies, contracts.",
+      "example_prompt": "What does our travel policy say about seat upgrades?",
+      "defaults": {
+        "avg_input_tokens": 300,
+        "avg_output_tokens": 350,
+        "agent_steps": 1,
+        "needs_knowledge_base": true,
+        "retrieval_chunks": 6,
+        "chunk_tokens": 400,
+        "needs_memory": false,
+        "default_corpus_gb": 10
+      },
+      "blueprint": [
+        {
+          "title": "What it does",
+          "body": "People type a question. The system looks up the most relevant passages from your document collection, then an AI model writes an answer grounded in those passages, with references back to the source files."
+        },
+        {
+          "title": "What gets built",
+          "body": "A searchable index of your documents that stays in sync as files change, an AI model that writes the answers, and a small always-on service that connects the two behind your access controls."
+        }
+      ]
+    },
+    "summarize": {
+      "label": "Summarize long content",
+      "description": "Turn long reports, transcripts or ticket threads into short, consistent summaries.",
+      "example_prompt": "Give me a one-page summary of this 60-page audit report.",
+      "defaults": {
+        "avg_input_tokens": 6000,
+        "avg_output_tokens": 500,
+        "agent_steps": 1,
+        "needs_knowledge_base": false,
+        "retrieval_chunks": 0,
+        "chunk_tokens": 0,
+        "needs_memory": false
+      },
+      "blueprint": [
+        {
+          "title": "What it does",
+          "body": "Each document or conversation is sent to an AI model with instructions describing the summary format your team needs, and the model returns the finished summary."
+        },
+        {
+          "title": "What gets built",
+          "body": "A service that accepts content, applies your summary rules, and returns the result to the tool your team already works in."
+        }
+      ]
+    },
+    "extract_fields": {
+      "label": "Pull structured data out of documents",
+      "description": "Read invoices, forms or contracts and fill a spreadsheet or system of record with the fields that matter.",
+      "example_prompt": "From each invoice, capture vendor, amount, due date and PO number.",
+      "defaults": {
+        "avg_input_tokens": 2500,
+        "avg_output_tokens": 300,
+        "agent_steps": 1,
+        "needs_knowledge_base": false,
+        "retrieval_chunks": 0,
+        "chunk_tokens": 0,
+        "needs_memory": false
+      },
+      "blueprint": [
+        {
+          "title": "What it does",
+          "body": "Each document is read by an AI model that fills in a fixed list of fields you define. Results land in your downstream system with a confidence note per field."
+        },
+        {
+          "title": "What gets built",
+          "body": "A document intake step, the AI extraction service with your field definitions, and checks that flag low-confidence answers for a person to review."
+        }
+      ]
+    },
+    "classify_route": {
+      "label": "Sort and route incoming requests",
+      "description": "Automatically label incoming emails, tickets or claims and send each one to the right queue or team.",
+      "example_prompt": "Tag each support ticket by product area and urgency, then route it.",
+      "defaults": {
+        "avg_input_tokens": 800,
+        "avg_output_tokens": 60,
+        "agent_steps": 1,
+        "needs_knowledge_base": false,
+        "retrieval_chunks": 0,
+        "chunk_tokens": 0,
+        "needs_memory": false
+      },
+      "blueprint": [
+        {
+          "title": "What it does",
+          "body": "Every incoming item is labeled by an AI model against your category list and routed by rules you control. Unclear cases go to a person instead of guessing."
+        },
+        {
+          "title": "What gets built",
+          "body": "A labeling service wired into your intake channel, the routing rules, and a review queue for low-confidence items."
+        }
+      ]
+    },
+    "agent_workflow": {
+      "label": "Automate a multi-step task",
+      "description": "An AI assistant that works through a task in several steps - looking things up, drafting, checking - before returning a finished result.",
+      "example_prompt": "Research this account, draft a renewal proposal, and check it against our pricing rules.",
+      "defaults": {
+        "avg_input_tokens": 1200,
+        "avg_output_tokens": 700,
+        "agent_steps": 5,
+        "needs_knowledge_base": true,
+        "retrieval_chunks": 4,
+        "chunk_tokens": 400,
+        "needs_memory": true,
+        "default_corpus_gb": 5
+      },
+      "blueprint": [
+        {
+          "title": "What it does",
+          "body": "The assistant breaks the task into steps, uses your data sources and tools at each step, and assembles a finished result. Every intermediate step is recorded so you can see exactly how it reached the answer."
+        },
+        {
+          "title": "What gets built",
+          "body": "The step-by-step assistant, connections to the systems it needs, a searchable index of your reference material, and per-user working state so it can pick up where it left off."
+        }
+      ]
+    }
+  }
+}

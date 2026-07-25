@@ -5,11 +5,15 @@ SELECT
   u.workspace_id                                                 AS workspace_id,
   COALESCE(u.billing_origin_product, 'unallocated')               AS workload_type,
   CASE
+    WHEN u.billing_origin_product = 'GENIE' THEN 'databricks'
     WHEN UPPER(u.sku_name) LIKE '%ANTHROPIC%' THEN 'anthropic'
     WHEN UPPER(u.sku_name) LIKE '%OPENAI%' THEN 'openai'
     ELSE 'databricks'
   END                                                            AS provider,
-  u.sku_name                                                     AS model,
+  CASE
+    WHEN u.billing_origin_product = 'GENIE' THEN 'GENIE'
+    ELSE u.sku_name
+  END                                                            AS model,
   COALESCE(u.usage_metadata.endpoint_name, 'unallocated')         AS endpoint,
   COALESCE(u.identity_metadata.run_as, 'unallocated')             AS principal,
   COALESCE(NULLIF(TRIM(u.custom_tags['project']), ''),
@@ -40,6 +44,7 @@ WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
       'MODEL_SERVING', 'VECTOR_SEARCH', 'ONLINE_TABLES',
       'AGENT_EVALUATION', 'FOUNDATION_MODEL_TRAINING'
     )
+    OR u.billing_origin_product = 'GENIE'
     OR u.sku_name LIKE '%INFERENCE%'
     OR u.sku_name LIKE '%SERVING%'
   )

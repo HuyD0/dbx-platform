@@ -11,8 +11,7 @@ pointing CI or a local profile at a new workspace.
   override (`DATABRICKS_HOST`) or a Databricks CLI profile instead of copying the
   host into jobs, scripts, docs, or app code.
 - Keep the dedicated 2X-Small serverless SQL warehouse. Reusing an existing
-  shared warehouse makes ownership, Hibernate/Wake, and blast-radius checks
-  ambiguous.
+  shared warehouse makes ownership and blast-radius checks ambiguous.
 - Keep the production deployment allowlist in `.github/workflows/deploy.yml`.
   It prevents bundle deploys from replacing Lakeview dashboards or crossing an
   unreviewed destructive plan.
@@ -30,6 +29,7 @@ pointing CI or a local profile at a new workspace.
   - `AZURE_SUBSCRIPTION_ID`
   - `DBX_PLATFORM_RUNTIME_EXECUTOR_SP`
   - `DBX_PLATFORM_ACTION_EXECUTOR_SP`
+  - `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP`
   - `DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL`
   - `DBX_PLATFORM_ACTIONS_ENABLED`
 - Override bundle variables for enterprise names where needed:
@@ -41,7 +41,7 @@ pointing CI or a local profile at a new workspace.
   - `platform_console_name`
 - Remove any temporary workspace-admin membership after applying the scoped
   grants in `docs/service-principal.md`. Workspace admin should not be the final
-  steady-state permission model for deployment, app, runtime, or action
+  steady-state permission model for deployment, app, evidence-job, or action
   executor identities.
 - Keep `actions_enabled=false` until proposal-only validation, one full evidence
   cycle, approval negative tests, and a low-risk executor test all pass in the
@@ -58,8 +58,14 @@ pointing CI or a local profile at a new workspace.
 - The deployment identity must be registered in the target Databricks workspace
   and able to deploy the bundle, run `schema_migrations`, and manage only the
   bundle-owned resources.
-- The runtime executor and action executor must be distinct service principals
+- The evidence-job identity and action executor must be distinct service principals
   unless a reviewed exception explicitly sets `DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP`.
+- The LakeMeter migration executor must be a third, dedicated service
+  principal with access only to its Lakebase project/database and unscheduled
+  migration Job.
+- Confirm Lakebase Autoscaling and Databricks Apps database resources are
+  available in the target region. Keep the Estimator in its setup state until
+  the approved companion reconciliation and schema migration complete.
 - Unity Catalog `main.dbx_platform` in examples is only a default. Enterprise
   workspaces should either create that schema or set `control_plane_catalog` and
   `control_plane_schema` consistently before migrations.
@@ -81,6 +87,5 @@ DATABRICKS_HOST=https://adb-<workspace-id>.<n>.azuredatabricks.net \
 ```
 
 For production, deploy with `actions_enabled=false`, run `schema_migrations`,
-then run the power-controller reconciliation in proposal-only mode. Approve Wake
-only after the app health endpoint, source-health states, and one scheduled
-evidence cycle are clean.
+then verify the app health endpoint, source-health states, the five curated
+schedule states, and one scheduled evidence cycle.

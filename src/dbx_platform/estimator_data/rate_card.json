@@ -1,0 +1,201 @@
+{
+  "version": "2026.07.1",
+  "_comment": "Mapping layer between abstract billable components and concrete meters. azure_groups become one Retail Prices API request each (region/currency appended at fetch time); azure_rate_keys match meters within a group by regex at parse time, so meter renames rot visibly (pricing-coverage findings), never silently. kind drives unit normalization: token prices are stored per 1M text units, hour/unit_hour per hour, gb_month per GB-month. Databricks $/DBU comes from system.billing.list_prices; per-1M-token DBU draws for pay-per-token endpoints are git-versioned constants with provenance because list_prices prices DBUs, not tokens.",
+  "azure_groups": {
+    "aoai": "serviceName eq 'Cognitive Services' and priceType eq 'Consumption'",
+    "foundry": "serviceName eq 'Azure AI Foundry' and priceType eq 'Consumption'",
+    "search": "serviceName eq 'Azure Cognitive Search' and priceType eq 'Consumption'",
+    "vm": "armSkuName eq 'Standard_D8s_v5' and priceType eq 'Consumption'",
+    "aks": "serviceName eq 'Azure Kubernetes Service' and priceType eq 'Consumption'",
+    "storage": "serviceName eq 'Storage' and skuName eq 'Hot LRS' and priceType eq 'Consumption'",
+    "postgres": "serviceName eq 'Azure Database for PostgreSQL' and priceType eq 'Consumption'"
+  },
+  "azure_rate_keys": [
+    {
+      "rate_key": "aoai.gpt-4o-mini.input",
+      "group": "aoai",
+      "kind": "token",
+      "meter_regex": "(?i)gpt.?4o.?mini.*In(p|put)",
+      "exclude_regex": "(?i)cach|batch|audio|realtime|fine|train|regional|Data Zone",
+      "description": "Efficient AI model - reading"
+    },
+    {
+      "rate_key": "aoai.gpt-4o-mini.output",
+      "group": "aoai",
+      "kind": "token",
+      "meter_regex": "(?i)gpt.?4o.?mini.*Outp",
+      "exclude_regex": "(?i)cach|batch|audio|realtime|fine|train|regional|Data Zone",
+      "description": "Efficient AI model - writing"
+    },
+    {
+      "rate_key": "aoai.gpt-4o.input",
+      "group": "aoai",
+      "kind": "token",
+      "meter_regex": "(?i)gpt.?4o(?!.?mini).*In(p|put)",
+      "exclude_regex": "(?i)cach|batch|audio|realtime|fine|train|regional|Data Zone",
+      "description": "Standard AI model - reading"
+    },
+    {
+      "rate_key": "aoai.gpt-4o.output",
+      "group": "aoai",
+      "kind": "token",
+      "meter_regex": "(?i)gpt.?4o(?!.?mini).*Outp",
+      "exclude_regex": "(?i)cach|batch|audio|realtime|fine|train|regional|Data Zone",
+      "description": "Standard AI model - writing"
+    },
+    {
+      "rate_key": "aoai.embedding-3-small.input",
+      "group": "aoai",
+      "kind": "token",
+      "meter_regex": "(?i)text.?embedding.?3.?small",
+      "exclude_regex": "(?i)batch",
+      "description": "Document indexing model"
+    },
+    {
+      "rate_key": "foundry.llama-3-3-70b.input",
+      "group": "foundry",
+      "kind": "token",
+      "meter_regex": "(?i)llama.?3.?3.?70b.*In(p|put)",
+      "exclude_regex": "(?i)batch|fine|train",
+      "optional": true,
+      "description": "Open-weight AI model - reading (informational; not used by default model classes)"
+    },
+    {
+      "rate_key": "foundry.llama-3-3-70b.output",
+      "group": "foundry",
+      "kind": "token",
+      "meter_regex": "(?i)llama.?3.?3.?70b.*Outp",
+      "exclude_regex": "(?i)batch|fine|train",
+      "optional": true,
+      "description": "Open-weight AI model - writing (informational; not used by default model classes)"
+    },
+    {
+      "rate_key": "search.basic.unit",
+      "group": "search",
+      "kind": "unit_hour",
+      "meter_regex": "(?i)^basic unit",
+      "exclude_regex": null,
+      "description": "Managed document search - basic capacity unit"
+    },
+    {
+      "rate_key": "search.s1.unit",
+      "group": "search",
+      "kind": "unit_hour",
+      "meter_regex": "(?i)^(standard )?s1 unit",
+      "exclude_regex": null,
+      "description": "Managed document search - standard capacity unit"
+    },
+    {
+      "rate_key": "vm.d8s_v5",
+      "group": "vm",
+      "kind": "hour",
+      "meter_regex": "(?i)^d8s v5",
+      "exclude_regex": "(?i)spot|low priority|windows",
+      "product_exclude_regex": "(?i)windows",
+      "description": "Kubernetes worker machine (8 cores)"
+    },
+    {
+      "rate_key": "aks.standard_uptime",
+      "group": "aks",
+      "kind": "hour",
+      "meter_regex": "(?i)standard uptime",
+      "exclude_regex": "(?i)long term",
+      "description": "Kubernetes control-plane fee (uptime guarantee)"
+    },
+    {
+      "rate_key": "storage.hot_gb_month",
+      "group": "storage",
+      "kind": "gb_month",
+      "meter_regex": "(?i)hot lrs data stored",
+      "exclude_regex": "(?i)early delete",
+      "description": "Cloud file storage, per GB per month"
+    },
+    {
+      "rate_key": "postgres.flex.burstable",
+      "group": "postgres",
+      "kind": "hour",
+      "meter_regex": "(?i)b1ms",
+      "exclude_regex": "(?i)reserved",
+      "product_regex": "(?i)flexible server",
+      "description": "Small managed database for per-user working state"
+    },
+    {
+      "rate_key": "postgres.flex.general",
+      "group": "postgres",
+      "kind": "hour",
+      "meter_regex": "(?i)d2s",
+      "exclude_regex": "(?i)reserved|spot",
+      "product_regex": "(?i)flexible server",
+      "description": "Standard managed database for per-user working state"
+    }
+  ],
+  "databricks_rate_keys": [
+    {
+      "rate_key": "dbx.model_serving.dbu",
+      "sku_regex": "(?i)serverless.?real.?time.?inference",
+      "description": "Databricks model serving, $ per DBU"
+    },
+    {
+      "rate_key": "dbx.fmapi.dbu",
+      "sku_regex": "(?i)foundation.?model",
+      "description": "Databricks pay-per-token AI models, $ per DBU"
+    },
+    {
+      "rate_key": "dbx.vector_search.dbu",
+      "sku_regex": "(?i)vector.?search",
+      "description": "Databricks document search index, $ per DBU"
+    },
+    {
+      "rate_key": "dbx.jobs_serverless.dbu",
+      "sku_regex": "(?i)jobs.?serverless",
+      "description": "Databricks serverless jobs (quality-check suites), $ per DBU"
+    },
+    {
+      "rate_key": "dbx.lakebase.dbu",
+      "sku_regex": "(?i)lakebase",
+      "optional": true,
+      "description": "Databricks operational database for per-user working state, $ per DBU"
+    }
+  ],
+  "models": {
+    "answer_mini": {
+      "label": "Efficient AI model",
+      "azure": {"input": "aoai.gpt-4o-mini.input", "output": "aoai.gpt-4o-mini.output"},
+      "databricks": {
+        "dbu_rate_key": "dbx.fmapi.dbu",
+        "dbu_per_1m_input_tokens": 3.5,
+        "dbu_per_1m_output_tokens": 10.5,
+        "provenance": "Databricks Foundation Model API pay-per-token rate card, efficient model class (claude-haiku family), captured 2026-06. Multiplied by the live $/DBU list price from system.billing.list_prices."
+      }
+    },
+    "answer_standard": {
+      "label": "Standard AI model",
+      "azure": {"input": "aoai.gpt-4o.input", "output": "aoai.gpt-4o.output"},
+      "databricks": {
+        "dbu_rate_key": "dbx.fmapi.dbu",
+        "dbu_per_1m_input_tokens": 21.4,
+        "dbu_per_1m_output_tokens": 64.3,
+        "provenance": "Databricks Foundation Model API pay-per-token rate card, standard model class (claude-sonnet family), captured 2026-06. Multiplied by the live $/DBU list price from system.billing.list_prices."
+      }
+    },
+    "judge_standard": {
+      "label": "AI review model",
+      "azure": {"input": "aoai.gpt-4o-mini.input", "output": "aoai.gpt-4o-mini.output"},
+      "databricks": {
+        "dbu_rate_key": "dbx.fmapi.dbu",
+        "dbu_per_1m_input_tokens": 3.5,
+        "dbu_per_1m_output_tokens": 10.5,
+        "provenance": "Databricks Foundation Model API pay-per-token rate card, efficient model class used for AI-graded reviews, captured 2026-06. Multiplied by the live $/DBU list price."
+      }
+    },
+    "embedding_standard": {
+      "label": "Document indexing model",
+      "azure": {"input": "aoai.embedding-3-small.input"},
+      "databricks": {
+        "dbu_rate_key": "dbx.fmapi.dbu",
+        "dbu_per_1m_input_tokens": 1.0,
+        "provenance": "Databricks Foundation Model API pay-per-token rate card, embedding model class (gte-large family), captured 2026-06. Multiplied by the live $/DBU list price."
+      }
+    }
+  }
+}

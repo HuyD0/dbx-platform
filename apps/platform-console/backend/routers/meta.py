@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 import dbx_platform
 from backend import cache, deps
@@ -28,6 +29,21 @@ def _build_info() -> dict | None:
     return info if isinstance(info, dict) else None
 
 
+# Cached on success only, so a workspace blip at startup cannot pin health to
+# a null scope for the process lifetime.
+_workspace_id_cache: str | None = None
+
+
+def _workspace_id() -> str | None:
+    global _workspace_id_cache
+    if _workspace_id_cache is None:
+        try:
+            _workspace_id_cache, _ = deps.control_plane_scope()
+        except Exception:  # noqa: BLE001 — health must answer even without the workspace
+            return None
+    return _workspace_id_cache
+
+
 @router.get("/api/health")
 def health() -> dict:
     return {
@@ -36,6 +52,7 @@ def health() -> dict:
         "build": _build_info(),
         "actions_enabled": deps.actions_enabled(),
         "environment": os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev"),
+        "workspace_id": _workspace_id(),
     }
 
 
@@ -47,7 +64,9 @@ def config() -> dict:
         "actions_enabled": deps.actions_enabled(),
         "findings_table": deps.findings_table(),
         "digest_model": s.digest_model,
-        "agent_endpoint": deps.agent_endpoint(),
+        # Retain the response key for UI/API compatibility; the value is now
+        # the App-hosted LangGraph agent's bound foundation-model endpoint.
+        "agent_endpoint": deps.chat_endpoint(),
         "lookback_days": s.lookback_days,
         "required_tags": s.required_tag_list(),
         "thresholds": {
@@ -62,6 +81,83 @@ def config() -> dict:
     }
 
 
+@router.get("/api/workspaces")
+def workspaces(request: Request) -> dict:
+    actor = request.state.actor
+    workspace_id = _workspace_id()
+    environment = os.environ.get("DBX_PLATFORM_ENVIRONMENT", "dev")
+    is_admin = actor.has_role("operator") or actor.has_role("approver")
+    capabilities = [
+        {
+            "id": "personal-evidence",
+            "label": "View workspace evidence",
+            "description": (
+                "See health, cost, governance, AI, and operational evidence with "
+                "viewer-safe redaction."
+            ),
+            "enabled": True,
+        },
+        {
+            "id": "propose-actions",
+            "label": "Draft governed changes",
+            "description": (
+                "Create immutable proposals for workspace changes; execution still "
+                "requires approval."
+            ),
+            "enabled": actor.has_role("proposer"),
+        },
+        {
+            "id": "approve-actions",
+            "label": "Approve exact plans",
+            "description": (
+                "Approve one current, immutable plan before a dedicated executor "
+                "can run it."
+            ),
+            "enabled": actor.has_role("approver"),
+        },
+        {
+            "id": "admin-console",
+            "label": "Platform admin view",
+            "description": (
+                "Review all workspace evidence and pending governed actions for "
+                "this control plane."
+            ),
+            "enabled": is_admin,
+        },
+    ]
+    workspace = {
+        "workspace_id": workspace_id,
+        "name": (
+            os.environ.get("DBX_PLATFORM_WORKSPACE_NAME")
+            or workspace_id
+            or "Current workspace"
+        ),
+        "environment": environment,
+        "relationship": "platform_admin" if is_admin else "workspace_user",
+        "roles": sorted(actor.roles),
+        "capabilities": capabilities,
+        "management_mode": "governed_approval" if is_admin else "viewer_safe",
+    }
+    return {
+        "actor": {
+            "actor_id": actor.actor_id,
+            "email": actor.email,
+            "roles": sorted(actor.roles),
+            "view": "platform_admin" if is_admin else "workspace_user",
+        },
+        "workspaces": [workspace],
+        "source_status": {
+            "status": "partial",
+            "source": "databricks_app_obo",
+            "notes": (
+                "Uses the Databricks Apps forwarded user token as OBO passthrough "
+                "for this workspace. Account-wide workspace discovery can be "
+                "added behind the same entitlement model."
+            ),
+        },
+    }
+
+
 @router.get("/api/dashboards")
 def dashboards(refresh: bool = False) -> dict:
     def load() -> list[dict]:
@@ -69,16 +165,28 @@ def dashboards(refresh: bool = False) -> dict:
         host = (w.config.host or "").rstrip("/")
         out = []
         try:
+            workspace_id = str(w.get_workspace_id() or "").strip()
+            if not host or not workspace_id:
+                return []
+            workspace_query = urlencode({"o": workspace_id})
             for d in w.lakeview.list():
                 name = d.display_name or ""
                 if DASHBOARD_MARKER in name and d.dashboard_id:
-                    out.append({
-                        "name": name,
-                        "url": f"{host}/sql/dashboardsv3/{d.dashboard_id}",
-                        # Iframe-embeddable only after a workspace admin approves
-                        # the app's domain for embedding (docs/runbook.md).
-                        "embed_url": f"{host}/embed/dashboardsv3/{d.dashboard_id}",
-                    })
+                    out.append(
+                        {
+                            "name": name,
+                            "url": (
+                                f"{host}/sql/dashboardsv3/{d.dashboard_id}"
+                                f"?{workspace_query}"
+                            ),
+                            # Basic embedding reuses the viewer's workspace
+                            # session; never expose the App's forwarded token.
+                            "embed_url": (
+                                f"{host}/embed/dashboardsv3/{d.dashboard_id}"
+                                f"?{workspace_query}"
+                            ),
+                        }
+                    )
         except Exception:  # noqa: BLE001 — links are garnish, never break the page
             return []
         return sorted(out, key=lambda d: d["name"])

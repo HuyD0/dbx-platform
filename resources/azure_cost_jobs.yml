@@ -7,12 +7,10 @@ resources:
     azure_cost_pull:
       name: "[dbx-platform] azure-cost-pull"
       description: >
-        Pulls the subscription's actual cost (daily, by service and resource
-        group) from the Azure Cost Management Query API and MERGEs it into
-        <catalog>.<schema>.azure_costs. Temporarily pulls a 365-day initial
-        backfill; restore the normal 3-day late-restatement window immediately
-        after the approved backfill succeeds. Then reports per-bucket spend
-        spikes. Writes only to platform-owned tables.
+        Pulls resource-group-scoped billed cost from the Azure Cost Management
+        Query API and MERGEs it into <catalog>.<schema>.azure_costs. Pulls a
+        rolling 3-day window so late restatements are merged on the next daily
+        run. Fails closed if no resource-group allowlist is configured.
       schedule:
         quartz_cron_expression: "0 30 6 * * ?"  # daily 06:30 UTC, before cost jobs
         timezone_id: UTC
@@ -34,9 +32,6 @@ resources:
           default: ""
         - name: approved_plan_hash
           default: ""
-      email_notifications:
-        on_failure:
-          - ${var.notification_email}
       environments:
         - environment_key: default
           spec:
@@ -50,8 +45,9 @@ resources:
             package_name: dbx_platform
             entry_point: dbx-platform
             parameters:
-              ["azure-cost", "pull", "--days", "365",
+              ["azure-cost", "pull", "--days", "3",
                "--subscription-id", "${var.azure_subscription_id}",
+               "--resource-groups", "${var.azure_cost_resource_groups}",
                "--service-credential", "${var.azure_service_credential}",
                "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
                "--approved-action-id", "{{job.parameters.approved_action_id}}",
@@ -69,4 +65,11 @@ resources:
             entry_point: dbx-platform
             parameters:
               ["azure-cost", "spikes",
-               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}"]
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--store-findings",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

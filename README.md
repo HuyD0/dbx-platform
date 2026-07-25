@@ -6,7 +6,7 @@ Databricks across cost, security, risk, and performance.
 It continuously observes the platform, normalizes evidence into findings, and
 uses AI to correlate symptoms and draft proposals. AI is never an executor.
 Every Databricks/Azure resource, credential, policy, budget, schedule, model,
-training, or runtime mutation follows:
+training, or other governed mutation follows:
 
 `Observe → correlate → propose → human approve → execute → verify → measure`
 
@@ -32,7 +32,7 @@ jobs are the only mutation boundary.
   unsupported in v1.
 - Autonomous schedules may read sources and append internal findings, usage,
   cost, and audit telemetry. Training, model promotion, budget/config changes,
-  manual stateful job runs, remediation, and runtime control require approval.
+  manual stateful job runs, and remediation require approval.
 
 See [docs/runbook.md](docs/runbook.md) for the operator flow and
 [docs/service-principal.md](docs/service-principal.md) for the exact identity
@@ -47,14 +47,13 @@ systems:
    outcomes, pending approvals, what changed, and the top decisions.
 2. **Action Center** — recommendations, awaiting approval, activity, failures,
    and rollback outcomes.
-3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, and unit
-   economics.
+3. **Cost & Value** — Databricks, Azure, LLM/AI, budgets, forecast, unit
+   economics, and the native LakeMeter Estimator.
 4. **Security & Risk** — identity, credentials, grants, ownership, policies,
    egress, and audit anomalies.
 5. **Performance** — job/query regressions, queueing, retry waste,
    utilization, serving latency/errors, and SLO risk.
-6. **Resources & Runtime** — exact owned inventory, dependencies, Hibernate,
-   and Wake.
+6. **Operations** — performance regressions and compute hygiene.
 7. **Automations** — report schedules, monitors, and playbooks.
 8. **Assistant**, with Settings and Audit available globally.
 
@@ -64,9 +63,12 @@ affected resources, evidence, freshness, first/last seen, blast radius, and
 lifecycle state. Ranking is deterministic: critical security/SLO impact,
 estimated financial impact, then age.
 
-The contextual assistant receives the current page/filter/resource context. It
-can explain evidence and draft structured proposals, but cannot call an
-executor. Responses must cite a source table/query, timestamp, or resource.
+The contextual assistant receives the current page/filter/resource context and
+runs as a LangGraph agent inside the FastAPI backend. Its allowlisted tools
+reuse the package's read-only checks and canonical findings; its LLM uses a
+least-privileged `CAN_QUERY` binding to a Databricks-hosted foundation model.
+The graph has no executor tool. Responses must cite a source table/query,
+timestamp, or resource.
 
 ## LLM Cost & Value
 
@@ -86,32 +88,21 @@ The rollup keeps 90 days of hourly detail and 400 days of daily aggregates.
 Budgets default to 80% warning and 100% critical alerts; changing a budget is
 an approved action and an alert never changes resources automatically.
 
-## Safe Hibernate and Wake
+## Curated schedules and compute
 
 The bundle creates a dedicated 2X-Small serverless SQL warehouse with a
-five-minute auto-stop. It never manages or reuses the shared Starter warehouse.
+five-minute auto-stop. It starts on demand and never manages or reuses the
+shared Starter warehouse. The Platform Console remains started.
 
-The exact v1 Hibernate inventory is:
+Every schedule is paused by default in its resource definition. Production
+unpauses only:
 
-- the Platform Console app;
-- thirteen bundle-declared schedules;
-- the dedicated Mission Control warehouse.
+- daily `azure_cost_pull` and `cost_usage_report`;
+- weekly `security_audit`, `governance_check`, and `platform_digest`.
 
-The unscheduled `power-controller` and `action-executor` jobs, manual forecast
-training, dashboards, Unity Catalog data, models, shared compute, storage,
-networking, and unrelated projects are protected/out of scope.
-
-Hibernate records exact prior state, pauses only schedules that were enabled,
-waits up to 15 minutes for owned runs/queries to drain, stops the warehouse,
-then stops the app. Wake starts the warehouse, starts and health-checks the
-app, and restores only the schedules enabled before Hibernate. Partial failure
-restores captured state where possible and records the result.
-
-All bundle schedules deploy PAUSED and the warehouse deploys stopped; the app
-deploys started, so a prod deploy starts it directly. Deployments run schema
-migrations on serverless Spark, then produce a proposal-only runtime
-reconciliation. Deploying while `SLEEPING` still restarts the app but leaves
-the warehouse and schedules asleep.
+Dev and UAT keep every schedule paused. The other production Jobs remain
+deployed and may be launched through an approved `run-job` action when fresh
+evidence is needed.
 
 ## Commands and jobs
 
@@ -119,10 +110,16 @@ Read-only/advisory CLI examples:
 
 ```bash
 dbx-platform cost report --days 30
+dbx-platform cost attribution --dimension team     # spend by enforced tag
+dbx-platform azure-cost detail --by meter --bucket foundry_ai
 dbx-platform security token-audit
 dbx-platform governance policy-sync
 dbx-platform dashboards health
 ```
+
+The utilization and Azure-spike checks accept `--store-findings` to persist
+their results to `platform_findings`; that path verifies the governed Job
+context first, so ad-hoc local runs stay report-only.
 
 The legacy mutator flags remain parseable only to fail with a migration
 message:
@@ -167,8 +164,9 @@ databricks auth login \
   --host https://adb-<workspace-id>.<n>.azuredatabricks.net \
   --profile dbx-platform
 
-export BUNDLE_VAR_runtime_executor_service_principal_name=<runtime-executor-client-id>
+export BUNDLE_VAR_runtime_executor_service_principal_name=<evidence-job-client-id>
 export BUNDLE_VAR_action_executor_service_principal_name=<action-executor-client-id>
+export BUNDLE_VAR_lakemeter_migration_executor_service_principal_name=<lakemeter-migration-client-id>
 
 uv run ruff check .
 uv run pytest
@@ -182,17 +180,22 @@ controlled enablement, create the approver group, apply the least-privilege
 grants, and validate one complete scheduled reporting cycle. Full setup:
 [docs/setup.md](docs/setup.md). For enterprise migration pre-flight checks, see
 [docs/enterprise-migration-audit.md](docs/enterprise-migration-audit.md).
+LakeMeter provisioning, migration, and upstream-update procedures are in
+[docs/lakemeter.md](docs/lakemeter.md).
 
 ## Repository layout
 
 ```text
 apps/platform-console/     React/FastAPI Mission Control
-agents/platform_agent/     read-only contextual assistant
+agents/platform_agent/     optional MLflow-serving compatibility wrapper
+integrations/lakemeter/     host adapters and immutable upstream lock
+vendor/lakemeter/           untouched pinned LakeMeter OSS snapshot
+src/dbx_platform/platform_agent/ shared read-only LangGraph tools and formatting
 src/dbx_platform/          evidence packs, ledger, migrations, executors
 resources/                 Asset Bundle jobs, app, warehouse, dashboards
 dashboards/                AI/BI templates and rendered definitions
 policies/                  reviewable policy source
-tests/                     offline safety, decision, API, and runtime tests
+tests/                     offline safety, decision, API, and executor tests
 docs/                      setup, grants, runbook, secrets, cloud CI
 ```
 
@@ -205,7 +208,9 @@ uv run python -m build --wheel
 databricks bundle validate -t dev
 ```
 
-The frontend production build runs from
-`apps/platform-console/frontend` with `npm ci && npm run build`.
+The host frontend production build runs from
+`apps/platform-console/frontend` with `npm ci && npm run build`; the isolated
+LakeMeter build follows from `integrations/lakemeter/frontend` before
+`scripts/stage_lakemeter_app.py` assembles the App source.
 CI authenticates to Databricks only on protected workspace-touching jobs; PR
 tests remain credential-free and offline.

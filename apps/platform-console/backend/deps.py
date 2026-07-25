@@ -19,6 +19,15 @@ from dbx_platform.config import Settings
 
 @lru_cache(maxsize=1)
 def get_ws():
+    if os.environ.get("DATABRICKS_APP_NAME"):
+        # Databricks Apps inject both a limited static token and the App
+        # service principal's OAuth client credentials. Unified auth prefers
+        # the static token, which can lack the SQL Statement Execution scope.
+        # Force M2M here so shared App operations use the resource-bound
+        # service principal with a refreshable all-APIs token.
+        from databricks.sdk import WorkspaceClient
+
+        return WorkspaceClient(auth_type="oauth-m2m", scopes=["all-apis"])
     return get_client(None)
 
 
@@ -189,32 +198,6 @@ def require_operator(request: Request):
     return actor
 
 
-def power_controller_job_id() -> int:
-    raw = os.environ.get("DBX_PLATFORM_POWER_CONTROLLER_JOB_ID", "").strip()
-    if not raw:
-        raise ValueError(
-            "DBX_PLATFORM_POWER_CONTROLLER_JOB_ID is not configured from the "
-            "power-controller app resource binding."
-        )
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise ValueError(
-            "DBX_PLATFORM_POWER_CONTROLLER_JOB_ID must be an integer job ID."
-        ) from exc
-
-
-@lru_cache(maxsize=1)
-def get_runtime_controller_client():
-    from backend.runtime_controller_client import RuntimeControllerClient
-
-    return RuntimeControllerClient(
-        get_ws(),
-        power_controller_job_id(),
-        get_control_plane_repository(),
-    )
-
-
 def action_executor_job_id() -> int:
     raw = os.environ.get("DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID", "").strip()
     if not raw:
@@ -237,14 +220,25 @@ def get_action_executor_client():
     return ActionExecutorClient(get_ws(), action_executor_job_id())
 
 
-def agent_endpoint() -> str:
-    """Serving endpoint name of the platform agent. agents.deploy names it
-    agents_{catalog}-{schema}-{model}; override with DBX_PLATFORM_AGENT_ENDPOINT."""
-    explicit = os.environ.get("DBX_PLATFORM_AGENT_ENDPOINT", "").strip()
+def chat_endpoint() -> str:
+    """Least-privileged foundation-model endpoint bound to the App."""
+    explicit = os.environ.get("DBX_PLATFORM_CHAT_ENDPOINT", "").strip()
     if explicit:
         return explicit
-    s = get_settings()
-    return f"agents_{s.dashboard_catalog}-{s.dashboard_schema}-platform_agent"
+    return get_settings().digest_model
+
+
+@lru_cache(maxsize=1)
+def get_platform_agent():
+    """Process-local LangGraph agent hosted by the FastAPI backend."""
+    from backend.platform_agent import PlatformAgent
+
+    return PlatformAgent(
+        endpoint=chat_endpoint(),
+        workspace_client_factory=get_ws,
+        settings_factory=get_settings,
+        repository_factory=get_control_plane_repository,
+    )
 
 
 def clamp_days(days: int, lo: int = 7, hi: int = 90) -> int:

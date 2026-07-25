@@ -5,6 +5,7 @@ SELECT
   u.workspace_id                                                 AS workspace_id,
   COALESCE(u.billing_origin_product, 'unallocated')               AS workload_type,
   CASE
+    WHEN u.billing_origin_product = 'GENIE' THEN 'databricks'
     WHEN UPPER(COALESCE(
       u.usage_metadata.ai_gateway.destination_model,
       u.sku_name
@@ -19,6 +20,7 @@ SELECT
   END                                                            AS provider,
   COALESCE(
     u.usage_metadata.ai_gateway.destination_model,
+    CASE WHEN u.billing_origin_product = 'GENIE' THEN 'GENIE' END,
     u.sku_name
   )                                                              AS model,
   COALESCE(
@@ -59,6 +61,7 @@ WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), :days)
       'MODEL_SERVING', 'VECTOR_SEARCH', 'ONLINE_TABLES',
       'AGENT_EVALUATION', 'FOUNDATION_MODEL_TRAINING'
     )
+    OR u.billing_origin_product = 'GENIE'
     OR u.sku_name LIKE '%INFERENCE%'
     OR u.sku_name LIKE '%SERVING%'
   )

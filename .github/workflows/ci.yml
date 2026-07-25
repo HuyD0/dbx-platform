@@ -31,7 +31,18 @@ jobs:
         run: uv run pytest
       - name: Build wheel
         run: uv run python -m build --wheel
-      - name: Verify packaged data (queries + policies ship in the wheel)
+      - name: Resolve the locked Platform Console environment
+        run: |
+          wheel="$(basename "$(find dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          mkdir -p apps/platform-console/wheels
+          cp "dist/$wheel" "apps/platform-console/wheels/$wheel"
+          # The local wheel keeps the same name/version while its contents change.
+          # Refresh it explicitly so uv records the newly built artifact hash.
+          uv lock --refresh-package dbx-platform --project apps/platform-console
+          uv sync --frozen --project apps/platform-console --no-install-project
+          apps/platform-console/.venv/bin/python -m unittest discover \
+            -s apps/platform-console/tests -v
+      - name: Verify packaged data (queries + policies + estimator data ship in the wheel)
         run: |
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/usage_last_30d.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/serving_cost.sql"
@@ -39,28 +50,76 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/ai_gateway_usage_daily.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/rate_card.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/tiers.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/patterns.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/prompts/estimator_pattern_classify.md"
+          unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/extraction_eval.jsonl"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_assets/pricing/manifest.json"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/backend/app/routes/estimates.py"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/scripts/functions/09_Main_Orchestrator.py"
+          unzip -l dist/*.whl | grep -q "dbx_platform/lakemeter_vendor/scripts/install_lakemeter.py"
+      - name: Verify pinned LakeMeter compatibility
+        run: uv run python scripts/check_lakemeter_compat.py
 
   frontend:
     # Credential-free like lint-test-build — safe on PR branches.
     runs-on: ubuntu-latest
+    # Visual baselines are generated in this exact image. Pinning its digest
+    # keeps Chromium, system fonts, and rasterization stable across runner updates.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+      options: --ipc=host
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/platform-console/frontend/package-lock.json
+          cache-dependency-path: |
+            apps/platform-console/frontend/package-lock.json
+            integrations/lakemeter/frontend/package-lock.json
       - name: Install
         working-directory: apps/platform-console/frontend
         run: npm ci
+      - name: Install Chromium
+        working-directory: apps/platform-console/frontend
+        run: npx playwright install --with-deps chromium
       - name: Accessibility and interaction tests
         working-directory: apps/platform-console/frontend
         run: npm test
       - name: Typecheck and build
         working-directory: apps/platform-console/frontend
         run: npm run build
+      - name: Typecheck and build isolated LakeMeter
+        working-directory: integrations/lakemeter/frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Stage deployable LakeMeter assets
+        run: python scripts/stage_lakemeter_app.py
+      - name: Enforce Databricks Apps file limit
+        run: |
+          ! find apps/platform-console \
+            -path '*/node_modules' -prune -o \
+            -type f -size +9500k -print -quit | grep -q .
+      - name: Responsive browser and visual tests
+        working-directory: apps/platform-console/frontend
+        run: npm run test:e2e
+      - name: Upload browser test report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-console-playwright-report
+          path: apps/platform-console/frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   bundle-validate:
     # Push/dispatch only — never on pull_request. The `production` environment
@@ -79,6 +138,8 @@ jobs:
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
+      BUNDLE_VAR_lakemeter_migration_executor_service_principal_name: ${{ vars.DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP }}
+      BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
     steps:
       - uses: actions/checkout@v4

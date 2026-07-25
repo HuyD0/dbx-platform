@@ -13,8 +13,8 @@ allowlisted v1 action.
 
 Scheduled jobs may read platform sources and append findings, cost/usage
 ledger rows, forecasts, and audit telemetry. Budget/configuration changes,
-training/model promotion, manual stateful job runs, remediation, Hibernate,
-and Wake always require approval.
+training/model promotion, manual stateful job runs, and remediation always
+require approval.
 
 ## Action lifecycle
 
@@ -30,8 +30,9 @@ Every action stores the canonical plan JSON and SHA-256 hash, exact targets,
 resource versions/preconditions, before/after state, impact, rollback,
 verification, proposer, workspace/environment, 15-minute expiry, and
 single-use idempotency key. Every approval stores the same plan hash, verified
-approver identity/role, decision, timestamp, and typed confirmation when
-required. Execution and verification produce append-only events.
+approver identity/role, decision, and timestamp. The UI requires a separate
+explicit confirmation after the approval click. Execution and verification
+produce append-only events.
 
 Any payload change, target drift, expiry before executor claim, replay, missing
 SCIM identity, lost approver-group membership, unavailable audit storage, or
@@ -42,7 +43,7 @@ failed precondition invalidates the action without a target mutation.
 1. Open **Action Center → Awaiting Approval**.
 2. Confirm workspace/environment, exact target count, before/after state,
    source freshness, blast radius, rollback, and verification.
-3. For medium/high risk, type the displayed action and target count.
+3. Select Approve, then confirm the decision in the separate confirmation step.
 4. Approve or reject. One current member of `dbx-platform-approvers` is
    sufficient and may approve their own proposal.
 5. Follow Activity through execution and verification. Do not retry by
@@ -62,7 +63,7 @@ Keep bundle variable `actions_enabled=false` until all of these pass:
    sources are visible rather than silently omitted.
 4. `dbx-platform-approvers` membership resolves through Databricks user
    authorization/SCIM.
-5. Runtime and action executors are distinct identities with the grants in
+5. Evidence-job and action executors are distinct identities with the grants in
    [service-principal.md](service-principal.md).
 6. Spoofed identity, altered hash, unauthorized approval, expiry, replay,
    target drift, and missing audit storage tests fail without mutation.
@@ -73,103 +74,78 @@ Then set `BUNDLE_VAR_actions_enabled=true` through a reviewed deployment.
 Turning on this flag only permits approval/executor submission; it does not
 bypass any durable checks.
 
-## Safe Hibernate
+## Curated schedules and compute
 
-The exact managed scope is generated from bundle output:
+The Platform Console declares `started: true`. Its dedicated 2X-Small
+serverless SQL warehouse starts on first query and auto-stops after five idle
+minutes.
 
-- Platform Console app;
-- thirteen declared schedules;
-- dedicated `[dbx-platform] mission-control` 2X-Small serverless warehouse.
+All schedule definitions default to `PAUSED`. Dev and UAT keep that default.
+Production target overrides unpause exactly:
 
-Protected/out of scope:
+- `azure_cost_pull` daily at 06:30 UTC;
+- `cost_usage_report` daily at 07:00 UTC;
+- `security_audit` Monday at 06:00 UTC;
+- `governance_check` Monday at 06:30 UTC;
+- `platform_digest` Monday at 08:00 UTC.
 
-- shared Starter and every unrelated warehouse;
-- unscheduled `power-controller`, `action-executor`, and `schema_migrations`;
-- protected manual `cost-forecast-train`;
-- dashboards, UC data, models, storage/networking, workspace, and unrelated
-  projects.
+All other scheduled Jobs stay paused. When one is needed, create an exact
+`run-job` plan in Action Center and use the normal approval/executor flow.
+Never use Databricks **Run now** for a stateful evidence writer because it
+lacks the durable approval attestation.
 
-The controller never discovers targets by substring, tag, or broad workspace
-scan.
+CI builds and deploys the bundle, runs `schema_migrations`, and synchronizes
+estimator prompts. It does not run a lifecycle reconciliation job.
 
-### Plan and execute Hibernate
+After the first complete week, verify 17 scheduled Job triggers, confirm no new
+controller runs, and compare serverless billing with the previous week. A Job
+trigger may contain multiple billed tasks, so use system billing rather than
+trigger count as the dollar-savings measurement.
 
-Use **Workflows → `[dbx-platform] power-controller`**:
+### One-time power-controller retirement
 
-1. Run `operation=plan-hibernate`.
-2. Review resources to stop, already-stopped resources, exclusions, active
-   runs/queries, dependencies, estimated idle savings, retained data, wake
-   procedure, inverse state, expiry, hash, and confirmation phrase.
-3. Before expiry, rerun with:
-   - `operation=execute-hibernate`
-   - `plan_id=<reviewed action id>`
-   - `plan_hash=<reviewed hash>`
-   - `confirmation=<exact displayed phrase>`
+Production already has a bundle-bound controller Job. Resource deletion is
+unsupported, so retire it without deleting it:
 
-Execution:
+1. Deploy the release that removes CI invocation and app access while the old
+   Job definition is still present and unscheduled.
+2. Resolve the production bundle summary and verify the exact
+   `power_controller` binding and remote Job ID.
+3. Run `databricks bundle deployment unbind power_controller -t prod`.
+4. Without an intervening deployment from a revision that still declares the
+   controller, deploy the release that removes its bundle definition.
 
-1. Persist exact before state and inverse Wake plan.
-2. Pause only schedules previously unpaused.
-3. Wait up to 15 minutes for owned runs and dedicated-warehouse statements.
-4. If activity remains, abort and restore schedules/runtime state. Cancellation
-   requires a separate action and is unsupported in v1.
-5. Stop the dedicated warehouse.
-6. Persist checkpoints and desired `SLEEPING`.
-7. Stop the app last.
+The old workspace Job remains inert and unmanaged. Existing runtime-state
+tables and historical action/audit rows are retained; retired runtime actions
+cannot be approved or executed.
 
-On partial failure the controller restores captured state where possible and
-records the exact result. Drift becomes `STALE`; there is no best-effort
-mutation.
+## Assistant model access
 
-## Wake while the app is stopped
+The FastAPI backend hosts the LangGraph ReAct agent in-process. The graph uses
+the Databricks-hosted endpoint configured by `var.chat_model` (default
+`databricks-claude-sonnet-4-5`) as its LLM. The bundle binds that endpoint as
+the `chat-model` App resource with `CAN_QUERY` and injects its exact name
+through `DBX_PLATFORM_CHAT_ENDPOINT`.
 
-Use the same out-of-band controller in the Jobs UI:
+The graph receives the current page context and browser-held conversation. Its
+allowlisted tools reuse package checks for SQL-backed operational evidence and
+the canonical `platform_findings` repository for privileged scheduled
+evidence. It has no executor or target-mutation tool.
 
-1. Run `operation=plan-wake`.
-2. Review the exact 15-minute plan/hash.
-3. Rerun with `operation=execute-wake`, plan ID, plan hash, and exact
-   confirmation.
+If chat returns `agent_unavailable`, verify that the endpoint is `READY`, the
+App deployment includes the `chat-model` resource, and the active deployment
+contains `DBX_PLATFORM_CHAT_ENDPOINT`. Also verify the App environment
+installed `databricks-langchain` and `langgraph` from `requirements.txt`.
 
-The controller verifies the launcher’s current approver-group membership,
-starts the dedicated warehouse, starts and health-checks the currently
-deployed app revision, then restores only schedules enabled before Hibernate.
-Repeated Wake/Hibernate calls are idempotent.
-
-The controller does not deploy source. Releasing a different app revision is a
-separate reviewed deployment.
-
-Note: the app also starts on any prod deploy (it declares `started: true`), so
-after a merge to `main` this manual Wake is only needed to restart the warehouse
-and the schedules — the app itself is already up.
-
-## Deployment reconciliation
-
-Every bundle schedule declares `pause_status: PAUSED` and the dedicated
-warehouse declares `started: false`. The app declares `started: true`, so a
-prod deploy starts it directly (see `resources/app.yml`).
-
-CI performs:
-
-1. build wheel and frontend;
-2. validate/deploy the bundle;
-3. run unscheduled `schema_migrations` on serverless Spark;
-4. run `power_controller operation=reconcile`.
-
-The migration is the sole bootstrap path for schemas, tables, and dashboard
-helper functions. It does not start the managed SQL warehouse. Reconciliation
-reads durable desired state and either reports `ALREADY_RECONCILED` or creates
-an `AWAITING_APPROVAL` plan. CI never executes it.
-
-Deploying while desired state is `SLEEPING` leaves the warehouse and schedules
-asleep, but still starts the app, which declares `started: true`. A routine
-merge to `main` therefore restarts the app even when the toolkit is hibernated;
-only the warehouse and schedules stay asleep until an approved Wake.
+The optional MLflow-serving wrapper under `agents/platform_agent/` remains
+disabled; the App does not need it. Its deployment helper intentionally exits
+because separate model registration/deployment is a governed mutation without
+an allowlisted executor action.
 
 ## Protected forecast training
 
 `cost-forecast-train` is unscheduled and runs as the action executor identity.
-It is exact-bound into the app as a governed manual Job but is absent from the
-Hibernate inventory.
+It is exact-bound into the app as a governed manual Job.
 
 To train/promote:
 
@@ -234,7 +210,10 @@ and agent deployment are not general executor actions in v1.
 
 `agents/platform_agent/deploy_agent.py` intentionally exits without logging,
 registering, or deploying. Add a narrowly scoped, tested model-deploy action
-before enabling it.
+before enabling it. The Platform Console assistant does not need that action:
+its LangGraph runtime is hosted inside the read-only App and queries the
+`chat-model` foundation endpoint through an App resource binding with only
+`CAN_QUERY`.
 
 ### AI catalog & monitoring
 
@@ -280,6 +259,18 @@ Interpret labels literally:
 - `provider estimate`: AI Gateway/provider estimate, never silently combined
   with actual billed cost.
 
+Azure billed cost is ingested only after Cost Management applies the configured
+resource-group allowlist. The Databricks/Azure reconciliation view is a daily
+SKU-family bridge, not invoice-line equivalence; it withholds variance when the
+Azure billing currency is not USD. Compute, storage, networking, commitments,
+credits, and tax lines can remain unmatched by design.
+
+Paid Genie usage is included from `billing_origin_product = 'GENIE'` in the
+Databricks list-cost basis. SQL warehouse compute used by Genie remains a
+separate Databricks product cost. Use native Databricks Genie budgets for
+near-real-time alerts or blocking; Mission Control budgets are analytical,
+approval-gated guardrails and do not replace native enforcement.
+
 Do not add currencies without a documented conversion source/rate/time.
 Request telemetry allocates billed totals to workloads but does not claim
 invoice-accurate per-request cost. Keep an explicit `unallocated/uncovered`
@@ -319,6 +310,27 @@ Do not run `dashboards setup`; it is a disabled compatibility command.
 System-table and preview-source failures should be shown as dependency-health
 states with source, freshness, and setup guidance. Mission Control must not
 render raw backend/SQL exceptions.
+
+### Embedded dashboards in the console
+
+The Learn page embeds each published `[dbx-platform]` dashboard with the
+workspace-qualified basic-embedding URL:
+
+`<workspace-host>/embed/dashboardsv3/<dashboard-id>?o=<workspace-id>`
+
+Basic embedding authenticates the viewer with their existing Databricks
+workspace browser session. The App's forwarded user access token remains
+server-side and is never returned to the frontend or inserted into the iframe.
+`resources/dashboards.yml` keeps `embed_credentials: false`, so the viewer
+still needs `CAN_VIEW` on the dashboard plus access to its warehouse and
+underlying Unity Catalog data.
+
+Before using the iframe, a workspace admin must add the App's domain to the
+approved domains for dashboard embedding. The browser must also allow
+third-party cookies for the Databricks App and workspace domains; otherwise
+the iframe can show a second **Continue** prompt even when the user is already
+signed in to the App. Use **Open in workspace** as the fallback because it
+opens the same workspace-qualified dashboard outside the iframe.
 
 ## Audit and incident response
 

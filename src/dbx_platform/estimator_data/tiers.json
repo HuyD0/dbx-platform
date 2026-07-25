@@ -1,0 +1,214 @@
+{
+  "version": "2026.07.1",
+  "_comment": "Every number the cost engine uses that is not a user input or a live price lives here, named, with a plain-English description surfaced in the UI drill-down. Change values here, never inline in the engine.",
+  "assumptions": {
+    "dev_requests_per_month": {
+      "value": 2000,
+      "unit": "requests/month",
+      "description": "Fixed development-environment traffic floor: builders testing by hand and automated checks, independent of production scale."
+    },
+    "uat_traffic_fraction": {
+      "value": 0.1,
+      "unit": "fraction of production",
+      "description": "Acceptance-testing traffic as a share of production traffic."
+    },
+    "tokens_per_gb": {
+      "value": 180000000,
+      "unit": "text units per GB",
+      "description": "Approximate text volume in one gigabyte of typical business documents, used to size knowledge-base indexing work."
+    },
+    "corpus_amortization_months": {
+      "value": 12,
+      "unit": "months",
+      "description": "One-time cost of indexing the initial document collection is spread over this many months."
+    },
+    "dev_corpus_fraction": {
+      "value": 0.05,
+      "unit": "fraction",
+      "description": "Development uses a small sample of the document collection."
+    },
+    "uat_corpus_fraction": {
+      "value": 0.25,
+      "unit": "fraction",
+      "description": "Acceptance testing uses a representative sample of the document collection."
+    },
+    "search_partition_gb": {
+      "value": 25,
+      "unit": "GB per search unit",
+      "description": "Usable document capacity assumed per managed search unit."
+    },
+    "vs_gb_per_unit": {
+      "value": 50,
+      "unit": "GB per index unit",
+      "description": "Usable document capacity assumed per Databricks search index unit."
+    },
+    "vs_dbu_per_hour": {
+      "value": 4,
+      "unit": "DBU/hour per index unit",
+      "description": "Compute draw assumed for one Databricks search index unit."
+    },
+    "serving_dbu_per_unit_hour": {
+      "value": 4,
+      "unit": "DBU/hour per serving unit",
+      "description": "Compute draw assumed for one Databricks model serving concurrency unit."
+    },
+    "peak_factor": {
+      "value": 8,
+      "unit": "x average",
+      "description": "Peak traffic assumed as a multiple of the monthly average rate."
+    },
+    "request_latency_seconds": {
+      "value": 4,
+      "unit": "seconds",
+      "description": "Average time one request occupies capacity end to end."
+    },
+    "concurrency_per_serving_unit": {
+      "value": 4,
+      "unit": "simultaneous requests",
+      "description": "Simultaneous requests one serving unit is assumed to handle."
+    },
+    "pods_per_node": {
+      "value": 8,
+      "unit": "app copies per machine",
+      "description": "Application copies packed onto one Kubernetes machine."
+    },
+    "active_hours_per_month": {
+      "value": 160,
+      "unit": "hours/month",
+      "description": "Assumed working-hours usage for capacity that switches off when idle (prototype tier)."
+    },
+    "hours_per_month": {
+      "value": 730,
+      "unit": "hours/month",
+      "description": "Average hours in a calendar month for always-on capacity."
+    },
+    "ci_runs_per_month": {
+      "value": 20,
+      "unit": "runs/month",
+      "description": "How often the development quality-check suite runs (roughly every workday)."
+    },
+    "releases_per_month": {
+      "value": 4,
+      "unit": "releases/month",
+      "description": "How often a release candidate goes through acceptance-stage regression checks."
+    },
+    "judge_rubric_tokens": {
+      "value": 500,
+      "unit": "text units",
+      "description": "Grading-instructions overhead added to each AI-graded review."
+    },
+    "judge_output_tokens": {
+      "value": 300,
+      "unit": "text units",
+      "description": "Length of each AI-graded review verdict."
+    },
+    "eval_harness_dbu_per_run": {
+      "value": 2,
+      "unit": "DBU per suite run",
+      "description": "Compute for one run of the automated (code-based) quality-check suite."
+    },
+    "base_trace_kb": {
+      "value": 2,
+      "unit": "KB/request",
+      "description": "Baseline activity-record size written for every request."
+    },
+    "step_trace_kb": {
+      "value": 4,
+      "unit": "KB per step",
+      "description": "Additional activity-record size per assistant step, including its inputs and outputs. Recording every step is what makes step-by-step review possible."
+    },
+    "judged_payload_kb": {
+      "value": 16,
+      "unit": "KB/reviewed request",
+      "description": "Extra record size kept for requests selected for AI-graded review."
+    },
+    "lakebase_cu_per_tier_base": {
+      "value": 1,
+      "unit": "capacity units",
+      "description": "Baseline Databricks operational-database capacity for per-user working state."
+    },
+    "memory_users_per_capacity_unit": {
+      "value": 25000,
+      "unit": "monthly users per capacity unit",
+      "description": "Extra database capacity is added for every block of this many monthly users."
+    },
+    "postgres_storage_gb": {
+      "value": 32,
+      "unit": "GB",
+      "description": "Provisioned database storage for per-user working state."
+    }
+  },
+  "envs": {
+    "dev": {"label": "Development"},
+    "uat": {"label": "Acceptance testing"},
+    "prod": {"label": "Production"}
+  },
+  "tiers": {
+    "prototype": {
+      "label": "Departmental prototype",
+      "description": "Prove the idea with a small group. Efficient AI model, capacity that switches off when idle, automated code-based checks only - no AI-graded reviews.",
+      "model_class": "answer_mini",
+      "judge_class": "judge_standard",
+      "default_rigor_pct": 0,
+      "rigor_locked": true,
+      "rigor_locked_reason": "Prototype keeps checking costs at zero: automated code-based checks run, but no AI-graded reviews.",
+      "judged_steps_mode": "none",
+      "llm_judge_share": 0.0,
+      "eval_set_size": 50,
+      "retention_months": 1,
+      "search_sku": "basic",
+      "search_min_replicas": 1,
+      "serving_always_on": false,
+      "serving_duty_cycle": 1.0,
+      "serving_min_units": 1,
+      "aks_min_nodes": 1,
+      "aks_cluster_fee": false,
+      "state_replicas": 1,
+      "postgres_rate_key": "postgres.flex.burstable"
+    },
+    "production": {
+      "label": "Production standard",
+      "description": "Serve real users. Capacity scales with load, and a sample of live answers gets an AI-graded review on top of code-based checks on everything.",
+      "model_class": "answer_standard",
+      "judge_class": "judge_standard",
+      "default_rigor_pct": 10,
+      "rigor_locked": false,
+      "rigor_locked_reason": "",
+      "judged_steps_mode": "final",
+      "llm_judge_share": 1.0,
+      "eval_set_size": 200,
+      "retention_months": 3,
+      "search_sku": "s1",
+      "search_min_replicas": 1,
+      "serving_always_on": true,
+      "serving_duty_cycle": 0.4,
+      "serving_min_units": 1,
+      "aks_min_nodes": 2,
+      "aks_cluster_fee": true,
+      "state_replicas": 1,
+      "postgres_rate_key": "postgres.flex.general"
+    },
+    "fiduciary": {
+      "label": "Fiduciary-grade compliance",
+      "description": "For decisions you must be able to defend. Highly available capacity, full activity records kept for a year, and every step of every answer gets an AI-graded review.",
+      "model_class": "answer_standard",
+      "judge_class": "judge_standard",
+      "default_rigor_pct": 100,
+      "rigor_locked": true,
+      "rigor_locked_reason": "Compliance requires reviewing every answer, so review coverage is fixed at 100%.",
+      "judged_steps_mode": "trajectory",
+      "llm_judge_share": 1.0,
+      "eval_set_size": 500,
+      "retention_months": 12,
+      "search_sku": "s1",
+      "search_min_replicas": 3,
+      "serving_always_on": true,
+      "serving_duty_cycle": 1.0,
+      "serving_min_units": 2,
+      "aks_min_nodes": 3,
+      "aks_cluster_fee": true,
+      "state_replicas": 2,
+      "postgres_rate_key": "postgres.flex.general"
+    }
+  }
+}

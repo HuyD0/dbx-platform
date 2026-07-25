@@ -1,6 +1,6 @@
 name: Claude PR Review
 
-# Automatic review on every PR, checked against THIS repo's safety invariants
+# Manual review on request, checked against THIS repo's safety invariants
 # rather than a generic checklist. Same auth as claude.yml: the Claude Pro/Max
 # subscription OAuth token (CLAUDE_CODE_OAUTH_TOKEN), no API key.
 #
@@ -8,20 +8,21 @@ name: Claude PR Review
 # deliberately has none, so it is safe to run on PR branches.
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to review"
+        required: true
+        type: number
 
 # One review per PR head at a time; a new push cancels an in-flight review.
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
+  group: claude-review-${{ inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    # Same-repo PRs only. A fork PR must not be handed the review token, and
-    # GitHub withholds secrets from fork-triggered runs anyway — this makes that
-    # explicit and skips cleanly rather than failing on an empty token.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Manual runs use the repository token and do not receive Databricks/Azure credentials.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,7 +39,7 @@ jobs:
           track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ inputs.pr_number }}
 
             Review this PR for a Databricks platform-management toolkit. Read
             CLAUDE.md first — it states the invariants below. Prioritize these

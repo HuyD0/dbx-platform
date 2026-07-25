@@ -23,6 +23,7 @@ export function FindingsSection({
   emptyMessage = "No findings — all clean.",
   actionSlot,
   render,
+  renderWhenEmpty = false,
 }: {
   title: string;
   subtitle?: string;
@@ -31,6 +32,7 @@ export function FindingsSection({
   emptyMessage?: string;
   actionSlot?: ReactNode;
   render?: (rows: Row[]) => ReactNode;
+  renderWhenEmpty?: boolean;
 }) {
   const queryClient = useQueryClient();
   const queryKey = [path, params];
@@ -80,6 +82,8 @@ export function FindingsSection({
             "No finding can be asserted until this source is available."
           }
         />
+      ) : rows.length === 0 && render && renderWhenEmpty ? (
+        render(rows)
       ) : rows.length === 0 ? (
         <EmptyState message={emptyMessage} />
       ) : render ? (

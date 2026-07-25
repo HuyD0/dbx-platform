@@ -7,7 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { Cost } from "./Cost";
 import { CostValue } from "./CostValue";
 
-function envelope(data: unknown[]) {
+function envelope(data: unknown) {
   return new Response(
     JSON.stringify({
       data,
@@ -69,6 +69,12 @@ test("Azure actuals can switch from service to exact resource detail", async () 
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.startsWith("/api/cost/overview")) {
+      return envelope({
+        scope: { label: "Test workspace" },
+        period: { days: 30, from: "2026-06-26", to: "2026-07-25" },
+      });
+    }
     if (url.startsWith("/api/cost/azure?") && url.includes("by=resource")) {
       return envelope([
         {
@@ -85,10 +91,10 @@ test("Azure actuals can switch from service to exact resource detail", async () 
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  renderPage(<CostValue />, "/cost?tab=azure");
+  renderPage(<CostValue />, "/cost?tab=ownership");
 
   expect(await screen.findByText("Azure Databricks")).toBeInTheDocument();
-  await user.selectOptions(screen.getByRole("combobox", { name: "Dimension" }), "resource");
+  await user.click(screen.getByRole("button", { name: "Resource" }));
   expect(
     await screen.findByText(
       "/subscriptions/sub/resourceGroups/rg/providers/type/agent-eval",

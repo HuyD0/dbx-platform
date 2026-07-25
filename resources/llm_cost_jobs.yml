@@ -29,9 +29,6 @@ resources:
           default: ""
         - name: approved_plan_hash
           default: ""
-      email_notifications:
-        on_failure:
-          - ${var.notification_email}
       environments:
         - environment_key: default
           spec:

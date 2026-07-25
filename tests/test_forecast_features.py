@@ -11,6 +11,7 @@ from dbx_platform.forecast_features import (
     features_for_date,
     merge_features_sql,
     store_features,
+    validate_feature_alignment,
 )
 
 
@@ -99,6 +100,42 @@ def test_build_features_emits_all_columns():
 
 def test_build_features_short_history_is_empty():
     assert build_features(_rows(n=10)) == []
+
+
+def test_feature_alignment_reports_ready_series_and_counts():
+    source = _rows(n=40)
+    features = build_features(source)
+    alignment = validate_feature_alignment(source, features)
+    assert alignment == [
+        {
+            "series": "databricks",
+            "source_days": 40,
+            "expected_feature_rows": 12,
+            "feature_rows": 12,
+            "status": "ready",
+        },
+        {
+            "series": TOTAL_SERIES,
+            "source_days": 40,
+            "expected_feature_rows": 12,
+            "feature_rows": 12,
+            "status": "ready",
+        },
+    ]
+
+
+def test_feature_alignment_marks_expected_short_history_without_failing():
+    source = _rows(n=10)
+    alignment = validate_feature_alignment(source, [])
+    assert {row["status"] for row in alignment} == {"insufficient-history"}
+    assert {row["expected_feature_rows"] for row in alignment} == {0}
+
+
+def test_feature_alignment_fails_when_an_expected_feature_is_missing():
+    source = _rows(n=40)
+    features = build_features(source)
+    with pytest.raises(RuntimeError, match="Feature alignment failed"):
+        validate_feature_alignment(source, features[:-1])
 
 
 # --- SQL builders ---------------------------------------------------------------

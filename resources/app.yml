@@ -7,6 +7,11 @@
 # apps/platform-console/wheels/ and serves the SPA from
 # apps/platform-console/static/ — both produced by the deploy workflow.
 resources:
+  experiments:
+    platform_console_traces:
+      name: /Shared/dbx-platform-${bundle.target}-platform-console-traces
+      lifecycle:
+        prevent_destroy: true
   apps:
     platform_console:
       name: ${var.platform_console_name}
@@ -23,27 +28,57 @@ resources:
         - sql
       lifecycle:
         prevent_destroy: true
-        # Deploy converges the app to this state, so every prod deploy starts
-        # the app directly rather than leaving it stopped for an approved power
-        # controller reconciliation. This intentionally lets the CI identity
-        # perform a runtime start without an approval; do not flip back to
-        # false expecting the app to stay off after a merge to main.
+        # The console remains available while its serverless SQL warehouse
+        # starts on demand and auto-stops after five idle minutes.
         started: true
       config:
         command: ["python", "main.py"]
         env:
           - name: DBX_PLATFORM_WAREHOUSE_ID
             value_from: sql-warehouse
-          - name: DBX_PLATFORM_POWER_CONTROLLER_JOB_ID
-            value_from: power-controller
           - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
             value_from: action-executor
-          # Exact bundle-bound manual Jobs that Action Center may plan. These
-          # remain protected/outside the Hibernate inventory.
+          - name: DBX_PLATFORM_CHAT_ENDPOINT
+            value_from: chat-model
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: agent-traces
+          # Exact bundle-bound Jobs that Action Center may plan. Scheduled
+          # Jobs are injected directly because runtime inventory is retired.
+          - name: DBX_PLATFORM_GOVERNED_SCHEDULED_JOB_IDS
+            value: >-
+              ${resources.jobs.ai_catalog_sync.id},
+              ${resources.jobs.ai_monitor_rollup.id},
+              ${resources.jobs.azure_cost_pull.id},
+              ${resources.jobs.cost_forecast_daily.id},
+              ${resources.jobs.cost_usage_report.id},
+              ${resources.jobs.dashboards_setup.id},
+              ${resources.jobs.estimator_drift_check.id},
+              ${resources.jobs.estimator_prices_pull.id},
+              ${resources.jobs.governance_check.id},
+              ${resources.jobs.housekeeping_report.id},
+              ${resources.jobs.llm_cost_rollup.id},
+              ${resources.jobs.ml_hygiene_report.id},
+              ${resources.jobs.ml_serving_report.id},
+              ${resources.jobs.platform_digest.id},
+              ${resources.jobs.security_audit.id}
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
-            value_from: governed-forecast-training
+            value: ${resources.jobs.cost_forecast_train.id},${resources.jobs.lakemeter_schema_migrations.id}
+          - name: DBX_LAKEMETER_ENDPOINT
+            value: projects/${var.lakemeter_project_id}/branches/production/endpoints/primary
+          - name: CLAUDE_MODEL_ENDPOINT
+            value_from: lakemeter-claude
+          # Cap interactive system-table queries below the Databricks Apps HTTP
+          # gateway request timeout. Without this the app blocks on a cold /
+          # stopped warehouse until the gateway aborts with an opaque 502; this
+          # lets the backend return its own typed 504 (rendered as a retryable
+          # "warehouse query timed out") instead. Scheduled jobs and the CLI do
+          # not set this var and keep the 300s batch budget.
+          - name: DBX_PLATFORM_STATEMENT_TIMEOUT_SECONDS
+            value: "45"
           - name: DBX_PLATFORM_ENVIRONMENT
             value: ${bundle.target}
+          - name: DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS
+            value: ${var.azure_cost_resource_groups}
           - name: DBX_PLATFORM_APPROVER_GROUP
             value: ${var.approver_group}
           - name: DBX_PLATFORM_OPERATOR_GROUP
@@ -56,13 +91,19 @@ resources:
           sql_warehouse:
             id: ${resources.sql_warehouses.platform_console_warehouse.id}
             permission: CAN_USE
-        - name: power-controller
+        - name: chat-model
           description: >
-            Submit an already approved runtime action to the out-of-band
-            controller; the app service principal cannot execute it directly.
-          job:
-            id: ${resources.jobs.power_controller.id}
-            permission: CAN_MANAGE_RUN
+            Query the Databricks-hosted foundation model used by the
+            App-hosted read-only LangGraph agent.
+          serving_endpoint:
+            name: ${var.chat_model}
+            permission: CAN_QUERY
+        - name: agent-traces
+          description: >
+            Write production LangGraph execution traces for agent observability.
+          experiment:
+            experiment_id: ${resources.experiments.platform_console_traces.id}
+            permission: CAN_EDIT
         - name: action-executor
           description: >
             Submit an approved non-runtime action ID to the dedicated executor;
@@ -77,4 +118,24 @@ resources:
             directly; execution is submitted only through action-executor.
           job:
             id: ${resources.jobs.cost_forecast_train.id}
+            permission: CAN_VIEW
+        - name: lakemeter-database
+          description: >
+            OAuth-only connection to LakeMeter's dedicated Lakebase database.
+            This binding cannot provision the project or run schema migrations.
+          postgres:
+            branch: projects/${var.lakemeter_project_id}/branches/production
+            database: projects/${var.lakemeter_project_id}/branches/production/databases/lakemeter
+            permission: CAN_CONNECT_AND_CREATE
+        - name: lakemeter-claude
+          description: LakeMeter estimate assistant model endpoint
+          serving_endpoint:
+            name: ${var.lakemeter_model_endpoint}
+            permission: CAN_QUERY
+        - name: governed-lakemeter-migrations
+          description: >
+            Read the exact unscheduled schema-migration Job definition so
+            Action Center can hash and revalidate it. The App cannot run it.
+          job:
+            id: ${resources.jobs.lakemeter_schema_migrations.id}
             permission: CAN_VIEW

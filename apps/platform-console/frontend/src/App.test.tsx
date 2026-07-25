@@ -5,14 +5,14 @@ import { MemoryRouter } from "react-router-dom";
 import { expect, test, vi } from "vitest";
 import App from "./App";
 
-function renderApp() {
+function renderApp(initialEntry = "/") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter
-        initialEntries={["/"]}
+        initialEntries={[initialEntry]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <App />
@@ -20,6 +20,80 @@ function renderApp() {
     </QueryClientProvider>,
   );
 }
+
+test("global assistant launcher does not cover Mission Control decision actions", () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: "dependency_unavailable",
+          message: "Test source unavailable.",
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const mission = renderApp("/");
+  expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+  mission.unmount();
+
+  renderApp("/actions");
+  expect(screen.getByRole("button", { name: "Ask agent" })).toBeInTheDocument();
+});
+
+test("LakeMeter route stays in the Mission Control shell while setup is pending", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "dev",
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/lakemeter/status")) {
+        return new Response(
+          JSON.stringify({
+            status: "unavailable",
+            ready: false,
+            database_ready: false,
+            frontend_ready: true,
+            reason: "schema_migration_required",
+            schema_version: 0,
+            required_schema_version: 1,
+            upstream_version: "v0.1.0",
+            pricing_version: "test-pricing",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+
+  renderApp("/cost/estimator/pricing");
+
+  expect(
+    await screen.findByRole("heading", { name: "Estimator setup required" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Estimator" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "Ask estimator" })).toBeInTheDocument();
+  expect(screen.queryByText("Ask agent")).not.toBeInTheDocument();
+});
 
 test("skip link and mobile drawer are keyboard complete", async () => {
   const user = userEvent.setup();
@@ -69,4 +143,540 @@ test("skip link and mobile drawer are keyboard complete", async () => {
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Mobile navigation" })).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
+});
+
+test("Mission Control turns ranked evidence into governed decisions", async () => {
+  const user = userEvent.setup();
+  const mission = {
+    data: {
+      scope: {
+        workspace: "enterprise-prod",
+        workspace_name: "enterprise-prod",
+        environment: "production",
+        region: "canadacentral",
+      },
+      outcomes: {
+        cost: {
+          value: "$18.4K",
+          open_findings: 6,
+          status: "attention",
+          summary: "Idle compute and failed-run waste dominate.",
+        },
+        security: {
+          value: "1 serious",
+          open_findings: 4,
+          critical_findings: 1,
+          status: "critical",
+          summary: "Privileged grants need owner review.",
+        },
+        risk: {
+          value: "policy drift",
+          open_findings: 3,
+          status: "attention",
+          summary: "A managed cluster policy differs from source.",
+        },
+        performance: {
+          value: "p95 +21%",
+          open_findings: 5,
+          status: "attention",
+          summary: "A nightly feature job regressed after scaling.",
+        },
+      },
+      pending_approvals: 2,
+      decisions: [
+        {
+          finding_id: "finding-1",
+          pillar: "RISK",
+          severity: "HIGH",
+          check_name: "managed-policy-drift",
+          reason: "Three managed constraints differ from the repository policy.",
+          proposed_action_type: "policy-sync",
+          affected_resources: [
+            { resource_id: "policy-1" },
+            { resource_id: "policy-2" },
+            { resource_id: "policy-3" },
+          ],
+          evidence: { source: "policy repository", fields_drifted: 3 },
+          freshness_at: "2026-07-18T12:00:00Z",
+        },
+      ],
+      data_health: [
+        {
+          source: "Platform findings",
+          status: "healthy",
+          freshness: "2026-07-18T12:00:00Z",
+        },
+        {
+          source: "Approval ledger",
+          status: "healthy",
+          freshness: "2026-07-18T12:00:00Z",
+        },
+        {
+          source: "Runtime inventory",
+          status: "degraded",
+          freshness: "2026-07-18T11:00:00Z",
+        },
+      ],
+      findings: {
+        data: {
+          run_ts: "2026-07-18T12:00:00Z",
+          total: 18,
+          by_area: { cost: 6, security: 4, risk: 3, performance: 5 },
+          by_action: { "policy-sync": 1 },
+        },
+      },
+      changes: [],
+    },
+    count: null,
+    as_of: "2026-07-18T12:00:00Z",
+    cached: false,
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/health")) {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          version: "test",
+          environment: "production",
+          actions_enabled: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/mission-control")) {
+      return new Response(JSON.stringify(mission), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url === "/api/chat") {
+      return new Response(
+        JSON.stringify({
+          message: "Policy drift is ranked first because it weakens three managed controls.",
+          proposals: [],
+          endpoint: "test-agent",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url === "/api/action-requests/plan") {
+      return new Response(
+        JSON.stringify({
+          plan_id: "plan-1",
+          action: "policy-sync",
+          expires_at: Date.now() + 15 * 60 * 1000,
+          items: [{ policy_id: "policy-1", change: "restore managed constraints" }],
+          summary: { updated: 1 },
+          confirm_phrase: "apply policy-sync 1",
+          actions_enabled: false,
+          plan_hash: "a".repeat(64),
+          risk: "medium",
+          impact: { changed_resource_count: 1 },
+          rollback: { strategy: "restore exact before state" },
+          verification: { exact_policy_match: true },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({ error: "not_found", message: `No test response for ${url}` }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/mission-control");
+
+  expect(
+    await screen.findByRole("heading", { name: "Operational posture" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Cost" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "Synchronize managed policies" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("3 affected resources")).toBeInTheDocument();
+  expect(screen.getByText("Exact plan required")).toBeInTheDocument();
+  expect(screen.getByText("2 / 3")).toBeInTheDocument();
+
+  const ask = screen.getByRole("button", { name: "Ask why this matters" });
+  await user.click(ask);
+  const investigator = await screen.findByRole("dialog", {
+    name: "Read-only investigator",
+  });
+  expect(
+    await within(investigator).findByText(
+      "Policy drift is ranked first because it weakens three managed controls.",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.some(([input]) => String(input) === "/api/chat"),
+  ).toBe(true);
+
+  await user.click(screen.getByRole("button", { name: "Close assistant" }));
+  await waitFor(() => expect(ask).toHaveFocus());
+
+  const review = screen.getByRole("button", { name: "Review exact plan" });
+  await user.click(review);
+  const planDialog = await screen.findByRole("dialog", { name: "Review exact plan" });
+  expect(
+    within(planDialog).getByText("This applies the reviewed action to 1 exact target."),
+  ).toBeInTheDocument();
+  expect(
+    within(planDialog).getByRole("button", { name: "Why does this approval expire?" }),
+  ).toBeInTheDocument();
+  expect(within(planDialog).getByText("a".repeat(64))).toBeInTheDocument();
+  expect(
+    within(planDialog).getByText(
+      "This deployment is proposal-only. The plan can be inspected and exported, but execution remains disabled until the audited executor and approver group are configured.",
+    ),
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Close approval dialog" }));
+  await waitFor(() => expect(review).toHaveFocus());
+});
+
+test("five-jobs navigation exposes governance homes and the workspace scope", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "prod",
+            actions_enabled: false,
+            workspace_id: "7405609799238491",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+  renderApp("/");
+
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  for (const label of [
+    "Cost Control",
+    "Mission Control",
+    "Command Center",
+    "Cost Explorer",
+    "Data Governance",
+    "AI Governance",
+    "Risk",
+    "Operations",
+    "Learn",
+  ]) {
+    expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
+  }
+  expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
+});
+
+test("Command Center and Mission Control remain available beside Cost Control", async () => {
+  const user = userEvent.setup();
+  const now = new Date();
+  const observedAt = now.toISOString();
+  const usageDate = observedAt.slice(0, 10);
+  const mission = {
+    data: {
+      scope: {
+        workspace: "workspace-1",
+        workspace_name: "Production analytics",
+        environment: "production",
+      },
+      outcomes: {
+        cost: { open_findings: 0, value: 0, status: "unknown" },
+        security: { open_findings: 0, value: 0, status: "unknown" },
+        risk: { open_findings: 0, value: 0, status: "unknown" },
+        performance: { open_findings: 0, value: 0, status: "unknown" },
+      },
+      pending_approvals: 0,
+      decision_queue: {
+        evaluated_at: observedAt,
+        ranking: "risk-expiry-created-v1",
+        active_count: 0,
+        expiring_soon_count: 0,
+        expired_count: 0,
+        items: [],
+      },
+      decisions: [],
+      changes: [],
+      data_health: [],
+      findings: {
+        data: {
+          run_ts: observedAt,
+          total: 0,
+          by_area: {},
+          by_action: {},
+        },
+      },
+    },
+    count: null,
+    as_of: observedAt,
+    cached: false,
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/health")) {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          version: "test",
+          environment: "production",
+          actions_enabled: false,
+          workspace_id: "workspace-1",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/overview")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            findings: {
+              data: { run_ts: observedAt, total: 0, by_area: {}, by_action: {} },
+            },
+            spend: { data: [] },
+            digest: { data: { latest_run_ts: null } },
+          },
+          count: null,
+          as_of: observedAt,
+          cached: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/dashboards")) {
+      return new Response(
+        JSON.stringify({ data: [], count: 0, as_of: observedAt, cached: false }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/performance/ai-gateway-telemetry")) {
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              usage_date: usageDate,
+              input_tokens: 100,
+              output_tokens: 25,
+              p95_latency_ms: 320,
+              source: "system.ai_gateway.usage",
+            },
+          ],
+          count: 1,
+          as_of: observedAt,
+          cached: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/mission-control")) {
+      return new Response(JSON.stringify(mission), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({ error: "not_found", message: `No test response for ${url}` }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/overview");
+
+  expect(await screen.findByRole("heading", { name: "Command center" })).toBeInTheDocument();
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  const commandCenter = within(nav).getByRole("link", { name: "Command Center" });
+  const missionControl = within(nav).getByRole("link", { name: "Mission Control" });
+  expect(commandCenter).toHaveAttribute("aria-current", "page");
+  expect(missionControl).not.toHaveAttribute("aria-current");
+  expect(document.title).toBe("Command Center · dbx-platform");
+  expect(
+    fetchMock.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/performance/ai-gateway-telemetry"),
+    ),
+  ).toHaveLength(1);
+
+  await user.click(missionControl);
+  expect(await screen.findByRole("heading", { name: "Operational posture" })).toBeInTheDocument();
+  expect(missionControl).toHaveAttribute("aria-current", "page");
+  expect(commandCenter).not.toHaveAttribute("aria-current");
+  expect(document.title).toBe("Mission Control · dbx-platform");
+});
+
+test("legacy governance and security URLs land on the split governance pages", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const governance = renderApp("/governance");
+  expect(
+    await governance.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  governance.unmount();
+
+  const security = renderApp("/security?tab=governance");
+  expect(
+    await security.findByRole("heading", { name: "Data Governance" }),
+  ).toBeInTheDocument();
+  security.unmount();
+
+  const risk = renderApp("/security?tab=identity");
+  expect(await risk.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
+  risk.unmount();
+
+  const aiMl = renderApp("/ai-ml");
+  expect(await aiMl.findByRole("heading", { name: "AI Governance" })).toBeInTheDocument();
+});
+
+test("Cost Planner shows a friendly first-run pricing snapshot message", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/health")) {
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            version: "test",
+            environment: "production",
+            actions_enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/estimator/patterns")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                pattern: "doc_chat",
+                label: "Chat with your documents",
+                description: "Answers grounded in your own files.",
+                example_prompt: "What does our travel policy say?",
+                defaults: { needs_knowledge_base: true, needs_memory: false },
+              },
+            ],
+            count: 1,
+            as_of: "2026-07-18T12:00:00Z",
+            cached: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.startsWith("/api/estimator/estimate")) {
+        return new Response(
+          JSON.stringify({
+            error: "pricing_snapshot_missing",
+            message: "No stored price snapshot exists for USD.",
+            hint:
+              "Run the '[dbx-platform] estimator-prices-pull' job once (schedule or an approved manual run) to store a price snapshot, then retry.",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ data: [], count: 0, as_of: null, cached: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+
+  renderApp("/cost-planner");
+  await user.click(await screen.findByRole("radio", { name: /Chat with your documents/ }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Review my answers" }));
+  await user.click(
+    screen.getByRole("button", { name: "These numbers are right — show the costs" }),
+  );
+
+  expect(
+    await screen.findByText("Cost Planner needs its first price snapshot."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Ask an approver to run the estimator-prices-pull job once/),
+  ).toBeInTheDocument();
+});
+
+test("workspace access page switches between user and platform admin views", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/health")) {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          version: "test",
+          environment: "prod",
+          actions_enabled: false,
+          workspace_id: "7405609799238491",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (url.startsWith("/api/workspaces")) {
+      return new Response(
+        JSON.stringify({
+          actor: {
+            actor_id: "user-1",
+            email: "admin@example.com",
+            roles: ["authenticated", "viewer", "operator", "proposer"],
+            view: "platform_admin",
+          },
+          workspaces: [
+            {
+              workspace_id: "7405609799238491",
+              name: "enterprise-prod",
+              environment: "prod",
+              relationship: "platform_admin",
+              roles: ["authenticated", "viewer", "operator", "proposer"],
+              management_mode: "governed_approval",
+              capabilities: [
+                {
+                  id: "admin-console",
+                  label: "Platform admin view",
+                  description: "Review all workspace evidence and pending governed actions.",
+                  enabled: true,
+                },
+              ],
+            },
+          ],
+          source_status: {
+            status: "partial",
+            source: "databricks_app_obo",
+            notes: "Uses the Databricks Apps forwarded user token as OBO passthrough.",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({ error: "dependency_unavailable", message: "Test source unavailable." }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/workspaces");
+
+  expect(
+    await screen.findByRole("heading", { name: "Platform admin workspaces" }),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Platform admin").length).toBeGreaterThan(0);
+  expect(screen.getByText("enterprise-prod")).toBeInTheDocument();
+  expect(screen.getByText("Platform admin view")).toBeInTheDocument();
+  expect(
+    screen.getByText(/databricks_app_obo: Uses the Databricks Apps forwarded user token/),
+  ).toBeInTheDocument();
 });

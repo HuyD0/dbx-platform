@@ -27,7 +27,8 @@ Create/register:
 
 - deployment identity or deployment group;
 - app service principal (Databricks Apps creates/binds this);
-- dedicated runtime executor;
+- dedicated evidence-job executor (configured by the legacy
+  `runtime_executor_service_principal_name` variable);
 - distinct action executor;
 - scheduled report identity/group;
 - `dbx-platform-viewers`;
@@ -91,18 +92,16 @@ uv run pytest
 databricks bundle validate -t dev -p dbx-platform
 databricks bundle deploy -t dev -p dbx-platform
 databricks bundle run schema_migrations -t dev -p dbx-platform
-databricks bundle run power_controller -t dev -p dbx-platform \
-  --params operation=reconcile
 ```
 
 The bundle creates the dedicated `[dbx-platform] mission-control` 2X-Small
 serverless warehouse with five-minute auto-stop. It does not use or manage a
 shared Starter warehouse.
 
-Every schedule deploys PAUSED and the warehouse deploys stopped; the app
-deploys started (`resources/app.yml`). `schema_migrations` uses serverless
-Spark, so deploying while `SLEEPING` does not start the dedicated SQL
-warehouse. Reconciliation creates a proposal; it does not apply one.
+Every dev schedule deploys PAUSED and the warehouse starts only on demand; the
+app deploys started (`resources/app.yml`). `schema_migrations` uses serverless
+Spark and does not start the dedicated SQL warehouse. Production unpauses only
+the five curated schedules documented in the runbook.
 
 The migration job is the only dashboard/control-plane DDL bootstrap.
 `dbx-platform dashboards setup` is deliberately disabled. Use:
@@ -126,14 +125,14 @@ Before enabling actions, run/observe each scheduled pack once and verify:
   silently combined;
 - unavailable AI Gateway preview tables produce visible coverage gaps;
 - the app service principal has no target mutation or UC `MODIFY`;
-- exact runtime inventory excludes shared/unrelated resources, controller,
-  executors, migration, protected training, dashboards, data, and models.
+- paused packs remain visibly stale or unavailable instead of being reported
+  as healthy.
 
 Scheduled stateful writers attest the Jobs API’s exact periodic Job/run.
 Run-now/manual execution must instead arrive through an approved `run-job`
 action.
 
-## 8. Test approval and runtime safety
+## 8. Test approval and executor safety
 
 In proposal-only mode, validate negative cases:
 
@@ -150,8 +149,6 @@ Then exercise a low-risk valid action in a controlled dev scope and verify the
 complete plan → approval → execution → verification event chain and exact-once
 behavior.
 
-Review Hibernate/Wake in [runbook.md](runbook.md#safe-hibernate).
-
 ## 9. Controlled enablement
 
 Grant the action executor only the first allowlisted pack you intend to use.
@@ -165,9 +162,7 @@ export BUNDLE_VAR_actions_enabled=true
 databricks bundle validate -t prod
 databricks bundle deploy -t prod
 databricks bundle run schema_migrations -t prod
-databricks bundle run power_controller -t prod --params operation=reconcile
 ```
 
-The deploy still leaves the warehouse stopped and schedules paused (the app
-deploys started) and reconciliation proposal-only. A current approver must
-execute the exact Wake plan to restore the warehouse and schedules.
+The app remains started, the warehouse starts on demand, and production keeps
+only the five curated schedules active.

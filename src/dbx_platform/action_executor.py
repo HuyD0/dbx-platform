@@ -296,14 +296,6 @@ class GovernedActionExecutor:
         }
         if "approver" not in roles:
             raise ActionExecutionError("Stored approval has no approver role.")
-        risk = str(action.plan.get("risk") or "HIGH").upper()
-        if (
-            risk in {"MEDIUM", "HIGH"}
-            and approval.confirmation != action.plan.get("confirm_phrase")
-        ):
-            raise ActionExecutionError(
-                "Stored approval lacks the exact typed confirmation."
-            )
         if not self.approval_validator(approval):
             raise ActionExecutionError(
                 "Approver identity or current group membership could not be verified."
@@ -890,9 +882,16 @@ def bind_action_handler(
                 raise ActionExecutionError("run-job accepts exactly one job_id.")
             if int(payload["job_id"]) != job_id:
                 raise ActionExecutionError("run-job payload differs from its exact target.")
+            # Databricks deduplicates idempotency tokens across the workspace,
+            # not per Job. The app already uses the plan key when it submits
+            # this executor, so reusing it here would return the executor's own
+            # run instead of launching the governed child Job.
+            child_idempotency_token = hashlib.sha256(
+                f"run-job:{action.plan['idempotency_key']}:{job_id}".encode()
+            ).hexdigest()
             run = w.jobs.run_now(
                 job_id=job_id,
-                idempotency_token=str(action.plan["idempotency_key"]),
+                idempotency_token=child_idempotency_token,
                 job_parameters={
                     "approved_action_id": action.action_id,
                     "approved_plan_hash": action.plan_hash,
@@ -1453,6 +1452,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schema", default="dbx_platform")
     parser.add_argument("--expected-executor", required=True)
     parser.add_argument("--approver-group", default="dbx-platform-approvers")
+    parser.add_argument("--approver-group-id", required=True)
     parser.add_argument("--governed-job-id", action="append", type=int, default=[])
     return parser
 
@@ -1461,29 +1461,37 @@ def _approver_is_current_member(
     w: WorkspaceClient,
     approval: StoredApproval,
     group_name: str,
+    group_id: str,
 ) -> bool:
-    """Re-resolve the exact workspace group at execution time."""
+    """Inspect the one configured account group for the immutable approver ID.
 
+    Cross-user workspace SCIM reads require broader identity-admin access.
+    Reading the exact account group through the workspace proxy requires only
+    manager access to that one group and avoids enumerating users or groups.
+    """
+
+    if not group_id:
+        return False
     try:
-        user = w.users.get(approval.approver_id)
+        group = w.api_client.do(
+            "GET",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            headers={"Accept": "application/scim+json"},
+        )
     except Exception:  # noqa: BLE001 - authorization failures are uniform
         return False
     if (
-        not getattr(user, "id", None)
-        or str(user.id) != approval.approver_id
-        or not getattr(user, "user_name", None)
-        or str(user.user_name).lower() != approval.approver_email.lower()
-        or getattr(user, "active", None) is not True
+        not isinstance(group, Mapping)
+        or str(group.get("id") or "") != group_id
+        or str(group.get("displayName") or "") != group_name
     ):
         return False
-    escaped = group_name.replace('"', '\\"')
-    groups = list(w.groups.list(filter=f'displayName eq "{escaped}"'))
-    if len(groups) != 1 or not groups[0].id:
-        return False
-    group = w.groups.get(groups[0].id)
+    # SCIM member display is optional, so the account-scoped immutable ID is
+    # the load-bearing identity check.
     return any(
-        str(member.value or "") == approval.approver_id
-        for member in (group.members or [])
+        str(member.get("value") or "") == approval.approver_id
+        for member in (group.get("members") or [])
+        if isinstance(member, Mapping)
     )
 
 
@@ -1544,6 +1552,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 w,
                 approval,
                 args.approver_group,
+                args.approver_group_id,
             ),
         )
         result = executor.execute(args.action_id)

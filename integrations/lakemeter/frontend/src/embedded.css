@@ -1,0 +1,120 @@
+@import "../../../../vendor/lakemeter/frontend/src/index.css";
+
+:host {
+  display: block;
+  color: var(--color-ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.lakemeter-root {
+  --databricks-red: var(--color-accent);
+  --databricks-lava: var(--color-accent);
+  --databricks-coral: color-mix(in srgb, var(--color-accent) 55%, white);
+  --bg-primary: transparent;
+  --bg-secondary: var(--color-surface);
+  --bg-tertiary: color-mix(in srgb, var(--color-surface) 82%, var(--color-grid));
+  --bg-card: var(--color-surface);
+  --bg-input: var(--color-surface);
+  --bg-hover: var(--color-hairline);
+  --text-primary: var(--color-ink);
+  --text-secondary: var(--color-ink-2);
+  --text-muted: var(--color-muted);
+  --border-primary: var(--color-grid);
+  --border-secondary: color-mix(in srgb, var(--color-grid) 72%, var(--color-ink));
+  min-height: 24rem;
+  color: var(--color-ink);
+  font-family: inherit;
+}
+
+.lakemeter-root *,
+.lakemeter-root input,
+.lakemeter-root select,
+.lakemeter-root textarea,
+.lakemeter-root button {
+  font-family: inherit;
+}
+
+.lakemeter-root input:focus,
+.lakemeter-root select:focus,
+.lakemeter-root textarea:focus,
+.lakemeter-root button:focus-visible,
+.lakemeter-root a:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 25%, transparent);
+  outline: 2px solid transparent;
+}
+
+.lakemeter-root .card {
+  border-radius: 0.75rem;
+  box-shadow: none;
+}
+
+.lakemeter-root .btn-primary {
+  background: var(--color-accent);
+  box-shadow: none;
+}
+
+.lakemeter-root .btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 88%, black);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.lakemeter-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--color-grid);
+}
+
+.lakemeter-subnav a {
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.lakemeter-subnav a[data-active="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.lakemeter-attribution {
+  margin-top: 1rem;
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  text-align: right;
+}
+
+/* The host owns the only launcher. LakeMeter supplies the contextual panel
+   body, which is restyled to the same full-height Mission Control slide-over. */
+.lakemeter-root [class*="fixed"][class*="right-0"][class*="flex-col"] {
+  top: 0 !important;
+  max-width: 28rem;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent) !important;
+  border-color: var(--color-grid) !important;
+  backdrop-filter: blur(28px) saturate(1.4);
+}
+
+.lakemeter-root button[title="Minimize"] {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .lakemeter-root [class*="fixed"][class*="right-0"][class*="flex-col"] {
+    width: 100vw !important;
+    max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lakemeter-root *,
+  .lakemeter-root *::before,
+  .lakemeter-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

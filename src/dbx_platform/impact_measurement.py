@@ -17,28 +17,14 @@ from typing import Any
 
 from databricks.sdk import WorkspaceClient
 
+from dbx_platform.resource_identifiers import (
+    extract_resource_ids,
+    parse_resource_ids,
+)
 from dbx_platform.system_tables import run_query
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _RESOLVED_STATES = {"RESOLVED", "CLOSED", "REMEDIATED"}
-_RESOURCE_ID_FIELDS = {
-    "resource_id",
-    "resource_key",
-    "id",
-    "cluster_id",
-    "job_id",
-    "token_id",
-    "policy_id",
-    "warehouse_id",
-    "endpoint_id",
-    "endpoint_name",
-    "app_id",
-    "app_name",
-    "budget_id",
-    "schedule_id",
-    "job_key",
-    "name",
-}
 _SOURCE_CORRELATION_GRACE = timedelta(days=7)
 
 Query = Callable[..., list[dict[str, Any]]]
@@ -60,38 +46,6 @@ def _json_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError(f"{label} must be a JSON object.")
     return parsed
-
-
-def _resource_ids(value: Any) -> set[str]:
-    ids: set[str] = set()
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if key in _RESOURCE_ID_FIELDS and item:
-                ids.add(str(item))
-            if isinstance(item, (Mapping, list)):
-                ids.update(_resource_ids(item))
-    elif isinstance(value, list):
-        for item in value:
-            if isinstance(item, (Mapping, list)):
-                ids.update(_resource_ids(item))
-            elif isinstance(item, str) and item.strip():
-                ids.add(item.strip())
-    elif isinstance(value, str):
-        text = value.strip()
-        if text:
-            ids.add(text)
-    return ids
-
-
-def _parse_affected(value: Any) -> set[str]:
-    if value is None or value == "":
-        return set()
-    if isinstance(value, (dict, list)):
-        return _resource_ids(value)
-    try:
-        return _resource_ids(json.loads(str(value)))
-    except json.JSONDecodeError:
-        return {str(value)}
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -220,13 +174,13 @@ def _measurement(
         "immediate impact measurement",
     )
     targets = list(plan.get("targets") or [])
-    target_ids = _resource_ids(targets)
+    target_ids = extract_resource_ids(targets)
     immediate_event_at = _timestamp(row.get("immediate_event_ts"))
     matched = [
         finding
         for finding in findings
         if target_ids.intersection(
-            _parse_affected(finding.get("affected_resources_json"))
+            parse_resource_ids(finding.get("affected_resources_json"))
         )
         and (
             immediate_event_at is None

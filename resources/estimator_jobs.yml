@@ -1,0 +1,192 @@
+# Weekly price snapshot for the AI solution cost estimator. Azure Retail
+# Prices is a public, unauthenticated API (no service credential needed);
+# $/DBU comes from system.billing.list_prices via the bundle warehouse. The
+# pull writes only from its periodic run or an exact executor-approved manual
+# run; estimates themselves are pure reads stamped with the snapshot date.
+resources:
+  experiments:
+    estimator_extraction_eval_experiment:
+      name: /Shared/dbx-platform-${bundle.target}-estimator-extraction-eval
+      lifecycle:
+        prevent_destroy: true
+  jobs:
+    estimator_prompt_sync:
+      # Deployment-run (like schema_migrations): registers the wheel's
+      # extraction prompt texts in the UC prompt registry, tagged by content
+      # hash, so every trace/version/commit points at identical bytes. Skips
+      # unchanged hashes; never fetched at runtime.
+      name: "[dbx-platform] estimator-prompt-sync"
+      description: >
+        Syncs the wheel-shipped extraction prompts to the Unity Catalog
+        prompt registry with content-hash tags. Run by the deploy workflow
+        after schema_migrations; idempotent.
+      max_concurrent_runs: 1
+      timeout_seconds: 900
+      tags:
+        team: platform
+        project: dbx-platform
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+      tasks:
+        - task_key: prompts_sync
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters: ["estimator", "prompts-sync"]
+
+    estimator_extraction_eval:
+      # Manual quality gate for prompt changes: runs the wheel-shipped golden
+      # dataset through the real two-stage extraction against the chat
+      # endpoint and logs code-scorer metrics (pattern accuracy, field
+      # tolerance, validation pass rate) to the bundle experiment. Fails the
+      # run below the pattern-accuracy floor so a regressing prompt change is
+      # a red job, not a quiet drift.
+      name: "[dbx-platform] estimator-extraction-eval"
+      description: >
+        Golden-dataset extraction eval with pure code scorers, logged to the
+        estimator_extraction_eval MLflow experiment. Read-only against the
+        workspace apart from its own experiment runs.
+      max_concurrent_runs: 1
+      timeout_seconds: 1800
+      tags:
+        team: platform
+        project: dbx-platform
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - mlflow>=3.0
+      tasks:
+        - task_key: eval_extraction
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "eval-extraction",
+               "--experiment", "${resources.experiments.estimator_extraction_eval_experiment.id}"]
+
+    estimator_prices_pull:
+      name: "[dbx-platform] estimator-prices-pull"
+      description: >
+        Snapshots Azure Retail Prices API meters (matched by the git-versioned
+        rate card) and Databricks $/DBU list prices into
+        <catalog>.<schema>.estimator_price_snapshots, keyed by snapshot date so
+        every estimate is reproducible. Unmatched required rate keys become
+        cost/estimator-pricing-coverage findings (meter-rename alarm). Writes
+        only to platform-owned tables.
+      schedule:
+        quartz_cron_expression: "0 45 5 ? * MON"  # weekly Mon 05:45 UTC, before cost jobs
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: prices_pull
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "prices-pull",
+               "--region", "eastus",
+               "--currency", "USD",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]
+        - task_key: prices_status
+          depends_on:
+            - task_key: prices_pull
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "prices-status",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--environment", "${bundle.target}"]
+
+    estimator_drift_check:
+      name: "[dbx-platform] estimator-drift-check"
+      description: >
+        Compares saved estimates against current prices (re-price staleness)
+        and against real spend for the cost anchors operators linked
+        deployments to (estimate-vs-actuals). Stores cost/estimate-repricing-drift
+        and cost/estimate-drift findings and fails the run on material drift so
+        the failure email is the alert. Reads only platform-owned tables +
+        system.billing; writes only findings.
+      schedule:
+        quartz_cron_expression: "0 30 8 ? * MON"  # weekly Mon 08:30 UTC, after cost ingestion
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: drift_check
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["estimator", "drift-check",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

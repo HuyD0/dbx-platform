@@ -16,6 +16,7 @@ runs, forecasts and drift checks can tell feature generations apart.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import date, timedelta
 
 from databricks.sdk import WorkspaceClient
@@ -135,6 +136,50 @@ def build_features(rows: list[dict]) -> list[dict]:
                 }
             )
     return out
+
+
+def validate_feature_alignment(
+    source_rows: list[dict], feature_rows: list[dict]
+) -> list[dict]:
+    """Verify emitted feature keys exactly match forecastable source dates."""
+
+    dense = daily_series(source_rows)
+    if source_rows and not dense:
+        raise RuntimeError("Feature alignment failed: source rows have no valid usage dates.")
+    expected: dict[str, set[str]] = {}
+    for name, daily in dense.items():
+        expected[name] = {
+            day.isoformat()
+            for day in daily
+            if features_for_date(daily, day) is not None
+        }
+    actual = Counter(
+        (str(row.get("series", "")), str(row.get("feature_date", ""))[:10])
+        for row in feature_rows
+    )
+    expected_keys = {(name, day) for name, days in expected.items() for day in days}
+    duplicate_keys = sorted(key for key, count in actual.items() if count != 1)
+    missing_keys = sorted(expected_keys - set(actual))
+    unexpected_keys = sorted(set(actual) - expected_keys)
+    if duplicate_keys or missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "Feature alignment failed: "
+            f"missing={missing_keys[:3]}, unexpected={unexpected_keys[:3]}, "
+            f"duplicate={duplicate_keys[:3]}."
+        )
+    summaries = []
+    for name, daily in sorted(dense.items()):
+        emitted = sum(1 for series, _day in actual if series == name)
+        summaries.append(
+            {
+                "series": name,
+                "source_days": len(daily),
+                "expected_feature_rows": len(expected[name]),
+                "feature_rows": emitted,
+                "status": "ready" if emitted else "insufficient-history",
+            }
+        )
+    return summaries
 
 
 # --- storage ------------------------------------------------------------------

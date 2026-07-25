@@ -7,8 +7,7 @@ resources:
       name: "[dbx-platform] action-executor"
       description: >
         Executes one durable, approved, allowlisted Mission Control action by
-        action ID. This job has no schedule, no idle compute, and is excluded
-        from the Hibernate inventory.
+        action ID. This job has no schedule and no idle compute.
       max_concurrent_runs: 1
       timeout_seconds: 3600
       run_as:
@@ -18,6 +17,10 @@ resources:
         project: dbx-platform
         control_plane: action-executor
       permissions:
+        # The executor re-reads its own run metadata to attest the exact
+        # executor identity and immutable action ID before doing any work.
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_VIEW
         - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
           level: CAN_MANAGE_RUN
         - group_name: ${var.approver_group}
@@ -54,6 +57,8 @@ resources:
               - ${var.action_executor_service_principal_name}
               - --approver-group
               - ${var.approver_group}
+              - --approver-group-id
+              - ${var.approver_group_id}
               - --governed-job-id
               - ${resources.jobs.cost_forecast_train.id}
               - --governed-job-id
@@ -84,3 +89,9 @@ resources:
               - ${resources.jobs.ai_catalog_sync.id}
               - --governed-job-id
               - ${resources.jobs.ai_monitor_rollup.id}
+              - --governed-job-id
+              - ${resources.jobs.estimator_prices_pull.id}
+              - --governed-job-id
+              - ${resources.jobs.estimator_drift_check.id}
+              - --governed-job-id
+              - ${resources.jobs.lakemeter_schema_migrations.id}

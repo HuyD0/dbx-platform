@@ -28,6 +28,15 @@ def fetch_serving_endpoints(w: WorkspaceClient) -> list[dict]:
         auto_capture = config.auto_capture_config if config else None
         gw_table = gateway.inference_table_config if gateway else None
         gw_tracking = gateway.usage_tracking_config if gateway else None
+        guardrails = getattr(gateway, "guardrails", None) if gateway else None
+        guardrail_safety = [
+            getattr(getattr(guardrails, direction, None), "safety", None)
+            for direction in ("input", "output")
+        ]
+        attested_safety = [value for value in guardrail_safety if value is not None]
+        content_safety_enabled = (
+            all(bool(value) for value in attested_safety) if attested_safety else None
+        )
         entities = []
         for se in (config.served_entities if config else None) or []:
             entities.append(
@@ -66,6 +75,15 @@ def fetch_serving_endpoints(w: WorkspaceClient) -> list[dict]:
                 ),
                 "has_rate_limits": bool(gateway and gateway.rate_limits),
                 "has_usage_tracking": bool(gw_tracking and gw_tracking.enabled),
+                "content_safety_enabled": content_safety_enabled,
+                # ZDR is not inferred from endpoint shape.  An explicit
+                # endpoint tag (for example ``zdr_enabled=true``) is carried
+                # into the catalog; absent tags remain unverified.
+                "tags": {
+                    str(tag.key): str(tag.value or "")
+                    for tag in (getattr(e, "tags", None) or [])
+                    if getattr(tag, "key", None)
+                },
             }
         )
     return out

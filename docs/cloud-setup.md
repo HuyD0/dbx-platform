@@ -46,11 +46,12 @@ These exist; nothing to do.
 | GitHub default branch | `main` |
 | GitHub `production` environment | created, no protection rules |
 | Repo secrets | `DATABRICKS_HOST`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` |
-| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (runtime controller) and `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor) |
+| Required repo variables | `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` (legacy-named evidence-job identity), `DBX_PLATFORM_ACTION_EXECUTOR_SP` (allowlisted remediation executor), and `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP` (dedicated Lakebase owner/migrator) |
 
 The keyless CI chain is proven. Mission Control adds a dedicated warehouse,
-thirteen PAUSED report schedules, manual approval-gated training, and out-of-band
-executor Jobs; enablement is proposal-only until the prerequisites below exist.
+five active curated schedules, ten paused on-demand schedules, manual
+approval-gated training, and an out-of-band action executor Job; enablement is
+proposal-only until the prerequisites below exist.
 
 Workspace admin is not the target operating model. Deploy into the dedicated
 application schema and apply the identity-specific matrix in
@@ -70,16 +71,20 @@ making the deployment or action executor a workspace admin.
 
 ## What still needs you
 
-Mission Control requires two platform prerequisites in addition to the two
+Mission Control requires three platform prerequisites in addition to the two
 GitHub/Claude items below:
 
 - create `dbx-platform-approvers` and add the humans allowed to approve plans;
-- provision separate least-privileged runtime and action executors, register
-  both in the workspace, grant the runtime permissions in
-  [runbook.md](runbook.md#safe-hibernate), grant the action executor
+- provision separate least-privileged evidence-job and action executors,
+  register both in the workspace, grant the evidence-job permissions in
+  [service-principal.md](service-principal.md), grant the action executor
   only its enabled action-pack permissions, and set
   `DBX_PLATFORM_RUNTIME_EXECUTOR_SP` plus
   `DBX_PLATFORM_ACTION_EXECUTOR_SP` in the GitHub production environment.
+- provision a third service principal for LakeMeter Lakebase ownership and
+  approved schema migrations, then set
+  `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP`. It must not be shared with
+  either general executor.
 
 For a temporary proposal-only bootstrap, both variables may reference the
 deployment identity only when `DBX_PLATFORM_ACTIONS_ENABLED=false` and
@@ -158,15 +163,15 @@ GRANT USE SCHEMA, SELECT ON SCHEMA system.serving  TO `dbx-platform-reporters`;
 Pre-create `main.dbx_platform` and make the deployment group its owner as shown
 in [setup.md](setup.md); only the unscheduled `schema_migrations` bootstrap
 performs DDL. Do not grant the CI principal `CREATE SCHEMA` on `main` or
-`ALL PRIVILEGES` on the application schema. Table-level app, human, runtime,
-action-executor, and reporter grants are in
+`ALL PRIVILEGES` on the application schema. Table-level app, human,
+evidence-job, action-executor, and reporter grants are in
 [service-principal.md](service-principal.md).
 
 ### Optional: run read-only prod jobs as the CI service principal
 
-The power/action executor Jobs already use the dedicated runtime executor.
-Optionally add this to the `prod` target so read-only scheduled reports also run
-under CI rather than the resource owner:
+The action executor uses its dedicated identity. Optionally add this to the
+`prod` target so read-only scheduled reports run under CI rather than the
+resource owner:
 
 ```yaml
   prod:
@@ -260,9 +265,16 @@ Then wire the bundle variables and deploy:
 
 ```bash
 export BUNDLE_VAR_azure_subscription_id=ea936670-dda1-4884-8467-49c225bf3e83
+export BUNDLE_VAR_azure_cost_resource_groups=<workspace-rg>,<managed-databricks-rg>,<allocated-ai-rg>
 export BUNDLE_VAR_azure_service_credential=dbx_dev
 databricks bundle deploy -t prod
 ```
+
+`azure_cost_resource_groups` is required at runtime. Include only resource
+groups whose charges are allocated to this workspace, including the Databricks
+managed resource group and Azure AI groups used by its workloads. The pull
+fails closed when the allowlist is empty; it never stamps a subscription-wide
+bill with the current workspace ID.
 
 The job identity also needs `ACCESS` on the UC service credential, plus the
 `dbx_dev.dbx_platform` schema grants above (the ingest MERGEs into
@@ -284,6 +296,7 @@ First-run order (stateful/costly manual runs go through Action Center):
 |---|---|
 | `azure-cost pull` → 403 with the Cost Management Reader hint | The role assignment above is missing, on the wrong identity, or still propagating (can take a few minutes). |
 | `azure-cost pull` → `DefaultAzureCredential` errors inside a job | `--service-credential`/`BUNDLE_VAR_azure_service_credential` is empty, so the job fell back to a credential chain that only works locally. |
+| `azure-cost pull` rejects an empty resource-group scope | Set `--resource-groups` or `BUNDLE_VAR_azure_cost_resource_groups`; subscription-wide cost cannot be attributed to one workspace. |
 | Forecast training → `need >= N days of features` | Not enough approved/scheduled billing history exists; complete the backfill action first. |
 
 ---

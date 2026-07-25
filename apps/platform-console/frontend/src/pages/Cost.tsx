@@ -1,6 +1,14 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { BarList } from "../components/BarList";
 import { FindingsSection } from "../components/FindingsSection";
+import {
+  ProductSpendBreakdown,
+  type FoundrySourceState,
+} from "../components/ProductSpendBreakdown";
+import { Card, SectionTitle } from "../components/ui";
+import { apiGet } from "../lib/api";
+import type { Envelope, Row } from "../lib/types";
 
 const WINDOWS = [7, 30, 90];
 const DIMENSIONS = [
@@ -15,6 +23,33 @@ export function Cost() {
   const [dimension, setDimension] = useState<(typeof DIMENSIONS)[number]["value"]>(
     "workload_type",
   );
+  const foundry = useQuery({
+    queryKey: ["/api/cost/foundry-attribution", { days }],
+    queryFn: () =>
+      apiGet<Envelope<Row[]>>("/api/cost/foundry-attribution", { days }),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const sourceStatus = foundry.data?.source_status;
+  const foundrySource: FoundrySourceState = foundry.isPending
+    ? { status: "loading", rows: [] }
+    : foundry.isError
+      ? {
+          status: "error",
+          rows: [],
+          message: "Foundry actuals could not be loaded. Check Azure cost source health and retry.",
+        }
+      : sourceStatus && !["healthy", "available"].includes(sourceStatus.status.toLowerCase())
+        ? {
+            status: "unavailable",
+            rows: [],
+            message: sourceStatus.notes,
+          }
+        : {
+            status: "ready",
+            rows: foundry.data?.data ?? [],
+            message: sourceStatus?.notes,
+          };
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-1 text-xs">
@@ -34,12 +69,55 @@ export function Cost() {
         ))}
       </div>
 
+      <Card>
+        <SectionTitle
+          title="Cost command center"
+          subtitle="One high-level view before drilling into billable line items."
+        />
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-grid bg-page p-3">
+            <p className="text-xs font-semibold text-ink">Total Databricks cost</p>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              The workspace total is shown in the product breakdown below and reconciles Databricks
+              usage at list price by product, workload, SKU, and usage unit.
+            </p>
+          </div>
+          <div className="rounded-xl border border-grid bg-page p-3">
+            <p className="text-xs font-semibold text-ink">Azure bill reconciliation</p>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              Azure Cost Management is the bill-of-record for invoiced totals. Databricks line
+              items can be tied back by workspace, SKU, meter, tags, and date, but Azure may still
+              roll up credits, taxes, marketplace, and rounding outside item-level attribution.
+            </p>
+          </div>
+          <div className="rounded-xl border border-grid bg-page p-3">
+            <p className="text-xs font-semibold text-ink">Data quality controls</p>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              Scheduled evidence jobs refresh source health, normalize findings, flag unpriced or
+              untagged usage, and keep approval-only remediation separate from read-only reporting.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      <FindingsSection
+        title="Workspace spend by product"
+        subtitle={`Total cost, product groups, and workload drill-down for the last ${days} days`}
+        path="/api/cost/products"
+        params={{ days }}
+        emptyMessage="No billed usage in the window."
+        renderWhenEmpty
+        render={(rows) => (
+          <ProductSpendBreakdown rows={rows} days={days} foundrySource={foundrySource} />
+        )}
+      />
       <FindingsSection
         title="Databricks spend attribution"
         subtitle={`Workspace-scoped DBUs and list cost, last ${days} days`}
         path="/api/cost/usage"
         params={{ days }}
         emptyMessage="No billed usage in the window."
+        renderWhenEmpty
         render={(rows) => (
           <div className="space-y-3">
             <label className="flex items-center gap-2 text-xs text-muted">
@@ -79,6 +157,10 @@ export function Cost() {
       />
       <FindingsSection
         title="Most expensive jobs"
+        subtitle={
+          "Job names are shown when usage includes job metadata; missing descriptions require " +
+          "upstream job tags or an enrichment source."
+        }
         path="/api/cost/top-jobs"
         params={{ days }}
         emptyMessage="No job spend in the window."
