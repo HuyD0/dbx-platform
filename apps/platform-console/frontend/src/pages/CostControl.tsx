@@ -8,7 +8,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { CostTrendChart } from "../components/CostTrendChart";
+import { CostTrendChart, costCategoryColor } from "../components/CostTrendChart";
 import {
   AsOf,
   Badge,
@@ -125,6 +125,26 @@ export function CostControl() {
     ? data.series.filter((point) => point.currency === selectedCurrency)
     : [];
   const anomalies = data.anomalies.slice(0, 4);
+  const alignment = data.billing_alignment ?? {
+    status: "unavailable",
+    variance_count: 0,
+    unmatched_count: 0,
+    latest_azure_date: null,
+    latest_databricks_date: null,
+    azure_lag_days: null,
+    databricks_lag_days: null,
+    azure_totals: [],
+    databricks_totals: [],
+    largest_pattern_variance: null,
+    money_comparable: false,
+    notes: "Daily alignment is unavailable.",
+  };
+  const alignmentLabel = {
+    aligned: "Aligned",
+    variances_found: "Variances found",
+    delayed_source: "Source delayed",
+    unavailable: "Unavailable",
+  }[alignment.status];
 
   return (
     <div className="space-y-5">
@@ -144,50 +164,50 @@ export function CostControl() {
         />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Link to="/cost?tab=categories" className="block rounded-2xl">
-          <Card className="glass-hover-accent h-full">
+      <div className="grid min-w-0 grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
+        <Link to="/cost?tab=categories" className="min-w-0 rounded-2xl">
+          <Card className="glass-hover-accent h-full min-w-0 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted">Total platform cost</span>
               <BadgeDollarSign className="h-4 w-4 text-accent" />
             </div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums text-ink">
+            <div className="mt-2 break-words text-lg font-semibold tabular-nums text-ink sm:text-3xl">
               {total ? currency(total.cost, total.currency) : "—"}
             </div>
-            <div className="mt-2">
+            <div className="mt-2 hidden sm:block">
               <Delta value={total?.period_delta_pct ?? null} />
             </div>
-            <p className="mt-2 text-[11px] text-muted">
+            <p className="mt-2 hidden text-[11px] text-muted sm:block">
               Authoritative Azure billed actuals · click to explore
             </p>
           </Card>
         </Link>
 
-        <Link to="/cost?tab=databricks" className="block rounded-2xl">
-          <Card className="glass-hover-accent h-full">
+        <Link to="/cost?tab=databricks" className="min-w-0 rounded-2xl">
+          <Card className="glass-hover-accent h-full min-w-0 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted">Azure Databricks</span>
               <Layers3 className="h-4 w-4 text-series-1" />
             </div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums text-ink">
+            <div className="mt-2 break-words text-lg font-semibold tabular-nums text-ink sm:text-3xl">
               {databricks ? currency(databricks.cost, databricks.currency) : "—"}
             </div>
             <p className="mt-1 text-xs text-muted">
               {databricks ? `${databricks.share_pct}% of platform total` : "No billed cost"}
             </p>
-            <p className="mt-3 text-[11px] text-muted">
+            <p className="mt-3 hidden text-[11px] text-muted sm:block">
               Open workload and SKU attribution
             </p>
           </Card>
         </Link>
 
-        <Link to="/cost?tab=categories&component=azure" className="block rounded-2xl">
-          <Card className="glass-hover-accent h-full">
+        <Link to="/cost?tab=categories&component=azure" className="min-w-0 rounded-2xl">
+          <Card className="glass-hover-accent h-full min-w-0 p-3 sm:p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted">Other Azure</span>
               <span className="h-2.5 w-2.5 rounded-full bg-series-3" />
             </div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums text-ink">
+            <div className="mt-2 break-words text-lg font-semibold tabular-nums text-ink sm:text-3xl">
               {infrastructure ? currency(infrastructure.cost, infrastructure.currency) : "—"}
             </div>
             <p className="mt-1 text-xs text-muted">
@@ -195,27 +215,35 @@ export function CostControl() {
                 ? `${infrastructure.share_pct}% across compute, storage and network`
                 : "No billed infrastructure cost"}
             </p>
-            <p className="mt-3 text-[11px] text-muted">Open service categories</p>
+            <p className="mt-3 hidden text-[11px] text-muted sm:block">
+              Open service categories
+            </p>
           </Card>
         </Link>
 
-        <Link to="/cost?tab=coverage" className="block rounded-2xl">
-          <Card className="glass-hover-accent h-full">
+        <Link to="/cost?tab=alignment" className="min-w-0 rounded-2xl">
+          <Card className="glass-hover-accent h-full min-w-0 p-3 sm:p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-muted">Runaway signals</span>
+              <span className="text-xs font-medium text-muted">Variance watch</span>
               <CircleAlert
                 className={`h-4 w-4 ${
-                  anomalies.length ? "text-status-warning" : "text-status-good"
+                  alignment.status === "aligned" ? "text-status-good" : "text-status-warning"
                 }`}
               />
             </div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums text-ink">
-              {anomalies.length}
+            <div className="mt-2 text-lg font-semibold tabular-nums text-ink sm:text-3xl">
+              {alignment.variance_count}
             </div>
             <p className="mt-1 text-xs text-muted">
-              Daily spikes and 7-day acceleration
+              {alignmentLabel}
+              {alignment.unmatched_count > 0
+                ? ` · ${alignment.unmatched_count} unmatched`
+                : ""}
             </p>
-            <p className="mt-3 text-[11px] text-muted">Review signals and source coverage</p>
+            <p className="mt-3 hidden text-[11px] text-muted sm:block">
+              Azure through {alignment.latest_azure_date ?? "—"} · Databricks through{" "}
+              {alignment.latest_databricks_date ?? "—"}
+            </p>
           </Card>
         </Link>
       </div>
@@ -242,7 +270,17 @@ export function CostControl() {
             .filter((category) => !selectedCurrency || category.currency === selectedCurrency)
             .map((category) => (
               <span key={category.category} className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-accent" />
+                <span
+                  className="h-2 w-2 rounded-full"
+                  data-testid="cost-legend-dot"
+                  data-category={category.category}
+                  style={{
+                    backgroundColor: costCategoryColor(
+                      String(category.category ?? "Other"),
+                    ),
+                  }}
+                  aria-hidden="true"
+                />
                 {category.category} {category.share_pct}%
               </span>
             ))}
@@ -254,16 +292,23 @@ export function CostControl() {
           <SectionTitle
             title="Runaway spend signals"
             subtitle="Material changes worth investigating—not automatic remediation"
+            right={
+              <Badge tone={data.anomalies.length ? "warning" : "good"}>
+                {data.anomalies.length}
+              </Badge>
+            }
           />
           {anomalies.length === 0 ? (
             <EmptyState message="No daily spike or 7-day acceleration crossed the configured materiality thresholds." />
           ) : (
             <div className="space-y-2">
-              {anomalies.map((anomaly) => (
+              {anomalies.map((anomaly, index) => (
                 <Link
                   key={anomaly.id}
                   to={`/cost/anomalies/${encodeURIComponent(anomaly.id)}?days=${days}`}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-grid bg-page/25 p-3 hover:border-accent/40 hover:bg-hairline/30"
+                  className={`group min-w-0 flex-col items-start gap-2 rounded-xl border border-grid bg-page/25 p-3 hover:border-accent/40 hover:bg-hairline/30 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
+                    index >= 2 ? "hidden sm:flex" : "flex"
+                  }`}
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -271,9 +316,9 @@ export function CostControl() {
                       <span className="text-xs font-medium text-ink">{anomaly.category}</span>
                       <span className="text-[11px] text-muted">{anomaly.signal}</span>
                     </div>
-                    <p className="mt-1 truncate text-xs text-ink-2">{anomaly.reason}</p>
+                    <p className="mt-1 break-words text-xs text-ink-2">{anomaly.reason}</p>
                   </div>
-                  <div className="shrink-0 text-right">
+                  <div className="shrink-0 text-left sm:text-right">
                     <div className="text-sm font-semibold tabular-nums text-ink">
                       {currency(anomaly.cost, anomaly.currency)}
                     </div>
@@ -283,6 +328,14 @@ export function CostControl() {
                   </div>
                 </Link>
               ))}
+              {data.anomalies.length > 2 && (
+                <Link
+                  to="/cost?tab=coverage"
+                  className="inline-flex text-xs font-medium text-accent hover:underline"
+                >
+                  View all {data.anomalies.length} signals
+                </Link>
+              )}
             </div>
           )}
         </Card>
@@ -293,11 +346,13 @@ export function CostControl() {
             subtitle={`Selected ${days} days versus the prior ${days} days`}
           />
           <div className="space-y-3">
-            {data.movers.slice(0, 5).map((mover) => (
+            {data.movers.slice(0, 5).map((mover, index) => (
               <Link
                 key={`${mover.category}-${mover.currency}`}
                 to={`/cost?tab=categories&category=${encodeURIComponent(mover.category)}`}
-                className="flex items-center justify-between gap-3 rounded-lg p-1.5 hover:bg-hairline"
+                className={`min-w-0 flex-col items-start gap-1 rounded-lg p-1.5 hover:bg-hairline sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
+                  index >= 3 ? "hidden sm:flex" : "flex"
+                }`}
               >
                 <div>
                   <div className="text-xs font-medium text-ink">{mover.category}</div>
@@ -306,7 +361,7 @@ export function CostControl() {
                   </div>
                 </div>
                 <div
-                  className={`text-right text-xs font-medium tabular-nums ${
+                  className={`text-left text-xs font-medium tabular-nums sm:text-right ${
                     mover.change > 0 ? "text-status-serious" : "text-status-good"
                   }`}
                 >
@@ -318,6 +373,14 @@ export function CostControl() {
                 </div>
               </Link>
             ))}
+            {data.movers.length > 3 && (
+              <Link
+                to="/cost?tab=categories"
+                className="inline-flex text-xs font-medium text-accent hover:underline"
+              >
+                View all movers
+              </Link>
+            )}
           </div>
         </Card>
       </div>
@@ -327,7 +390,17 @@ export function CostControl() {
           title="Data coverage"
           subtitle="Totals stay trustworthy by keeping source basis, currency and freshness explicit"
         />
-        <DataHealthList sources={data.data_health} />
+        <details className="sm:hidden">
+          <summary className="cursor-pointer text-xs font-medium text-accent">
+            Show source details
+          </summary>
+          <div className="mt-3">
+            <DataHealthList sources={data.data_health} />
+          </div>
+        </details>
+        <div className="hidden sm:block">
+          <DataHealthList sources={data.data_health} />
+        </div>
       </Card>
     </div>
   );

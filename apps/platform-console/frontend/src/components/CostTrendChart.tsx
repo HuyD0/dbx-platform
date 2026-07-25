@@ -11,7 +11,7 @@ import {
 import { currency } from "../lib/format";
 import type { CostPoint } from "../lib/types";
 
-const COLORS: Record<string, string> = {
+export const COST_CATEGORY_COLORS: Record<string, string> = {
   Databricks: "var(--color-series-1)",
   Compute: "var(--color-series-2)",
   Storage: "var(--color-series-3)",
@@ -21,6 +21,10 @@ const COLORS: Record<string, string> = {
   Monitoring: "#d66f45",
   Other: "var(--color-muted)",
 };
+
+export function costCategoryColor(category: string) {
+  return COST_CATEGORY_COLORS[category] ?? COST_CATEGORY_COLORS.Other;
+}
 
 interface ChartRow {
   usage_date: string;
@@ -53,7 +57,7 @@ export function CostTrendChart({
 
   if (data.length === 0) {
     return (
-      <div className="grid h-64 place-items-center rounded-xl border border-dashed border-grid text-sm text-muted">
+      <div className="grid h-48 place-items-center rounded-xl border border-dashed border-grid text-sm text-muted sm:h-64">
         No Azure actual-cost trend is available for this window.
       </div>
     );
@@ -61,7 +65,7 @@ export function CostTrendChart({
 
   return (
     <div
-      className="h-72 w-full"
+      className="h-48 min-w-0 w-full sm:h-64 lg:h-72"
       role="img"
       aria-label={`Daily Azure actual cost in ${currencyCode}, stacked by service category`}
     >
@@ -124,8 +128,8 @@ export function CostTrendChart({
               type="monotone"
               dataKey={category}
               stackId="cost"
-              stroke={COLORS[category] ?? COLORS.Other}
-              fill={COLORS[category] ?? COLORS.Other}
+              stroke={costCategoryColor(category)}
+              fill={costCategoryColor(category)}
               fillOpacity={0.24}
               strokeWidth={1.5}
               activeDot={{ r: 4 }}

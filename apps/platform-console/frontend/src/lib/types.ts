@@ -276,6 +276,56 @@ export interface CostAnomaly extends Row {
   reason: string;
 }
 
+export type BillingAlignmentStatus =
+  | "aligned"
+  | "variances_found"
+  | "delayed_source"
+  | "unavailable";
+
+export interface BillingAlignmentTotal {
+  cost: number;
+  currency: string;
+  cost_basis: "AZURE_ACTUAL" | "DATABRICKS_LIST";
+}
+
+export interface BillingAlignmentSummary {
+  status: BillingAlignmentStatus;
+  variance_count: number;
+  unmatched_count: number;
+  latest_azure_date: string | null;
+  latest_databricks_date: string | null;
+  azure_lag_days: number | null;
+  databricks_lag_days: number | null;
+  azure_totals: BillingAlignmentTotal[];
+  databricks_totals: BillingAlignmentTotal[];
+  largest_pattern_variance: {
+    usage_date: string;
+    sku_family: string;
+    delta_pct_points: number;
+  } | null;
+  money_comparable: boolean;
+  notes: string;
+}
+
+export interface BillingAlignmentRow extends Row {
+  usage_date: string;
+  sku_family: string;
+  databricks_list_usd: number | null;
+  azure_billed_cost: number | null;
+  azure_currency: string;
+  comparison_status: string;
+  classifications: string[];
+  evaluated: boolean;
+  money_comparable: boolean;
+  pattern_delta_pct_points: number | null;
+  azure_window_share_pct?: number;
+  databricks_window_share_pct?: number;
+  variance: number | null;
+  variance_pct: number | null;
+  databricks_skus?: string[] | null;
+  azure_meters?: string[] | null;
+}
+
 export interface CostOverview {
   scope: {
     label: string;
@@ -300,6 +350,7 @@ export interface CostOverview {
     status: string;
     notes: string;
   };
+  billing_alignment: BillingAlignmentSummary;
   data_health: SourceHealth[];
 }
 
