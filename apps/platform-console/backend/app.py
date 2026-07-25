@@ -17,6 +17,14 @@ from backend.identity import (
     UnauthorizedError,
     mask_for_viewer,
 )
+from backend.lakemeter_integration import (
+    LazyLakeMeterApp,
+    canonicalize_identity_headers,
+    pricing_directory,
+)
+from backend.lakemeter_integration import (
+    router as lakemeter_router,
+)
 from backend.routers import (
     ai_governance,
     chat,
@@ -63,7 +71,14 @@ def create_app() -> FastAPI:
                 content=payload("unauthorized", str(exc)),
             )
         request.state.actor = actor
+        if request.url.path.startswith("/api/v1"):
+            canonicalize_identity_headers(request)
         response = await call_next(request)
+        # LakeMeter already scopes records to the verified user. Generic viewer
+        # masking would redact owner fields and break its stable API contract;
+        # binary exports and SSE also need to pass through unchanged.
+        if request.url.path.startswith("/api/v1"):
+            return response
         if actor.has_role("operator") or actor.has_role("approver"):
             return response
         if not response.headers.get("content-type", "").startswith(
@@ -96,6 +111,16 @@ def create_app() -> FastAPI:
                    governance, ai_governance, ml, performance, digest, jobs, chat,
                    estimator):
         app.include_router(module.router)
+    app.include_router(lakemeter_router)
+    app.mount("/api/v1", LazyLakeMeterApp(), name="lakemeter-api")
+
+    pricing = pricing_directory()
+    if pricing.is_dir():
+        app.mount(
+            "/static/pricing",
+            StaticFiles(directory=pricing),
+            name="lakemeter-pricing",
+        )
 
     @app.api_route(
         "/api/{path:path}",

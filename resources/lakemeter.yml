@@ -1,0 +1,108 @@
+# LakeMeter's Lakebase infrastructure is deliberately not part of the normal
+# application deployment selection. Provision or reconcile these resources
+# only through the existing approved infrastructure path. The unscheduled
+# migration Job is deployed normally, but can run only through an approved
+# `run-job` action handled by the dedicated action executor.
+resources:
+  postgres_projects:
+    lakemeter_project:
+      project_id: ${var.lakemeter_project_id}
+      display_name: dbx-platform LakeMeter
+      pg_version: 17
+      enable_pg_native_login: false
+      history_retention_duration: 604800s
+      default_endpoint_settings:
+        autoscaling_limit_min_cu: 0.5
+        autoscaling_limit_max_cu: 2
+        suspend_timeout_duration: 300s
+      lifecycle:
+        prevent_destroy: true
+      permissions:
+        - service_principal_name: ${var.lakemeter_migration_executor_service_principal_name}
+          level: CAN_MANAGE
+
+  postgres_branches:
+    lakemeter_production:
+      branch_id: production
+      parent: ${resources.postgres_projects.lakemeter_project.id}
+      no_expiry: true
+      is_protected: true
+      replace_existing: true
+      lifecycle:
+        prevent_destroy: true
+
+  postgres_endpoints:
+    lakemeter_primary:
+      endpoint_id: primary
+      parent: ${resources.postgres_branches.lakemeter_production.id}
+      endpoint_type: ENDPOINT_TYPE_READ_WRITE
+      autoscaling_limit_min_cu: 0.5
+      autoscaling_limit_max_cu: 2
+      suspend_timeout_duration: 300s
+      replace_existing: true
+      lifecycle:
+        prevent_destroy: true
+
+  postgres_roles:
+    lakemeter_migration_owner:
+      role_id: lakemeter-migration-owner
+      parent: ${resources.postgres_branches.lakemeter_production.id}
+      postgres_role: ${var.lakemeter_migration_executor_service_principal_name}
+      identity_type: SERVICE_PRINCIPAL
+      auth_method: LAKEBASE_OAUTH_V1
+      lifecycle:
+        prevent_destroy: true
+
+  postgres_databases:
+    lakemeter_database:
+      database_id: lakemeter
+      parent: ${resources.postgres_branches.lakemeter_production.id}
+      postgres_database: lakemeter
+      role: ${resources.postgres_roles.lakemeter_migration_owner.id}
+      lifecycle:
+        prevent_destroy: true
+
+  jobs:
+    lakemeter_schema_migrations:
+      name: "[dbx-platform] lakemeter-schema-migrations"
+      description: >
+        Reconciles the pinned LakeMeter schema, functions, reference data, and
+        pricing bundle after an immutable approved run-job action.
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+      run_as:
+        service_principal_name: ${var.lakemeter_migration_executor_service_principal_name}
+      tags:
+        team: platform
+        project: dbx-platform
+        control_plane: governed-lakemeter-migration
+      permissions:
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - group_name: ${var.approver_group}
+          level: CAN_MANAGE_RUN
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+              - psycopg2-binary>=2.9.9
+      tasks:
+        - task_key: reconcile_lakemeter_schema
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/dbx_platform/lakemeter_migrations.py
+            parameters:
+              - --endpoint
+              - projects/${var.lakemeter_project_id}/branches/production/endpoints/primary
+              - --database
+              - lakemeter
+              - --app-name
+              - ${var.platform_console_name}
+              - --expected-executor
+              - ${var.lakemeter_migration_executor_service_principal_name}
+              - --schema-version
+              - "1"

@@ -46,6 +46,7 @@ import { CostControl } from "./pages/CostControl";
 import { CostValue } from "./pages/CostValue";
 import { DataGovernance } from "./pages/DataGovernance";
 import { Learn } from "./pages/Learn";
+import { LakeMeter } from "./pages/LakeMeter";
 import { MissionControl } from "./pages/MissionControl";
 import { Operations } from "./pages/Operations";
 import { Overview } from "./pages/Overview";
@@ -211,6 +212,7 @@ export default function App() {
   const mobileCloseRef = useRef<HTMLButtonElement>(null);
   const mobileDrawerRef = useRef<HTMLElement>(null);
   const location = useLocation();
+  const estimatorRoute = location.pathname.startsWith("/cost/estimator");
   const health = useQuery({
     queryKey: ["health"],
     queryFn: () => apiGet<HealthResponse>("/api/health"),
@@ -342,12 +344,22 @@ export default function App() {
           <main
             id="main-content"
             tabIndex={-1}
-            aria-hidden={mobileNavOpen || assistantOpen || undefined}
+            aria-hidden={mobileNavOpen || (assistantOpen && !estimatorRoute) || undefined}
             className="px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
           >
             <div className="mx-auto max-w-7xl">
               <Routes>
                 <Route path="/cost/anomalies/:anomalyId" element={<CostAnomaly />} />
+                <Route
+                  path="/cost/estimator/*"
+                  element={
+                    <LakeMeter
+                      dark={dark}
+                      assistantOpen={assistantOpen}
+                      onAssistantClose={() => setAssistantOpen(false)}
+                    />
+                  }
+                />
                 {[...NAV, ...UTILITY_NAV].map(({ to, page }) => (
                   <Route key={to} path={to} element={page} />
                 ))}
@@ -368,7 +380,9 @@ export default function App() {
           {!mobileNavOpen && location.pathname !== "/" && (
             <AssistantLauncher onOpen={() => setAssistantOpen(true)} />
           )}
-          <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+          {!estimatorRoute && (
+            <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
+          )}
         </div>
       </AssistantPanelProvider>
     </ChatProvider>

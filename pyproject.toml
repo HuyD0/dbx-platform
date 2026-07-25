@@ -26,9 +26,15 @@ dev = [
     # Offline TestClient tests for the Platform Console backend (tests/test_app.py)
     "fastapi>=0.110",
     "httpx>=0.27",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9.9",
+    "pydantic-settings>=2.1",
     # Offline tests for the estimator's document-upload path
     "python-multipart>=0.0.9",
     "pypdf>=5.0",
+    "xlsxwriter>=3.1.9",
+    "python-dotenv>=1.0",
+    "cachetools>=5.3",
 ]
 # The Azure cost forecaster's training/inference deps — kept out of the core
 # wheel; the forecast jobs' serverless environment installs them alongside
@@ -60,10 +66,17 @@ packages = ["src/dbx_platform"]
 # governance job (which has no repo checkout) can run the drift report.
 [tool.hatch.build.targets.wheel.force-include]
 "policies" = "dbx_platform/policies"
+"vendor/lakemeter/backend/app" = "dbx_platform/lakemeter_vendor/backend/app"
+"vendor/lakemeter/scripts/functions" = "dbx_platform/lakemeter_vendor/scripts/functions"
+"vendor/lakemeter/scripts/install_lakemeter.py" = "dbx_platform/lakemeter_vendor/scripts/install_lakemeter.py"
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = [
+    "vendor/lakemeter",
+    "apps/platform-console/lakemeter_vendor",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

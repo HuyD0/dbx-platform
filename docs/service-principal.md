@@ -15,6 +15,7 @@ make an executor a workspace admin as a convenience.
 | App service principal | Read summaries and submit an already approved action ID to executor Jobs | UC `MODIFY`; cluster/job/token/policy/app/warehouse mutation APIs |
 | Evidence-job executor | Run scheduled evidence/reporting Jobs and append their governed outputs | Remediation, UC DDL, resource lifecycle APIs |
 | Action executor | Allowlisted remediation, protected manual Job launch, budget write | App lifecycle control, UC DDL, resource deletion |
+| LakeMeter migration executor | Own the dedicated Lakebase database and run an approved schema/pricing migration | App/runtime actions, workspace target mutation, shared database access |
 | Scheduled report identity | Read sources; append findings/cost/telemetry | Resource/configuration mutation APIs |
 | Human viewer | Read masked Mission Control data | Action-table writes |
 | Human operator/proposer | Create plans under forwarded user authorization | Approval unless also in approver group; executor API permissions |
@@ -34,6 +35,8 @@ never authorization.
 | Action executor Job | deploy/manage | `CAN_MANAGE_RUN` | none | run-as | none |
 | Protected forecast-training Job | deploy/manage | `CAN_VIEW` exact ID | none | `CAN_MANAGE_RUN`, run-as | none |
 | Schema migration Job | deploy/run | none | none | none | none |
+| LakeMeter migration Job | deploy/manage | `CAN_VIEW` exact ID | none | `CAN_MANAGE_RUN` exact approved Job | none |
+| LakeMeter Lakebase project/database | approved companion reconciliation | scoped CRUD through App binding | none | none | none |
 | Eligible clusters | deploy only if bundle-owned | none | none | `CAN_MANAGE` on exact approved scope | read if needed |
 | Eligible orphaned Jobs | deploy/manage if bundle-owned | none | none | `CAN_MANAGE` on exact approved scope | read |
 | PAT token-management API | none | none | none | workspace-admin-level capability; keep pack disabled unless accepted | read/list only if security pack enabled |
@@ -48,8 +51,8 @@ The evidence-job executor needs only `CAN_USE` on the dedicated warehouse. It
 must have no permission on the shared Starter warehouse and no warehouse
 stop/edit capability.
 
-The protected training Job is injected into the app through the exact bundle
-ID (`DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS`).
+The protected training and LakeMeter migration Jobs are injected into the app
+through exact bundle IDs (`DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS`).
 
 ## Unity Catalog matrix
 
@@ -288,8 +291,10 @@ Required production variables:
 
 - `DBX_PLATFORM_RUNTIME_EXECUTOR_SP`
 - `DBX_PLATFORM_ACTION_EXECUTOR_SP`
+- `DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP`
 
-The workflow fails if either is missing. There is no shared warehouse ID
+The workflow fails if any is missing. The LakeMeter migration identity must
+also be distinct from both general executors. There is no shared warehouse ID
 secret because the bundle owns the dedicated warehouse.
 
 If using Databricks OAuth M2M/client-secret auth instead, store only the
