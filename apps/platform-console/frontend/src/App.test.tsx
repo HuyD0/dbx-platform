@@ -232,7 +232,7 @@ test("Mission Control turns ranked evidence into governed decisions", async () =
     );
   });
   vi.stubGlobal("fetch", fetchMock);
-  renderApp();
+  renderApp("/mission-control");
 
   expect(
     await screen.findByRole("heading", { name: "Operational posture" }),
@@ -308,8 +308,10 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
 
   const nav = screen.getByRole("navigation", { name: "Primary" });
   for (const label of [
+    "Cost Control",
+    "Mission Control",
     "Command Center",
-    "Cost",
+    "Cost Explorer",
     "Data Governance",
     "AI Governance",
     "Risk",
@@ -321,7 +323,7 @@ test("five-jobs navigation exposes governance homes and the workspace scope", as
   expect(await screen.findByText("7405609799238491")).toBeInTheDocument();
 });
 
-test("Command Center is a real route while Mission Control remains the root safety surface", async () => {
+test("Command Center and Mission Control remain available beside Cost Control", async () => {
   const user = userEvent.setup();
   const now = new Date();
   const observedAt = now.toISOString();

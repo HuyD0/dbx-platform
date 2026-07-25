@@ -2,14 +2,180 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 
 from backend import cache, deps
 from backend.models import envelope
-from dbx_platform import azure_cost, cost
+from dbx_platform import azure_cost, cost, platform_cost
 from dbx_platform.system_tables import run_query
 
 router = APIRouter(prefix="/api/cost")
+
+
+def _window_days(window: str | None, days: int) -> int:
+    if window:
+        value = window.lower().removesuffix("d")
+        if value.isdigit():
+            days = int(value)
+    return deps.clamp_days(days)
+
+
+def _load_cost_overview(days: int) -> dict:
+    settings = deps.get_settings()
+    workspace_id, environment = deps.control_plane_scope()
+    resource_groups = settings.azure_cost_resource_group_list()
+    azure_rows = platform_cost.fetch_scoped_daily(
+        deps.get_ws(),
+        deps.warehouse_id(),
+        settings.dashboard_catalog,
+        settings.dashboard_schema,
+        workspace_id=workspace_id,
+        environment=environment,
+        resource_groups=resource_groups,
+        days=days,
+    )
+    databricks_rows: list[dict] = []
+    databricks_error: str | None = None
+    try:
+        databricks_rows = cost.usage_report(
+            deps.get_ws(),
+            deps.warehouse_id(),
+            days,
+        )
+    except Exception:
+        # Azure ActualCost remains authoritative even when the non-additive
+        # Databricks workload attribution source is temporarily unavailable.
+        databricks_error = "Databricks list-cost attribution is temporarily unavailable."
+    return platform_cost.build_overview(
+        azure_rows,
+        databricks_rows,
+        days=days,
+        workspace_id=workspace_id,
+        environment=environment,
+        resource_groups=resource_groups,
+        spike_pct=settings.azure_spike_pct,
+        spike_min_cost=settings.azure_spike_min_cost,
+        acceleration_pct=settings.azure_acceleration_pct,
+        acceleration_min_cost=settings.azure_acceleration_min_cost,
+        databricks_error=databricks_error,
+    )
+
+
+def _cost_overview(days: int, refresh: bool) -> tuple[dict, object, bool]:
+    return cache.cached(
+        f"cost/control/{days}",
+        lambda: _load_cost_overview(days),
+        refresh,
+    )
+
+
+@router.get("/overview")
+def cost_overview(
+    days: int = 30,
+    window: str | None = Query(default=None, pattern=r"^\d{1,3}d?$"),
+    refresh: bool = False,
+) -> dict:
+    days = _window_days(window, days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    return envelope(data, as_of, hit)
+
+
+@router.get("/timeseries")
+def cost_timeseries(
+    days: int = 30,
+    window: str | None = Query(default=None, pattern=r"^\d{1,3}d?$"),
+    refresh: bool = False,
+) -> dict:
+    days = _window_days(window, days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    return envelope(data["series"], as_of, hit)
+
+
+@router.get("/breakdown")
+def cost_breakdown(
+    by: str = Query(default="category", pattern=r"^(category|ownership|component)$"),
+    days: int = 30,
+    refresh: bool = False,
+) -> dict:
+    days = deps.clamp_days(days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    key = {
+        "category": "categories",
+        "ownership": "ownership",
+        "component": "components",
+    }[by]
+    return envelope(data[key], as_of, hit)
+
+
+@router.get("/movers")
+def cost_movers(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    return envelope(data["movers"], as_of, hit)
+
+
+@router.get("/anomalies")
+def cost_anomalies(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    return envelope(data["anomalies"], as_of, hit)
+
+
+@router.get("/anomalies/{anomaly_id}")
+def cost_anomaly(anomaly_id: str, days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    anomaly = next(
+        (row for row in data["anomalies"] if row["id"] == anomaly_id),
+        None,
+    )
+    if anomaly is None:
+        raise HTTPException(status_code=404, detail="Cost anomaly not found.")
+    related_series = [
+        row
+        for row in data["series"]
+        if row["category"] == anomaly["category"]
+        and row["currency"] == anomaly["currency"]
+    ]
+    related_mover = next(
+        (
+            row
+            for row in data["movers"]
+            if row["category"] == anomaly["category"]
+            and row["currency"] == anomaly["currency"]
+        ),
+        None,
+    )
+    return envelope(
+        {
+            "anomaly": anomaly,
+            "series": related_series,
+            "mover": related_mover,
+            "scope": data["scope"],
+            "databricks_list": data["databricks_list"],
+            "investigation": {
+                "checks": [
+                    "Confirm whether the increase aligns with a planned workload.",
+                    "Review Databricks SKU attribution for the same period.",
+                    "Compare the affected resource group and service category.",
+                ],
+                "safe_actions": [
+                    "Open filtered Cost Explorer",
+                    "Export the evidence",
+                    "Draft a governed cost-remediation proposal",
+                ],
+            },
+        },
+        as_of,
+        hit,
+    )
+
+
+@router.get("/data-health")
+def cost_data_health(days: int = 30, refresh: bool = False) -> dict:
+    days = deps.clamp_days(days)
+    data, as_of, hit = _cost_overview(days, refresh)
+    return envelope(data["data_health"], as_of, hit)
 
 
 @router.get("/usage")

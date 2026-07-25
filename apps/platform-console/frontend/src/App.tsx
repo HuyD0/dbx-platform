@@ -41,6 +41,8 @@ import { Audit } from "./pages/Audit";
 import { Automations } from "./pages/Automations";
 import { Chat } from "./pages/Chat";
 import { CostPlanner } from "./pages/CostPlanner";
+import { CostAnomaly } from "./pages/CostAnomaly";
+import { CostControl } from "./pages/CostControl";
 import { CostValue } from "./pages/CostValue";
 import { DataGovernance } from "./pages/DataGovernance";
 import { Learn } from "./pages/Learn";
@@ -59,10 +61,16 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/", label: "Mission Control", icon: LayoutDashboard, page: <MissionControl /> },
+  { to: "/", label: "Cost Control", icon: CircleDollarSign, page: <CostControl /> },
+  {
+    to: "/mission-control",
+    label: "Mission Control",
+    icon: LayoutDashboard,
+    page: <MissionControl />,
+  },
   { to: "/overview", label: "Command Center", icon: LayoutGrid, page: <Overview /> },
   { to: "/actions", label: "Action Center", icon: ListChecks, page: <ActionCenter /> },
-  { to: "/cost", label: "Cost", icon: CircleDollarSign, page: <CostValue /> },
+  { to: "/cost", label: "Cost Explorer", icon: CircleDollarSign, page: <CostValue /> },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
   { to: "/data-governance", label: "Data Governance", icon: Tags, page: <DataGovernance /> },
   { to: "/ai-governance", label: "AI Governance", icon: BrainCircuit, page: <AiGovernance /> },
@@ -339,6 +347,7 @@ export default function App() {
           >
             <div className="mx-auto max-w-7xl">
               <Routes>
+                <Route path="/cost/anomalies/:anomalyId" element={<CostAnomaly />} />
                 {[...NAV, ...UTILITY_NAV].map(({ to, page }) => (
                   <Route key={to} path={to} element={page} />
                 ))}

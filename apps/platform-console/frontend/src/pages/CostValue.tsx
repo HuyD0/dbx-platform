@@ -1,14 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ArrowLeft, Info, Layers3 } from "lucide-react";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { BudgetPlanButton } from "../components/BudgetPlanButton";
+import { CostTrendChart } from "../components/CostTrendChart";
 import { DataTable } from "../components/DataTable";
 import { FindingsSection } from "../components/FindingsSection";
 import { LlmCostView } from "../components/LlmCostView";
 import {
   AsOf,
+  Badge,
   Card,
+  DataHealthList,
   EmptyState,
   ErrorState,
   PageHeader,
@@ -17,213 +20,18 @@ import {
   Tabs,
 } from "../components/ui";
 import { apiGet } from "../lib/api";
-import type { Envelope, Row } from "../lib/types";
+import { currency } from "../lib/format";
+import type { CostOverview, Envelope, Row } from "../lib/types";
 import { Cost } from "./Cost";
 
 const COST_TABS = [
-  { id: "databricks", label: "Databricks" },
-  { id: "attribution", label: "Attribution" },
-  { id: "azure", label: "Azure & Foundry" },
-  { id: "llm", label: "LLM & AI" },
-  { id: "budgets", label: "Budgets & forecasts" },
+  { id: "categories", label: "Service categories" },
+  { id: "databricks", label: "Databricks drivers" },
+  { id: "ownership", label: "Ownership" },
+  { id: "forecast", label: "Forecast & budgets" },
+  { id: "coverage", label: "Coverage" },
+  { id: "llm", label: "LLM detail" },
 ];
-
-const ATTRIBUTION_DIMENSIONS = [
-  { id: "team", label: "Team" },
-  { id: "project", label: "Project" },
-  { id: "workspace", label: "Workspace" },
-];
-
-const ATTRIBUTION_WINDOWS = [7, 30, 90];
-
-function Attribution() {
-  const [dimension, setDimension] = useState("team");
-  const [days, setDays] = useState(30);
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
-        Attribution reads the <code>team</code>/<code>project</code> tags the cluster policies
-        enforce. Rows labeled <code>unallocated</code> carry no tag — tighten enforcement in
-        Data Governance to shrink them. Column names follow FOCUS vocabulary.
-      </div>
-      <div className="flex flex-wrap items-center gap-4 text-xs">
-        <div className="flex items-center gap-1" role="group" aria-label="Attribution dimension">
-          <span className="mr-1 text-muted">Attribute by:</span>
-          {ATTRIBUTION_DIMENSIONS.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => setDimension(d.id)}
-              aria-pressed={dimension === d.id}
-              className={`rounded-lg px-2.5 py-1 font-medium ${
-                dimension === d.id
-                  ? "bg-accent text-white"
-                  : "border border-grid text-ink-2 hover:bg-hairline"
-              }`}
-            >
-              {d.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1" role="group" aria-label="Attribution window">
-          <span className="mr-1 text-muted">Window:</span>
-          {ATTRIBUTION_WINDOWS.map((w) => (
-            <button
-              key={w}
-              type="button"
-              onClick={() => setDays(w)}
-              aria-pressed={days === w}
-              className={`rounded-lg px-2.5 py-1 font-medium ${
-                days === w
-                  ? "bg-accent text-white"
-                  : "border border-grid text-ink-2 hover:bg-hairline"
-              }`}
-            >
-              {w}d
-            </button>
-          ))}
-        </div>
-      </div>
-      <FindingsSection
-        title={`Spend by ${dimension}`}
-        subtitle={`Databricks list cost attributed by the ${dimension} dimension, last ${days} days`}
-        path="/api/cost/attribution"
-        params={{ dimension, days }}
-        emptyMessage="No billed usage in the window."
-      />
-    </div>
-  );
-}
-
-const AZURE_WINDOWS = [7, 30, 90];
-
-const AZURE_DIMENSIONS = [
-  { id: "service", label: "Service" },
-  { id: "bucket", label: "Bucket" },
-  { id: "resource-group", label: "Resource group" },
-];
-
-const AZURE_DIMENSION_SUBTITLES: Record<string, string> = {
-  service: "Billed actuals per Azure service — Azure OpenAI appears under Cognitive Services",
-  bucket:
-    "Billed actuals per allocation bucket — foundry_ai isolates Azure OpenAI, AI Foundry and Azure ML spend",
-  "resource-group": "Billed actuals per resource group for chargeback",
-};
-
-function ForecastBySeries({ rows }: { rows: Row[] }) {
-  const bySeries = new Map<string, Row[]>();
-  for (const row of rows) {
-    const key = String(row.series ?? "total");
-    bySeries.set(key, [...(bySeries.get(key) ?? []), row]);
-  }
-  const ordered = [...bySeries.keys()].sort((a, b) => {
-    if (a === "total") return -1;
-    if (b === "total") return 1;
-    return a.localeCompare(b);
-  });
-  return (
-    <div className="space-y-4">
-      {ordered.map((series) => (
-        <div key={series}>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-2">
-            {series}
-          </h3>
-          <DataTable
-            rows={(bySeries.get(series) ?? []).map(({ series: _series, ...rest }) => rest)}
-            caption={`Forecast for the ${series} series`}
-            exportName={`azure-forecast-${series}`}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AzureCost() {
-  const [days, setDays] = useState(30);
-  const [by, setBy] = useState("service");
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-grid bg-hairline/20 p-3 text-xs leading-5 text-ink-2">
-        Azure amounts are billed costs from the configured resource-group scope. They remain
-        separate from Databricks list cost and expose their original currency.
-      </div>
-      <div className="flex flex-wrap items-center gap-4 text-xs">
-        <div className="flex items-center gap-1" role="group" aria-label="Azure cost window">
-          <span className="mr-1 text-muted">Window:</span>
-          {AZURE_WINDOWS.map((w) => (
-            <button
-              key={w}
-              type="button"
-              onClick={() => setDays(w)}
-              aria-pressed={days === w}
-              className={`rounded-lg px-2.5 py-1 font-medium ${
-                days === w
-                  ? "bg-accent text-white"
-                  : "border border-grid text-ink-2 hover:bg-hairline"
-              }`}
-            >
-              {w}d
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1" role="group" aria-label="Azure cost dimension">
-          <span className="mr-1 text-muted">Group by:</span>
-          {AZURE_DIMENSIONS.map((dimension) => (
-            <button
-              key={dimension.id}
-              type="button"
-              onClick={() => setBy(dimension.id)}
-              aria-pressed={by === dimension.id}
-              className={`rounded-lg px-2.5 py-1 font-medium ${
-                by === dimension.id
-                  ? "bg-accent text-white"
-                  : "border border-grid text-ink-2 hover:bg-hairline"
-              }`}
-            >
-              {dimension.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <FindingsSection
-        title="Azure actual cost"
-        subtitle={`${AZURE_DIMENSION_SUBTITLES[by]}, last ${days} days`}
-        path="/api/cost/azure"
-        params={{ days, by }}
-        emptyMessage={`No Azure billing rows in the last ${days} days.`}
-      />
-      <FindingsSection
-        title="Databricks ↔ Azure reconciliation"
-        subtitle="Daily SKU-family bridge; variance is withheld when currencies differ"
-        path="/api/cost/reconciliation"
-        params={{ days }}
-        emptyMessage="No scoped Databricks and Azure billing rows are available to compare."
-      />
-      <FindingsSection
-        title="Foundry deployment drill"
-        subtitle={`Azure OpenAI / AI Foundry actuals per billing meter (per-model attribution), last ${days} days`}
-        path="/api/cost/azure-detail"
-        params={{ by: "meter", bucket: "foundry_ai", days }}
-        emptyMessage="No Foundry-bucket detail rows — the azure-cost pull populates azure_cost_details."
-      />
-      <FindingsSection
-        title="Azure spend anomalies"
-        subtitle="Material deviations from the trailing baseline"
-        path="/api/cost/azure-anomalies"
-        params={{ days }}
-        emptyMessage="No Azure cost anomaly needs attention."
-      />
-      <FindingsSection
-        title="Azure cost forecast"
-        subtitle="P10, P50 and P90 per series — foundry_ai is forecast separately from the total"
-        path="/api/cost/azure-forecast"
-        emptyMessage="No current Azure forecast is available."
-        render={(rows) => <ForecastBySeries rows={rows} />}
-      />
-    </div>
-  );
-}
 
 function Budgets() {
   const query = useQuery({
@@ -236,9 +44,9 @@ function Budgets() {
     <div className="space-y-4">
       <Card>
         <SectionTitle
-          title="Mission Control cost guardrails"
-          subtitle="Workspace evidence budgets with approval-gated changes; these are separate from Databricks account budgets"
-          right={<BudgetPlanButton label="Plan Mission Control budget" />}
+          title="Cost guardrails"
+          subtitle="Alerts at 80% and 100% never change resources automatically"
+          right={<BudgetPlanButton label="Plan budget change" />}
         />
         {query.isPending ? (
           <Skeleton rows={4} />
@@ -262,68 +70,272 @@ function Budgets() {
           </>
         ) : (
           <EmptyState
-            message="No Mission Control budget is configured. Plan a workspace, provider, team or use-case budget above."
+            message="No budget is configured. Plan a provider, team or use-case budget above."
             positive={false}
           />
         )}
       </Card>
+      <FindingsSection
+        title="Platform forecast"
+        subtitle="Month-end outlook with explicit currency and cost basis"
+        path="/api/cost/forecast"
+        emptyMessage="No current platform forecast is ready."
+      />
+    </div>
+  );
+}
+
+function CategoryExplorer({
+  data,
+  selectedDate,
+  selectedCategory,
+}: {
+  data: CostOverview;
+  selectedDate: string | null;
+  selectedCategory: string | null;
+}) {
+  const navigate = useNavigate();
+  const currencyCode = data.totals[0]?.currency;
+  const points = data.series.filter(
+    (point) =>
+      (!currencyCode || point.currency === currencyCode)
+      && (!selectedCategory || point.category === selectedCategory),
+  );
+  const categories = data.categories.filter(
+    (row) => !currencyCode || row.currency === currencyCode,
+  );
+  const dayRows = selectedDate
+    ? data.series.filter(
+        (point) =>
+          point.usage_date === selectedDate
+          && (!currencyCode || point.currency === currencyCode),
+      )
+    : [];
+
+  return (
+    <div className="space-y-4">
+      {(selectedDate || selectedCategory) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/25 bg-accent/5 p-3 text-xs text-ink-2">
+          <span className="font-medium text-ink">Active filter:</span>
+          {selectedDate && <Badge tone="info">{selectedDate}</Badge>}
+          {selectedCategory && <Badge tone="info">{selectedCategory}</Badge>}
+          <Link to="/cost?tab=categories" className="ml-auto text-accent hover:underline">
+            Clear filters
+          </Link>
+        </div>
+      )}
       <Card>
         <SectionTitle
-          title="Databricks account budgets"
-          subtitle="Use native budgets for near-real-time enforcement; Mission Control budgets remain analytical guardrails"
+          title={selectedCategory ? `${selectedCategory} trend` : "Cost trend by category"}
+          subtitle="Azure billed actuals; click a day to open its category breakdown"
         />
-        <p className="text-xs leading-5 text-ink-2">
-          Native Databricks budgets are account-level objects, while this app currently has a
-          workspace-scoped identity and approval ledger. Create or inspect the native budget in
-          the Azure Databricks account console; Mission Control will continue to show its own
-          currency- and cost-basis-specific guardrails above.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <a
-            href="https://accounts.azuredatabricks.net/"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
-          >
-            Open account console <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          <a
-            href="https://learn.microsoft.com/azure/databricks/admin/account-settings/budgets"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
-          >
-            Azure budget documentation <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          <a
-            href="https://learn.microsoft.com/en-us/azure/databricks/genie/budgets"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-lg border border-grid px-3 py-1.5 text-xs font-medium text-ink hover:bg-hairline"
-          >
-            Genie budget controls <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+        <CostTrendChart
+          points={points}
+          onSelectDate={(date) =>
+            navigate(
+              `/cost?tab=categories&date=${date}${
+                selectedCategory ? `&category=${encodeURIComponent(selectedCategory)}` : ""
+              }`,
+            )
+          }
+        />
+      </Card>
+      {selectedDate && (
+        <Card>
+          <SectionTitle
+            title={`What contributed on ${selectedDate}`}
+            subtitle="Click a category from the table below to isolate its trend"
+          />
+          {dayRows.length ? (
+            <DataTable
+              rows={dayRows}
+              columns={["category", "cost", "currency", "cost_basis"]}
+              caption={`Cost categories for ${selectedDate}`}
+              exportName={`cost-${selectedDate}`}
+              rowAction={(row) => (
+                <Link
+                  to={`/cost?tab=categories&date=${selectedDate}&category=${encodeURIComponent(
+                    String(row.category),
+                  )}`}
+                  className="text-xs font-medium text-accent hover:underline"
+                >
+                  Isolate
+                </Link>
+              )}
+              rowActionLabel="Inspect"
+            />
+          ) : (
+            <EmptyState message="No cost rows match this day and category." positive={false} />
+          )}
+        </Card>
+      )}
+      <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+        <Card>
+          <SectionTitle
+            title="Service categories"
+            subtitle="Stable categories prevent Azure service-name changes from hiding trends"
+          />
+          <DataTable
+            rows={categories}
+            columns={["category", "cost", "currency", "share_pct", "cost_basis"]}
+            caption="Azure actual cost by service category"
+            exportName="cost-by-category"
+            rowAction={(row) => (
+              <Link
+                to={`/cost?tab=categories&category=${encodeURIComponent(
+                  String(row.category),
+                )}`}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                Trend
+              </Link>
+            )}
+            rowActionLabel="Inspect"
+          />
+        </Card>
+        <Card>
+          <SectionTitle
+            title="Period movers"
+            subtitle="Current selected window compared with the immediately prior window"
+          />
+          <DataTable
+            rows={data.movers}
+            columns={[
+              "category",
+              "cost",
+              "previous_cost",
+              "change",
+              "change_pct",
+              "currency",
+            ]}
+            caption="Cost movers"
+            exportName="cost-movers"
+            pageSize={8}
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function DatabricksDrivers({ data }: { data: CostOverview }) {
+  const driver = data.databricks_list;
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-medium text-muted">
+              <Layers3 className="h-4 w-4 text-series-1" />
+              Databricks workload signal
+            </div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums text-ink">
+              {currency(driver.cost, driver.currency)}
+            </div>
+            <p className="mt-1 text-xs text-muted">{driver.cost_basis}</p>
+          </div>
+          <Badge tone={driver.status === "healthy" ? "good" : "warning"}>
+            {driver.status}
+          </Badge>
+        </div>
+        <div className="mt-4 flex gap-2 rounded-xl border border-grid bg-hairline/20 p-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <p className="text-xs leading-5 text-ink-2">
+            This is list-price attribution, not another bill. It explains which Databricks
+            SKUs and workloads drove the Azure Databricks actual cost, so it is never added
+            to the platform total.
+          </p>
         </div>
       </Card>
-      <FindingsSection
-        title="Consolidated forecast"
-        subtitle="Month-end outlook per series with explicit currency and cost basis"
-        path="/api/cost/forecast"
-        emptyMessage="No consolidated forecast is ready."
-        render={(rows) => <ForecastBySeries rows={rows} />}
-      />
+      {driver.rows.length > 0 && (
+        <Card>
+          <SectionTitle
+            title="SKU attribution"
+            subtitle="Workspace-scoped DBU and list-price signal"
+          />
+          <DataTable
+            rows={driver.rows}
+            caption="Databricks SKU cost attribution"
+            exportName="databricks-cost-drivers"
+          />
+        </Card>
+      )}
+      <Cost />
+    </div>
+  );
+}
+
+function OwnershipExplorer({ data }: { data: CostOverview }) {
+  const [dimension, setDimension] = useState("team");
+  const dimensions = [
+    { id: "team", label: "Team" },
+    { id: "project", label: "Project" },
+    { id: "workspace", label: "Workspace" },
+  ];
+  return (
+    <div className="space-y-4">
+      <Card>
+        <SectionTitle
+          title="Azure ownership allocation"
+          subtitle="Resource group is the current bill-of-record fallback"
+        />
+        <DataTable
+          rows={data.ownership}
+          columns={["owner", "cost", "currency", "share_pct", "cost_basis"]}
+          caption="Azure actual cost by owner"
+          exportName="azure-cost-by-owner"
+        />
+      </Card>
+      <Card>
+        <SectionTitle
+          title="Databricks tag attribution"
+          subtitle="Team and project tags explain workload ownership without changing the Azure total"
+        />
+        <div className="mb-3 flex flex-wrap items-center gap-1" role="group" aria-label="Attribution dimension">
+          {dimensions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setDimension(option.id)}
+              aria-pressed={dimension === option.id}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                dimension === option.id
+                  ? "bg-accent text-white"
+                  : "border border-grid text-ink-2 hover:bg-hairline"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <FindingsSection
+          title={`List-cost attribution by ${dimension}`}
+          path="/api/cost/attribution"
+          params={{ dimension, days: data.period.days }}
+          emptyMessage="No tagged Databricks usage is available in this window."
+        />
+      </Card>
     </div>
   );
 }
 
 export function CostValue() {
   const [params, setParams] = useSearchParams();
-  const requested = params.get("tab") ?? "databricks";
-  const active = COST_TABS.some((tab) => tab.id === requested) ? requested : "databricks";
+  const requested = params.get("tab") ?? "categories";
+  const active = COST_TABS.some((tab) => tab.id === requested) ? requested : "categories";
+  const days = Math.max(1, Math.min(365, Number(params.get("days") ?? 30)));
+  const query = useQuery({
+    queryKey: ["/api/cost/overview", days],
+    queryFn: () => apiGet<Envelope<CostOverview>>(`/api/cost/overview?days=${days}`),
+    staleTime: 60_000,
+    retry: false,
+  });
   const setActive = (tab: string) => {
     const next = new URLSearchParams(params);
-    if (tab === "databricks") next.delete("tab");
+    if (tab === "categories") next.delete("tab");
     else next.set("tab", tab);
+    next.delete("date");
+    next.delete("category");
     setParams(next, { replace: true });
   };
 
@@ -331,17 +343,96 @@ export function CostValue() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="FinOps"
-        title="Cost"
-        description="Understand what was billed, why it changed, and what useful outcome each dollar produced."
+        title="Cost Explorer"
+        description="Move from the bill to its service, ownership and Databricks workload drivers without mixing cost bases."
+        actions={
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-grid px-3 py-2 text-xs font-medium text-ink-2 hover:bg-hairline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Cost Control
+          </Link>
+        }
       />
-      <Tabs tabs={COST_TABS} active={active} onChange={setActive} label="Cost and value views" />
-      <div role="tabpanel">
-        {active === "databricks" && <Cost />}
-        {active === "attribution" && <Attribution />}
-        {active === "azure" && <AzureCost />}
-        {active === "llm" && <LlmCostView />}
-        {active === "budgets" && <Budgets />}
-      </div>
+      <Tabs tabs={COST_TABS} active={active} onChange={setActive} label="Cost Explorer views" />
+      {query.isPending ? (
+        <Skeleton rows={10} />
+      ) : query.isError ? (
+        <ErrorState error={query.error} />
+      ) : (
+        <div role="tabpanel" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+            <span>
+              {query.data.data.scope.label} · {query.data.data.period.from ?? "—"} to{" "}
+              {query.data.data.period.to ?? "—"}
+            </span>
+            <AsOf
+              asOf={query.data.as_of}
+              cached={query.data.cached}
+              onRefresh={() => query.refetch()}
+              refreshing={query.isFetching}
+            />
+          </div>
+          {active === "categories" && (
+            <CategoryExplorer
+              data={query.data.data}
+              selectedDate={params.get("date")}
+              selectedCategory={params.get("category")}
+            />
+          )}
+          {active === "databricks" && (
+            <DatabricksDrivers data={query.data.data} />
+          )}
+          {active === "ownership" && <OwnershipExplorer data={query.data.data} />}
+          {active === "forecast" && <Budgets />}
+          {active === "coverage" && (
+            <div className="space-y-4">
+              <Card>
+                <SectionTitle
+                  title="Source coverage"
+                  subtitle="Freshness, retention and attribution health for every cost claim"
+                />
+                <DataHealthList sources={query.data.data.data_health} />
+              </Card>
+              <Card>
+                <SectionTitle
+                  title="Detected runaway signals"
+                  subtitle="Daily spikes and sustained 7-day acceleration"
+                />
+                {query.data.data.anomalies.length > 0 ? (
+                  <DataTable
+                    rows={query.data.data.anomalies}
+                    columns={[
+                      "severity",
+                      "signal",
+                      "day",
+                      "category",
+                      "cost",
+                      "baseline",
+                      "change_pct",
+                      "currency",
+                    ]}
+                    caption="Cost anomaly signals"
+                    exportName="cost-anomalies"
+                    rowAction={(row) => (
+                      <Link
+                        to={`/cost/anomalies/${encodeURIComponent(String(row.id))}?days=${days}`}
+                        className="text-xs font-medium text-accent hover:underline"
+                      >
+                        Investigate
+                      </Link>
+                    )}
+                    rowActionLabel="Inspect"
+                  />
+                ) : (
+                  <EmptyState message="No runaway signal crossed the configured thresholds." />
+                )}
+              </Card>
+            </div>
+          )}
+          {active === "llm" && <LlmCostView />}
+        </div>
+      )}
     </div>
   );
 }
