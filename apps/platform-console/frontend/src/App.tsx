@@ -351,9 +351,9 @@ export default function App() {
             id="main-content"
             tabIndex={-1}
             aria-hidden={mobileNavOpen || (assistantOpen && !estimatorRoute) || undefined}
-            className="px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
+            className="min-w-0 overflow-x-hidden px-4 pb-24 pt-20 focus:outline-none sm:px-6 lg:ml-64 lg:px-8 lg:pb-8 lg:pt-6"
           >
-            <div className="mx-auto max-w-7xl">
+            <div className="mx-auto min-w-0 max-w-7xl">
               <Routes>
                 <Route path="/cost/anomalies/:anomalyId" element={<CostAnomaly />} />
                 <Route
