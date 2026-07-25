@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 
@@ -164,16 +165,28 @@ def dashboards(refresh: bool = False) -> dict:
         host = (w.config.host or "").rstrip("/")
         out = []
         try:
+            workspace_id = str(w.get_workspace_id() or "").strip()
+            if not host or not workspace_id:
+                return []
+            workspace_query = urlencode({"o": workspace_id})
             for d in w.lakeview.list():
                 name = d.display_name or ""
                 if DASHBOARD_MARKER in name and d.dashboard_id:
-                    out.append({
-                        "name": name,
-                        "url": f"{host}/sql/dashboardsv3/{d.dashboard_id}",
-                        # Iframe-embeddable only after a workspace admin approves
-                        # the app's domain for embedding (docs/runbook.md).
-                        "embed_url": f"{host}/embed/dashboardsv3/{d.dashboard_id}",
-                    })
+                    out.append(
+                        {
+                            "name": name,
+                            "url": (
+                                f"{host}/sql/dashboardsv3/{d.dashboard_id}"
+                                f"?{workspace_query}"
+                            ),
+                            # Basic embedding reuses the viewer's workspace
+                            # session; never expose the App's forwarded token.
+                            "embed_url": (
+                                f"{host}/embed/dashboardsv3/{d.dashboard_id}"
+                                f"?{workspace_query}"
+                            ),
+                        }
+                    )
         except Exception:  # noqa: BLE001 — links are garnish, never break the page
             return []
         return sorted(out, key=lambda d: d["name"])

@@ -292,6 +292,27 @@ System-table and preview-source failures should be shown as dependency-health
 states with source, freshness, and setup guidance. Mission Control must not
 render raw backend/SQL exceptions.
 
+### Embedded dashboards in the console
+
+The Learn page embeds each published `[dbx-platform]` dashboard with the
+workspace-qualified basic-embedding URL:
+
+`<workspace-host>/embed/dashboardsv3/<dashboard-id>?o=<workspace-id>`
+
+Basic embedding authenticates the viewer with their existing Databricks
+workspace browser session. The App's forwarded user access token remains
+server-side and is never returned to the frontend or inserted into the iframe.
+`resources/dashboards.yml` keeps `embed_credentials: false`, so the viewer
+still needs `CAN_VIEW` on the dashboard plus access to its warehouse and
+underlying Unity Catalog data.
+
+Before using the iframe, a workspace admin must add the App's domain to the
+approved domains for dashboard embedding. The browser must also allow
+third-party cookies for the Databricks App and workspace domains; otherwise
+the iframe can show a second **Continue** prompt even when the user is already
+signed in to the App. Use **Open in workspace** as the fallback because it
+opens the same workspace-qualified dashboard outside the iframe.
+
 ## Audit and incident response
 
 For a failed action, collect:
