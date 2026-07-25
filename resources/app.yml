@@ -28,27 +28,39 @@ resources:
         - sql
       lifecycle:
         prevent_destroy: true
-        # Deploy converges the app to this state, so every prod deploy starts
-        # the app directly rather than leaving it stopped for an approved power
-        # controller reconciliation. This intentionally lets the CI identity
-        # perform a runtime start without an approval; do not flip back to
-        # false expecting the app to stay off after a merge to main.
+        # The console remains available while its serverless SQL warehouse
+        # starts on demand and auto-stops after five idle minutes.
         started: true
       config:
         command: ["python", "main.py"]
         env:
           - name: DBX_PLATFORM_WAREHOUSE_ID
             value_from: sql-warehouse
-          - name: DBX_PLATFORM_POWER_CONTROLLER_JOB_ID
-            value_from: power-controller
           - name: DBX_PLATFORM_ACTION_EXECUTOR_JOB_ID
             value_from: action-executor
           - name: DBX_PLATFORM_CHAT_ENDPOINT
             value_from: chat-model
           - name: MLFLOW_EXPERIMENT_ID
             value_from: agent-traces
-          # Exact bundle-bound manual Jobs that Action Center may plan. These
-          # remain protected/outside the Hibernate inventory.
+          # Exact bundle-bound Jobs that Action Center may plan. Scheduled
+          # Jobs are injected directly because runtime inventory is retired.
+          - name: DBX_PLATFORM_GOVERNED_SCHEDULED_JOB_IDS
+            value: >-
+              ${resources.jobs.ai_catalog_sync.id},
+              ${resources.jobs.ai_monitor_rollup.id},
+              ${resources.jobs.azure_cost_pull.id},
+              ${resources.jobs.cost_forecast_daily.id},
+              ${resources.jobs.cost_usage_report.id},
+              ${resources.jobs.dashboards_setup.id},
+              ${resources.jobs.estimator_drift_check.id},
+              ${resources.jobs.estimator_prices_pull.id},
+              ${resources.jobs.governance_check.id},
+              ${resources.jobs.housekeeping_report.id},
+              ${resources.jobs.llm_cost_rollup.id},
+              ${resources.jobs.ml_hygiene_report.id},
+              ${resources.jobs.ml_serving_report.id},
+              ${resources.jobs.platform_digest.id},
+              ${resources.jobs.security_audit.id}
           - name: DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS
             value_from: governed-forecast-training
           # Cap interactive system-table queries below the Databricks Apps HTTP
@@ -86,13 +98,6 @@ resources:
           experiment:
             experiment_id: ${resources.experiments.platform_console_traces.id}
             permission: CAN_EDIT
-        - name: power-controller
-          description: >
-            Submit an already approved runtime action to the out-of-band
-            controller; the app service principal cannot execute it directly.
-          job:
-            id: ${resources.jobs.power_controller.id}
-            permission: CAN_MANAGE_RUN
         - name: action-executor
           description: >
             Submit an approved non-runtime action ID to the dedicated executor;

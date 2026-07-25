@@ -141,21 +141,18 @@ def test_bundle_artifact_build_uses_managed_environment():
     assert bundle["artifacts"]["default"]["build"] == "uv run python -m build --wheel"
 
 
-def test_app_and_controller_share_name_without_resource_cycle():
+def test_app_has_no_power_controller_binding():
     root = APP_DIR.parent.parent
     app_resource = yaml.safe_load((root / "resources" / "app.yml").read_text())
-    runtime_resource = yaml.safe_load(
-        (root / "resources" / "runtime_control.yml").read_text()
-    )
-    app_name = app_resource["resources"]["apps"]["platform_console"]["name"]
-    parameters = runtime_resource["resources"]["jobs"]["power_controller"][
-        "tasks"
-    ][0]["spark_python_task"]["parameters"]
+    app = app_resource["resources"]["apps"]["platform_console"]
+    env_names = {item["name"] for item in app["config"]["env"]}
+    resource_names = {item["name"] for item in app["resources"]}
 
-    assert app_name == "${var.platform_console_name}"
-    app_name_index = parameters.index("--app-name") + 1
-    assert parameters[app_name_index] == "${var.platform_console_name}"
-    assert "${resources.apps.platform_console.name}" not in parameters
+    assert app["name"] == "${var.platform_console_name}"
+    assert "DBX_PLATFORM_POWER_CONTROLLER_JOB_ID" not in env_names
+    assert "power-controller" not in resource_names
+    assert not (root / "resources" / "runtime_control.yml").exists()
+    assert not (root / "src" / "dbx_platform" / "runtime_control.py").exists()
 
 
 def test_chat_model_is_bound_to_the_app_with_query_only_access():

@@ -25,11 +25,12 @@ Missing identity/audit storage, altered payload/hash, drift, expiry, or replay
 fails closed. Resource deletion is unsupported.
 
 Schedules may read and append internal findings/cost/audit telemetry. Training,
-model promotion, budgets/configuration, manual stateful Jobs, remediation, and
-runtime state require approval — except the prod Platform Console app, which
-deploys `started: true` and is therefore started directly by CI (`resources/app.yml`);
-the warehouse and job schedules still require an approved reconciliation. The
-served agent remains read-only and can only cite evidence/draft proposals.
+model promotion, budgets/configuration, manual stateful Jobs, and remediation
+require approval. The prod Platform Console app deploys
+`started: true`; its warehouse starts on demand and auto-stops. Production
+unpauses only the five curated cost/security/governance schedules; all other
+schedules remain paused unless launched through an approved `run-job` action.
+The served agent remains read-only and can only cite evidence/draft proposals.
 
 ## Layout
 
@@ -65,10 +66,10 @@ shared `warehouse_id` bundle variable.
 
 - `dev` (default) — `mode: development`, resources prefixed `[dev <user>]`, schedules
   paused, deployed under your user folder. Safe to iterate.
-- `prod` — real names, all schedules PAUSED and the warehouse stopped until an
-  approved reconciliation. The Platform Console app is the exception: it deploys
-  `started: true` (`resources/app.yml`), so CI starts it directly on deploy
-  rather than waiting for an approved wake. Deployed by CI on push to `main`.
+- `prod` — real names, five curated schedules unpaused, all others PAUSED. The
+  warehouse starts on demand and auto-stops after five idle minutes. The
+  Platform Console app deploys `started: true` (`resources/app.yml`). Deployed
+  by CI on push to `main`.
 
 ## Commands
 

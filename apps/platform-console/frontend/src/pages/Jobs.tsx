@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { ActionPlanDialog } from "../components/ActionPlanDialog";
 import { apiGet } from "../lib/api";
 import { timeAgo } from "../lib/format";
@@ -70,11 +69,8 @@ export function Jobs() {
           not carry an approved action ID and are rejected intentionally.
           {allScheduledPaused && (
             <span>
-              {" "}All managed schedules are paused; use{" "}
-              <Link className="font-semibold text-accent hover:underline" to="/runtime">
-                Resources & Runtime → Plan wake
-              </Link>{" "}
-              to resume the previously active schedules.
+              {" "}All managed schedules are paused in this environment. Use a governed
+              manual run when fresh evidence is required.
             </span>
           )}
         </div>

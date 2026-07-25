@@ -32,7 +32,7 @@ test("tabs use effective status and expose approval readiness", async () => {
           data: [
             {
               action_id: "active-1",
-              action_type: "runtime.hibernate",
+              action_type: "run-job",
               status: "AWAITING_APPROVAL",
               effective_status: "AWAITING_APPROVAL",
               can_approve: true,
@@ -46,7 +46,7 @@ test("tabs use effective status and expose approval readiness", async () => {
             },
             {
               action_id: "missing-readiness-1",
-              action_type: "runtime.wake",
+              action_type: "configure-budget",
               status: "AWAITING_APPROVAL",
               raw_status: "AWAITING_APPROVAL",
               effective_status: "AWAITING_APPROVAL",
@@ -105,10 +105,10 @@ test("tabs use effective status and expose approval readiness", async () => {
   await user.click(approvalTab);
   expect(await screen.findAllByText("AWAITING APPROVAL")).toHaveLength(2);
   expect(
-    screen.getByRole("button", { name: "Review approval runtime.hibernate" }),
+    screen.getByRole("button", { name: "Review approval run-job" }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Review action runtime.wake" }),
+    screen.getByRole("button", { name: "Review action configure-budget" }),
   ).toBeInTheDocument();
 
   await user.click(failedTab);

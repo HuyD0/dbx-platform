@@ -44,10 +44,6 @@ from backend.identity import (  # noqa: E402
     mask_for_viewer,
 )
 from backend.routers import actions, control_plane  # noqa: E402
-from backend.runtime_controller_client import (  # noqa: E402
-    RuntimeControllerClient,
-    extract_review_output,
-)
 
 
 class Clock:
@@ -442,7 +438,7 @@ def test_sql_migration_owns_control_plane_not_llm_telemetry():
     assert "llm_cost_daily" not in sql
 
 
-def _runtime_action(repository) -> ActionRequest:
+def _retired_runtime_action(repository) -> ActionRequest:
     action = ActionRequest.create(
         action_type="runtime.hibernate",
         workspace_id="local",
@@ -477,59 +473,24 @@ def _runtime_action(repository) -> ActionRequest:
     return action
 
 
-def test_runtime_controller_client_resolves_durable_review_and_submits_exact_hash():
+def test_retired_runtime_action_remains_readable_but_cannot_be_approved():
     repository = InMemoryControlPlaneRepository()
-    action = _runtime_action(repository)
-    workspace = MagicMock()
-    waiter = MagicMock()
-    waiter.run_id = 101
-    task = MagicMock()
-    task.task_key = "runtime_control"
-    task.run_id = 102
-    completed = MagicMock()
-    completed.tasks = [task]
-    waiter.result.return_value = completed
-    workspace.jobs.run_now.return_value = waiter
-    output = MagicMock()
-    output.error = None
-    output.logs = (
-        "controller startup\n"
-        + canonical_json(
-            {
-                "action_id": action.action_id,
-                "action_type": action.action_type,
-                "plan_hash": action.plan_hash,
-                "plan": action.immutable_document(),
-            }
+    action = _retired_runtime_action(repository)
+    service = ActionService(
+        repository,
+        workspace_id="local",
+        environment="dev",
+    )
+    assert repository.get_action(action.action_id) == action
+    with pytest.raises(ActionConflictError, match="retired or unavailable"):
+        service.approve(
+            action.action_id,
+            actor=_actor("approver"),
+            plan_hash=action.plan_hash,
+            confirmation=action.confirm_phrase,
+            revalidate=_same_state,
         )
-        + "\nfinished"
-    )
-    workspace.jobs.get_run_output.return_value = output
-    client = RuntimeControllerClient(workspace, 44, repository)
-
-    resolved = client.submit_plan("runtime.hibernate")
-    assert resolved.action_id == action.action_id
-    workspace.jobs.get_run_output.assert_called_once_with(102)
-    plan_call = workspace.jobs.run_now.call_args.kwargs
-    assert plan_call["job_id"] == 44
-    assert plan_call["job_parameters"]["operation"] == "plan-hibernate"
-
-    approved = repository.transition(
-        action.action_id,
-        expected={ActionStatus.AWAITING_APPROVAL},
-        target=ActionStatus.APPROVED,
-        actor_id="user-1",
-    )
-    run_id = client.submit_execute(approved)
-    assert run_id == 101
-    execute_call = workspace.jobs.run_now.call_args.kwargs
-    assert execute_call["idempotency_token"] == action.idempotency_key
-    assert execute_call["job_parameters"] == {
-        "operation": "execute-hibernate",
-        "plan_id": action.action_id,
-        "plan_hash": action.plan_hash,
-        "confirmation": "",
-    }
+    assert repository.get_action(action.action_id).status == ActionStatus.AWAITING_APPROVAL
 
 
 @pytest.mark.parametrize("action_type", ["stale-clusters", "configure-budget"])
@@ -564,16 +525,6 @@ def test_action_executor_submission_contains_only_approved_action_id(action_type
         idempotency_token=approved.idempotency_key,
         job_parameters={"action_id": approved.action_id},
     )
-
-
-def test_review_log_parser_ignores_unrelated_json():
-    review = extract_review_output(
-        'prefix {"message":"noise"}\n'
-        '{"action_id":"a","action_type":"runtime.wake","plan_hash":"'
-        + ("1" * 64)
-        + '"}\n'
-    )
-    assert review["action_type"] == "runtime.wake"
 
 
 def _request(headers: dict[str, str]) -> Request:
@@ -1524,40 +1475,16 @@ def test_budget_plan_rejects_ambiguous_or_unsafe_input(
         )
 
 
-def test_runtime_alias_uses_controller_plan_and_submits_after_approval(
-    control_plane_client,
-    monkeypatch,
-):
-    repository = deps.get_control_plane_repository()
-
-    class FakeController:
-        def __init__(self):
-            self.execution = None
-
-        def submit_plan(self, action_type):
-            assert action_type == "runtime.hibernate"
-            return _runtime_action(repository)
-
-        def submit_execute(self, action):
-            self.execution = action
-            return 9001
-
-    controller = FakeController()
-    monkeypatch.setattr(deps, "get_runtime_controller_client", lambda: controller)
+@pytest.mark.parametrize(
+    "action_type",
+    ["hibernate", "wake", "runtime.hibernate", "runtime.wake"],
+)
+def test_retired_runtime_plans_and_apis_are_absent(control_plane_client, action_type):
     planned = control_plane_client.post(
         "/api/action-requests/plan",
-        json={"action": "hibernate"},
+        json={"action": action_type},
     )
-    assert planned.status_code == 200
-    plan = planned.json()
-    assert plan["action_type"] == "runtime.hibernate"
-    assert "resources" in plan["preconditions"]
-
-    approved = control_plane_client.post(
-        f"/api/action-requests/{plan['action_id']}/approve",
-        json={"plan_hash": plan["plan_hash"]},
-    )
-    assert approved.status_code == 200
-    assert approved.json()["status"] == "APPROVED"
-    assert approved.json()["execution_id"] == 9001
-    assert controller.execution.action_id == plan["action_id"]
+    assert planned.status_code == 404
+    assert planned.json()["error"] == "action_not_found"
+    assert control_plane_client.get("/api/runtime/state").status_code == 404
+    assert control_plane_client.get("/api/runtime/inventory").status_code == 404

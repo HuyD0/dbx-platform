@@ -346,7 +346,6 @@ export default function App() {
                 <Route path="/chat" element={<Navigate to="/assistant" replace />} />
                 <Route path="/security" element={<LegacySecurityRedirect />} />
                 <Route path="/performance" element={<Navigate to="/operations?tab=performance" replace />} />
-                <Route path="/runtime" element={<Navigate to="/operations" replace />} />
                 <Route path="/housekeeping" element={<Navigate to="/operations?tab=hygiene" replace />} />
                 <Route path="/governance" element={<Navigate to="/data-governance" replace />} />
                 <Route path="/ai-ml" element={<Navigate to="/ai-governance" replace />} />

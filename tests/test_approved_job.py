@@ -306,15 +306,49 @@ def test_every_scheduled_stateful_task_passes_exact_run_context():
     assert found == expected
 
 
-def test_app_binds_manual_job_without_adding_it_to_hibernate_inventory():
+def test_app_binds_manual_job_without_a_runtime_controller():
     root = __import__("pathlib").Path(__file__).resolve().parent.parent
     app_resource = (root / "resources" / "app.yml").read_text()
-    runtime_resource = (root / "resources" / "runtime_control.yml").read_text()
     assert "DBX_PLATFORM_GOVERNED_MANUAL_JOB_IDS" in app_resource
     assert "${resources.jobs.cost_forecast_train.id}" in app_resource
-    assert "cost_forecast_train=${resources.jobs.cost_forecast_train.id}" not in (
-        runtime_resource
+    assert not (root / "resources" / "runtime_control.yml").exists()
+
+
+def test_every_schedule_is_exact_bound_for_governed_manual_runs():
+    root = __import__("pathlib").Path(__file__).resolve().parent.parent
+    scheduled_keys = set()
+    for resource_path in (root / "resources").glob("*.yml"):
+        document = yaml.safe_load(resource_path.read_text()) or {}
+        for key, job in document.get("resources", {}).get("jobs", {}).items():
+            if job.get("schedule"):
+                scheduled_keys.add(key)
+
+    app = yaml.safe_load((root / "resources" / "app.yml").read_text())
+    env = app["resources"]["apps"]["platform_console"]["config"]["env"]
+    scheduled_ids = next(
+        item["value"]
+        for item in env
+        if item["name"] == "DBX_PLATFORM_GOVERNED_SCHEDULED_JOB_IDS"
     )
+    assert scheduled_keys == {
+        value.removeprefix("${resources.jobs.").removesuffix(".id}")
+        for value in scheduled_ids.replace(" ", "").split(",")
+    }
+
+    executor = yaml.safe_load(
+        (root / "resources" / "action_executor.yml").read_text()
+    )
+    parameters = executor["resources"]["jobs"]["action_executor"]["tasks"][0][
+        "spark_python_task"
+    ]["parameters"]
+    executor_ids = {
+        parameters[index + 1]
+        for index, value in enumerate(parameters)
+        if value == "--governed-job-id"
+    }
+    assert {
+        f"${{resources.jobs.{key}.id}}" for key in scheduled_keys
+    }.issubset(executor_ids)
 
 
 def test_every_scheduled_job_grants_only_exact_runtime_and_run_permissions():

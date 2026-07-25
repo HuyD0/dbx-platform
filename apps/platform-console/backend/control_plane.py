@@ -28,8 +28,6 @@ DEFAULT_EXECUTION_ALLOWLIST = frozenset(
         "policy-sync",
         "run-job",
         "configure-budget",
-        "runtime.hibernate",
-        "runtime.wake",
     }
 )
 
@@ -606,6 +604,10 @@ class ActionService:
     ) -> ActionRequest:
         self._require_approver(actor)
         action = self._load_valid(action_id)
+        if action.action_type not in self.execution_allowlist:
+            raise ActionConflictError(
+                f"Action type {action.action_type!r} is retired or unavailable."
+            )
         if action.status != ActionStatus.AWAITING_APPROVAL:
             raise ActionConflictError(
                 f"Action request is {action.status.value}, not awaiting approval."

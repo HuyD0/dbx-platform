@@ -1,4 +1,4 @@
-"""Mission Control evidence, approval, audit and runtime read APIs."""
+"""Mission Control evidence, approval, and audit APIs."""
 
 from __future__ import annotations
 
@@ -56,7 +56,6 @@ _ACTION_RISK = {
     "run-job": RiskLevel.MEDIUM,
     "configure-budget": RiskLevel.MEDIUM,
 }
-_RUNTIME_ACTIONS = {"runtime.hibernate", "runtime.wake"}
 _BUDGET_SCOPE_TYPES = frozenset({"workspace", "provider", "team", "use_case"})
 _BUDGET_ALLOWED_PARAMETERS = frozenset(
     {
@@ -74,10 +73,6 @@ _BUDGET_ALLOWED_PARAMETERS = frozenset(
 _BUDGET_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _CURRENCY_PATTERN = re.compile(r"[A-Z]{3}")
 _MONTH_PATTERN = re.compile(r"(\d{4})-(0[1-9]|1[0-2])")
-_ACTION_ALIASES = {
-    "hibernate": "runtime.hibernate",
-    "wake": "runtime.wake",
-}
 _EXPIRABLE_STATUSES = frozenset(
     {ActionStatus.AWAITING_APPROVAL, ActionStatus.APPROVED}
 )
@@ -88,10 +83,6 @@ _RISK_RANK = {
 }
 _EVIDENCE_RESPONSE_LIMIT = 50
 _EVIDENCE_READ_LIMIT = 1000
-
-
-def _normalize_action_type(action_type: str) -> str:
-    return _ACTION_ALIASES.get(action_type, action_type)
 
 
 def _error(exc: Exception) -> JSONResponse:
@@ -417,11 +408,6 @@ def _budget_plan(parameters: dict[str, Any]) -> PlanSpec:
 
 
 def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
-    action_type = _normalize_action_type(action_type)
-    if action_type in _RUNTIME_ACTIONS:
-        raise ValueError(
-            "Runtime plans must be produced by the out-of-band power-controller."
-        )
     if action_type == "configure-budget":
         return _budget_plan(parameters)
     if action_type == "run-job":
@@ -485,12 +471,6 @@ def _planner(action_type: str, parameters: dict[str, Any]) -> PlanSpec:
 
 
 def _revalidate(action: ActionRequest) -> dict[str, Any]:
-    if action.action_type in _RUNTIME_ACTIONS:
-        # The controller performs an exact observation against its
-        # preconditions immediately before any write. The app cannot safely
-        # reproduce that inventory adapter, so it preserves the reviewed
-        # precondition document and delegates the write-time check.
-        return dict(action.preconditions)
     request_parameters = action.parameters.get("request")
     current_parameters = (
         dict(request_parameters) if isinstance(request_parameters, dict) else {}
@@ -568,12 +548,10 @@ def _matching_findings(
         finding_ids = parse_resource_ids(_finding_resource_value(finding))
         if not target_ids.intersection(finding_ids):
             continue
-        finding_action = _normalize_action_type(
-            str(
-                finding.get("proposed_action_type")
-                or finding.get("action")
-                or ""
-            )
+        finding_action = str(
+            finding.get("proposed_action_type")
+            or finding.get("action")
+            or ""
         )
         match_type = (
             "supports_action"
@@ -856,45 +834,7 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
                 {
                     "source": "Approval ledger",
                     "status": "unavailable",
-                    "notes": "Run the power-controller setup to create durable tables.",
-                }
-            )
-        try:
-            runtime, fetched_at, hit = cache.cached(
-                f"mission-control/runtime/{workspace_id}/{environment}",
-                lambda: repo.runtime_state(workspace_id, environment),
-                refresh,
-                ttl_seconds=15,
-            )
-            source_as_of.append(fetched_at)
-            source_hits.append(hit)
-            health.append(
-                {
-                    "source": "Runtime inventory",
-                    "status": (
-                        "healthy"
-                        if runtime.get("source") == "unity-catalog"
-                        else "unknown"
-                    ),
-                    "freshness": runtime.get("updated_at") or fetched_at.isoformat(),
-                    "notes": runtime.get("source", "unknown"),
-                }
-            )
-        except Exception:  # noqa: BLE001 - an independent degraded section
-            source_failed = True
-            log.warning("Mission Control runtime state is unavailable", exc_info=True)
-            runtime = {
-                "workspace_id": workspace_id,
-                "environment": environment,
-                "desired_state": "UNKNOWN",
-                "actual_state": "UNKNOWN",
-                "source": "unavailable",
-            }
-            health.append(
-                {
-                    "source": "Runtime inventory",
-                    "status": "unavailable",
-                    "notes": "Initialize the unscheduled power-controller job.",
+                    "notes": "Run the control-plane schema migration.",
                 }
             )
         pending = [
@@ -1026,7 +966,6 @@ def mission_control(request: Request, refresh: bool = False) -> Any:
                     "by_severity": dict(sorted(by_severity.items())),
                 }
             },
-            "runtime": runtime,
             "data_health": health,
         }
         response_as_of = min(source_as_of) if source_as_of else utc_now()
@@ -1080,7 +1019,6 @@ def list_action_requests(
     except Exception as exc:  # noqa: BLE001
         return _error(exc)
 
-
 @router.get("/api/action-requests/{action_id}")
 def get_action_request(action_id: str, request: Request) -> Any:
     try:
@@ -1106,30 +1044,8 @@ def plan_action_request(
 ) -> Any:
     try:
         actor = _actor(request, proposer=True)
-        action_type = _normalize_action_type(body.action_type)
-        if action_type in _RUNTIME_ACTIONS:
-            if body.parameters:
-                raise ValueError(f"Action '{body.action_type}' accepts no parameters.")
-            action = deps.get_runtime_controller_client().submit_plan(action_type)
-            workspace_id, environment = deps.control_plane_scope()
-            if (
-                action.workspace_id != workspace_id
-                or action.environment != environment
-            ):
-                raise PlanIntegrityError(
-                    "Controller plan belongs to a different workspace or environment."
-                )
-            _write_repository(request).add_event(
-                ActionEvent(
-                    action_id=action.action_id,
-                    event_type="PLAN_REQUESTED_FROM_APP",
-                    actor_id=actor.actor_id,
-                    details={"requester_email": actor.email},
-                )
-            )
-        else:
-            spec = _planner(action_type, body.parameters)
-            action = _service(_write_repository(request)).plan(spec, actor)
+        spec = _planner(body.action_type, body.parameters)
+        action = _service(_write_repository(request)).plan(spec, actor)
         return _action_body(action, actor=actor)
     except Exception as exc:  # noqa: BLE001
         return _error(exc)
@@ -1162,12 +1078,7 @@ def approve_action_request(
         )
         execution_id = None
         try:
-            if action.action_type in _RUNTIME_ACTIONS:
-                execution_id = deps.get_runtime_controller_client().submit_execute(
-                    action
-                )
-            else:
-                execution_id = deps.get_action_executor_client().submit(action)
+            execution_id = deps.get_action_executor_client().submit(action)
             write_repository.add_event(
                 ActionEvent(
                     action_id=action.action_id,
@@ -1189,15 +1100,10 @@ def approve_action_request(
                 )
             except Exception:  # noqa: BLE001 - original failure stays primary
                 log.exception("failed to audit execution submission failure")
-            executor_name = (
-                "power-controller"
-                if action.action_type in _RUNTIME_ACTIONS
-                else "action-executor"
-            )
             body = payload(
                 "execution_submission_failed",
                 "The plan was approved, but the executor run could not be submitted.",
-                f"Use the {executor_name} Jobs UI with this action ID.",
+                "Use the action-executor Jobs UI with this action ID.",
             )
             body.update(
                 {
@@ -1230,29 +1136,5 @@ def reject_action_request(
             reason=body.reason,
         )
         return _action_body(action, actor=actor, detail=True)
-    except Exception as exc:  # noqa: BLE001
-        return _error(exc)
-
-
-@router.get("/api/runtime/state")
-def runtime_state(request: Request) -> Any:
-    try:
-        _actor(request)
-        workspace_id, environment = deps.control_plane_scope()
-        data = _repository().runtime_state(workspace_id, environment)
-        data["current_state"] = data.get("actual_state")
-        data["active_operation"] = data.get("active_action_id")
-        return envelope(data, utc_now(), False)
-    except Exception as exc:  # noqa: BLE001
-        return _error(exc)
-
-
-@router.get("/api/runtime/inventory")
-def runtime_inventory(request: Request) -> Any:
-    try:
-        _actor(request)
-        workspace_id, environment = deps.control_plane_scope()
-        rows = _repository().managed_resources(workspace_id, environment)
-        return envelope(rows, utc_now(), False)
     except Exception as exc:  # noqa: BLE001
         return _error(exc)
