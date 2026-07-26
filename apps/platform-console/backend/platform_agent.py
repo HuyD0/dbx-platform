@@ -16,7 +16,12 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import tool
 
-from backend.agent_runtime import DatabricksChatModel, configure_mlflow_tracing
+from backend.agent_runtime import (
+    DatabricksChatModel,
+    configure_mlflow_tracing,
+    mlflow_span,
+    set_mlflow_span_outputs,
+)
 from dbx_platform.platform_agent import tools as shared_tools
 from dbx_platform.platform_agent.formatting import SYSTEM_PROMPT, rows_to_text
 
@@ -153,6 +158,7 @@ class PlatformAgent:
         self.workspace_client_factory = workspace_client_factory
         self.settings_factory = settings_factory
         self.repository_factory = repository_factory
+        self._mlflow_tracing_enabled = False
 
     supports_execution_trace = True
 
@@ -255,7 +261,7 @@ class PlatformAgent:
 
         experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "").strip()
         if experiment_id:
-            configure_mlflow_tracing(experiment_id)
+            self._mlflow_tracing_enabled = configure_mlflow_tracing(experiment_id)
 
         shared_tools.configure_runtime(
             client_factory=self.workspace_client_factory,
@@ -283,14 +289,21 @@ class PlatformAgent:
 
     def invoke_with_trace(self, messages: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
         timing = _ExecutionTimingHandler()
-        result = self.graph.invoke(
-            {"messages": messages},
-            config={"recursion_limit": 20, "callbacks": [timing]},
-        )
-        output = result.get("messages") if isinstance(result, dict) else None
-        if not output:
-            return "", timing.trace()
-        return _text_content(output[-1]), timing.trace()
+        graph = self.graph
+        with mlflow_span(
+            "platform_agent.invoke",
+            span_type="AGENT",
+            inputs={"messages": messages, "endpoint": self.endpoint},
+            enabled=self._mlflow_tracing_enabled,
+        ) as span:
+            result = graph.invoke(
+                {"messages": messages},
+                config={"recursion_limit": 20, "callbacks": [timing]},
+            )
+            output = result.get("messages") if isinstance(result, dict) else None
+            text = _text_content(output[-1]) if output else ""
+            set_mlflow_span_outputs(span, {"message": text})
+            return text, timing.trace()
 
     def invoke(self, messages: list[dict[str, str]]) -> str:
         text, _trace = self.invoke_with_trace(messages)
