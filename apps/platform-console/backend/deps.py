@@ -83,16 +83,14 @@ def control_plane_scope() -> tuple[str, str]:
 
 
 def workspace_display_name() -> str:
-    """Return the deployment-owned human name without deriving it from an ID."""
+    """Return a safe human name without making display metadata a hard dependency."""
 
     value = os.environ.get("DBX_PLATFORM_WORKSPACE_DISPLAY_NAME", "").strip()
     if value:
         return value
     if is_local_or_test():
         return "Local development workspace"
-    raise RuntimeError(
-        "DBX_PLATFORM_WORKSPACE_DISPLAY_NAME is required in a deployed Platform Console."
-    )
+    return "Databricks workspace"
 
 
 @lru_cache(maxsize=1)

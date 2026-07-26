@@ -84,7 +84,7 @@ class DatabricksChatModelTests(unittest.TestCase):
         self.assertEqual(method, "POST")
         self.assertEqual(
             path,
-            "/api/2.0/serving-endpoints/foundation%2Fmodel/invocations",
+            "/serving-endpoints/foundation%2Fmodel/invocations",
         )
         self.assertEqual(payload["messages"][2]["role"], "tool")
         self.assertEqual(payload["messages"][2]["tool_call_id"], "prior-call")

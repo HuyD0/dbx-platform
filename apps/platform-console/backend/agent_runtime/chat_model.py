@@ -79,7 +79,7 @@ class DatabricksChatModel(BaseChatModel):
         response = self.workspace_client.api_client.do(
             "POST",
             (
-                "/api/2.0/serving-endpoints/"
+                "/serving-endpoints/"
                 f"{quote(self.endpoint, safe='')}/invocations"
             ),
             body=payload,

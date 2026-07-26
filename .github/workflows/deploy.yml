@@ -56,7 +56,7 @@ jobs:
       DATABRICKS_AUTH_TYPE: azure-cli
       BUNDLE_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       BUNDLE_VAR_azure_service_credential: ${{ vars.DBX_PLATFORM_AZURE_SERVICE_CREDENTIAL }}
-      BUNDLE_VAR_workspace_display_name: ${{ vars.DBX_PLATFORM_WORKSPACE_DISPLAY_NAME }}
+      BUNDLE_VAR_workspace_display_name: ${{ vars.DBX_PLATFORM_WORKSPACE_DISPLAY_NAME || 'Databricks workspace' }}
       BUNDLE_VAR_actions_enabled: ${{ vars.DBX_PLATFORM_ACTIONS_ENABLED || 'false' }}
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}

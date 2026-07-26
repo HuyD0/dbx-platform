@@ -40,10 +40,12 @@ The first rollout has three deliberately separate phases:
    `postgres_databases` selections. The companion must not manage the shared
    project, branch, or endpoint, and these resources remain excluded from the
    normal application deploy.
-2. Run the normal deployment. It binds the existing database to the one
-   Platform Console App, deploys the isolated assets, and installs the
-   unscheduled migration Job.
-3. In Action Center, create and approve an exact `run-job` action for
+2. After the database exists, add its `lakemeter-database` App resource binding
+   in a reviewed deployment. The normal core-App deployment deliberately does
+   not reference an absent companion database, so Mission Control and chat
+   remain available while this governed rollout is incomplete.
+3. Deploy the isolated assets and unscheduled migration Job, then in Action
+   Center create and approve an exact `run-job` action for
    `lakemeter-schema-migrations`. The general action executor revalidates that
    immutable approval and starts the target Job; the Job itself runs as the
    dedicated LakeMeter migration identity.
@@ -112,7 +114,7 @@ upstream LakeMeter release.
 
 | Status or symptom | Operator action |
 |---|---|
-| `database_not_configured` | Confirm the App's `lakemeter-database` resource binding and endpoint path. |
+| `database_not_configured` | Complete the companion database rollout, then add and verify the App's `lakemeter-database` resource binding. |
 | `schema_migration_required` | Review and approve the exact migration Job run. |
 | `database_unavailable:*` | Check endpoint state and the dedicated OAuth role; do not add a password secret. |
 | `frontend_not_built` | Re-run the host build, isolated build, and staging steps. |
