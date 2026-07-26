@@ -688,13 +688,22 @@ def test_missing_warehouse_maps_to_friendly_503(client, monkeypatch):
     assert resp.json()["error"] == "warehouse_not_configured"
 
 
-def test_chat_degrades_when_the_backend_agent_is_unavailable(client, monkeypatch):
+def test_chat_degrades_when_the_backend_agent_is_unavailable(
+    client,
+    monkeypatch,
+    caplog,
+):
     agent = MagicMock()
     agent.invoke.side_effect = RuntimeError("RESOURCE_DOES_NOT_EXIST")
     monkeypatch.setattr(deps, "get_platform_agent", lambda: agent)
-    resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    with caplog.at_level("WARNING", logger="platform_console"):
+        resp = client.post(
+            "/api/chat",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+        )
     assert resp.status_code == 503
     assert resp.json()["error"] == "agent_unavailable"
+    assert "backend LangGraph agent unavailable" in caplog.text
 
 
 def test_chat_denies_viewers_before_invoking_app_sp_agent(

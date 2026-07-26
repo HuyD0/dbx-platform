@@ -204,7 +204,7 @@ def chat(body: ChatRequest, request: Request):
         else:
             text = deps.get_platform_agent().invoke(prompt)
     except Exception as exc:  # noqa: BLE001 — agent is optional; degrade with guidance
-        log.info("backend LangGraph agent unavailable", exc_info=exc)
+        log.warning("backend LangGraph agent unavailable", exc_info=exc)
         return JSONResponse(status_code=503, content=payload(
             "agent_unavailable", "The contextual assistant is currently unavailable.",
             _AGENT_HINT))
