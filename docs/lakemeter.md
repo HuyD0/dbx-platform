@@ -40,10 +40,10 @@ The first rollout has three deliberately separate phases:
    `postgres_databases` selections. The companion must not manage the shared
    project, branch, or endpoint, and these resources remain excluded from the
    normal application deploy.
-2. After the database exists, add its `lakemeter-database` App resource binding
-   in a reviewed deployment. The normal core-App deployment deliberately does
-   not reference an absent companion database, so Mission Control and chat
-   remain available while this governed rollout is incomplete.
+2. After the database exists, deploy the reviewed `lakemeter-database` App
+   resource binding in `resources/app.yml`. The attachment supplies
+   `PGHOST`, `PGDATABASE`, and `PGUSER` to the App and grants its identity an
+   OAuth-only connection; it neither provisions Lakebase nor applies DDL.
 3. Deploy the isolated assets and unscheduled migration Job, then in Action
    Center create and approve an exact `run-job` action for
    `lakemeter-schema-migrations`. The general action executor revalidates that
@@ -52,8 +52,11 @@ The first rollout has three deliberately separate phases:
 
 Until all three phases complete, `/api/lakemeter/status` reports the missing or
 stale schema and the Estimator tab shows a setup/maintenance state. A normal
-deployment never selects Lakebase infrastructure and never starts the
-migration Job.
+deployment attaches the already-provisioned database but never selects
+Lakebase infrastructure and never starts the migration Job.
+Production deployment checks that exact database before building or changing
+normal resources, so an incomplete companion rollout fails early without
+partially updating the App or Jobs.
 
 The current PoC reuses `learn-app-sync-dev-1/production` while keeping
 LakeMeter data in its own `lakemeter` database. This shares project compute and

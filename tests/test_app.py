@@ -176,16 +176,23 @@ def test_chat_model_is_bound_to_the_app_with_query_only_access():
     }
 
 
-def test_core_app_deploy_does_not_require_unprovisioned_lakemeter_database():
+def test_core_app_deploy_attaches_preprovisioned_lakemeter_database():
     root = APP_DIR.parent.parent
     resource = yaml.safe_load(
         (root / "resources" / "app.yml").read_text()
     )["resources"]["apps"]["platform_console"]
-
-    assert all(
-        item["name"] != "lakemeter-database"
+    database = next(
+        item
         for item in resource["resources"]
+        if item["name"] == "lakemeter-database"
     )
+
+    assert database["postgres"]["database"].endswith("/databases/lakemeter")
+    assert database["postgres"]["permission"] == "CAN_CONNECT_AND_CREATE"
+    assert {
+        item["name"]
+        for item in resource["config"]["env"]
+    }.isdisjoint({"PGHOST", "PGDATABASE", "PGUSER"})
 
 
 # --- TestClient behavior ----------------------------------------------------
