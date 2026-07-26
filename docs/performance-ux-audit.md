@@ -217,16 +217,21 @@ requests, `integrations/lakemeter/frontend/src/entry.tsx:63`) pays it 30–50
 times.
 
 **Fix.** TTL-cache the verified `Actor` keyed by a hash of the forwarded token
-(~60 s, invalidate on downstream 401) inside `IdentityVerifier` — **for
-read-only requests only**. Governed mutations (plan, approve, reject, confirm,
-execute) must keep doing a fresh SCIM verification: the cached `Actor` carries
-approver/proposer roles, and a user removed from `dbx-platform-approvers`
-mid-TTL would otherwise still pass authorization (group removal does not revoke
-the token, so a downstream 401 never fires). The safety model requires *current*
-approver membership at approval time, so scope the cache by method/route
-(e.g. cache GETs, bypass for the control-plane mutation paths that call
-`verify(require_approver=True)` / `require_proposer`). Independently, reuse one
-resolved host/`ApiClient` config instead of a new `WorkspaceClient` per request.
+(~60 s) — **for read-only requests only**, and make that decision **at the
+middleware verification itself**. The `verified_api_boundary` middleware's
+flag-less `verify()` call (`app.py:59`) is the only verification that runs in
+production: `require_verified_user`/`require_operator` (`deps.py:189-209`)
+reuse the `Actor` already stored on `request.state` and never re-verify, and no
+production code passes `verify(require_approver=True)`. So a cache bypass keyed
+on those flags would never fire — instead, have the middleware skip the cache
+for non-safe methods (every governed mutation — plan/approve/reject at
+`control_plane.py:1041-1125` — is a POST), or maintain an explicit no-cache
+route list. Rationale: the cached `Actor` carries approver/proposer roles, and a
+user removed from `dbx-platform-approvers` mid-TTL would otherwise still pass
+authorization (group removal does not revoke the token, so no downstream 401
+ever fires); the safety model requires *current* membership at approval time.
+Independently, reuse one resolved host/`ApiClient` config instead of a new
+`WorkspaceClient` per request.
 
 ### B4 (M) — `control_plane_scope()` makes a live `get_workspace_id()` call per request
 `deps.py:82` reaches the workspace API on every call at ~38 router call sites —
@@ -410,9 +415,10 @@ skeleton until `mountLakeMeter` resolves; start
 1. `retry: false` QueryClient default (C7) — deletes the 3-minute silent spinner.
 2. Static shell in `index.html` (C5) + `GZipMiddleware` + immutable
    `Cache-Control` on `/assets` (C4).
-3. TTL-cache identity verification per token for read-only requests, keeping
-   fresh SCIM verification on governed mutations (B3), and memoize the
-   workspace id (B4) — removes 1–2 network round trips from *every* read call.
+3. TTL-cache identity verification per token for read-only requests — decided
+   in the middleware by HTTP method, since that is the only verification point;
+   mutations (POSTs) always re-verify (B3) — and memoize the workspace id
+   (B4). Removes 1–2 network round trips from *every* read call.
 4. `isPending`/`isError` branches in `EstimateLibrary`/`DeploymentsPanel` (A7);
    debounce the rigor slider (C11).
 
