@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ZdrEnforcer } from "../components/CompliancePosture";
 import { FindingsSection } from "../components/FindingsSection";
+import { ModelInventoryExplorer } from "../components/ModelInventoryExplorer";
 import { Card, PageHeader, SectionTitle, Tabs } from "../components/ui";
 import { AiMl } from "./AiMl";
 
@@ -23,18 +24,7 @@ function InventoryAccess() {
         />
         <ZdrEnforcer />
       </Card>
-      <FindingsSection
-        title="Model inventory"
-        subtitle="Unity Catalog models, serving endpoints and Azure OpenAI/Foundry deployments in one register, with key-auth exposure flags"
-        path="/api/ai-governance/catalog"
-        emptyMessage="No AI inventory rows yet — run the scheduled ai-catalog sync job to populate this register."
-      />
-      <FindingsSection
-        title="Access graph"
-        subtitle="Who can invoke or administer each model, via which grant, ACL or Azure role scope"
-        path="/api/ai-governance/access"
-        emptyMessage="No access rows yet — the ai-catalog sync job records grants, ACLs and Azure role assignments here."
-      />
+      <ModelInventoryExplorer />
     </div>
   );
 }

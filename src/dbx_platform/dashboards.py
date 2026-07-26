@@ -151,6 +151,7 @@ def setup_statements(catalog: str, schema: str, tag_keys: list[str]) -> list[tup
     # Same DDL the ingest/forecast jobs use — one code path, no schema drift.
     from dbx_platform.ai_catalog import create_access_table_sql, create_catalog_table_sql
     from dbx_platform.ai_monitor import create_monitoring_table_sql
+    from dbx_platform.application_cost import create_application_table_statements
     from dbx_platform.azure_cost import (
         create_detail_table_sql as azure_cost_details_ddl,
     )
@@ -273,6 +274,7 @@ WHEN NOT MATCHED THEN INSERT (workspace_id, warehouse_id, warehouse_name)
     ]
     return [
         *create_ledger_table_statements(catalog, schema),
+        *create_application_table_statements(catalog, schema),
         *statements,
     ]
 

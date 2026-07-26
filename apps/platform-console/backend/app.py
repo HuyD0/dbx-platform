@@ -27,6 +27,8 @@ from backend.lakemeter_integration import (
 )
 from backend.routers import (
     ai_governance,
+    ai_inventory,
+    applications,
     chat,
     control_plane,
     cost,
@@ -107,9 +109,25 @@ def create_app() -> FastAPI:
             background=response.background,
         )
 
-    for module in (meta, overview, control_plane, cost, llm_cost, housekeeping, security,
-                   governance, ai_governance, ml, performance, digest, jobs, chat,
-                   estimator):
+    for module in (
+        meta,
+        overview,
+        control_plane,
+        applications,
+        cost,
+        llm_cost,
+        housekeeping,
+        security,
+        governance,
+        ai_governance,
+        ai_inventory,
+        ml,
+        performance,
+        digest,
+        jobs,
+        chat,
+        estimator,
+    ):
         app.include_router(module.router)
     app.include_router(lakemeter_router)
     app.mount("/api/v1", LazyLakeMeterApp(), name="lakemeter-api")

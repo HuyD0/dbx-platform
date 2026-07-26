@@ -65,6 +65,9 @@ class Settings:
     azure_cost_resource_groups: str = (
         "rg-databricks-dbx-dev,databricks-rg-rg-databricks-dbx-dev"
     )
+    # Application identity is generic and evidence-driven; configured order
+    # is the tag precedence used across Azure and Databricks billing.
+    application_tag_keys: str = "application,app,project"
     azure_spike_pct: int = 50
     azure_spike_min_cost: int = 10
     azure_acceleration_pct: int = 30
@@ -105,3 +108,8 @@ class Settings:
             for group in self.azure_cost_resource_groups.split(",")
             if group.strip()
         ]
+
+    def application_tag_key_list(self) -> list[str]:
+        from dbx_platform.application_cost import parse_application_tag_keys
+
+        return list(parse_application_tag_keys(self.application_tag_keys))

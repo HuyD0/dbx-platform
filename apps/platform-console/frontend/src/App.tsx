@@ -8,6 +8,7 @@ import {
   ListChecks,
   Menu,
   Moon,
+  PanelsTopLeft,
   ScrollText,
   ServerCog,
   Settings,
@@ -36,6 +37,8 @@ import { ChatProvider } from "./lib/chat";
 import type { AppContext, HealthResponse } from "./lib/types";
 import { ActionCenter } from "./pages/ActionCenter";
 import { AiGovernance } from "./pages/AiGovernance";
+import { ApplicationDetail } from "./pages/ApplicationDetail";
+import { Applications } from "./pages/Applications";
 import { Audit } from "./pages/Audit";
 import { Automations } from "./pages/Automations";
 import { Chat } from "./pages/Chat";
@@ -62,6 +65,12 @@ const NAV: NavItem[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, page: <MissionControl /> },
   { to: "/actions", label: "Review & Approve", icon: ListChecks, page: <ActionCenter /> },
   { to: "/cost", label: "Costs", icon: CircleDollarSign, page: <CostValue /> },
+  {
+    to: "/applications",
+    label: "Applications",
+    icon: PanelsTopLeft,
+    page: <Applications />,
+  },
   { to: "/cost-planner", label: "AI Cost Planner", icon: Calculator, page: <CostPlanner /> },
   { to: "/data-governance", label: "Data Governance", icon: Tags, page: <DataGovernance /> },
   { to: "/ai-governance", label: "AI Governance", icon: BrainCircuit, page: <AiGovernance /> },
@@ -356,6 +365,10 @@ export default function App() {
             <div className="mx-auto min-w-0 max-w-7xl">
               <Routes>
                 <Route path="/cost/anomalies/:anomalyId" element={<CostAnomaly />} />
+                <Route
+                  path="/applications/:applicationKey"
+                  element={<ApplicationDetail />}
+                />
                 <Route
                   path="/cost/estimator/*"
                   element={

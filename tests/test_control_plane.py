@@ -703,6 +703,24 @@ def test_viewer_response_masks_proposer_approver_and_owner_identity():
     assert masked["approvals"][0]["plan_hash"] == "safe-to-show"
 
 
+def test_viewer_keeps_scoped_application_display_name():
+    viewer = Actor(
+        actor_id="viewer-1",
+        email="viewer@example.com",
+        roles=frozenset({"viewer"}),
+    )
+    masked = mask_for_viewer(
+        {
+            "application_key": "learn-app",
+            "display_name": "Learn App",
+            "owner": "owner@example.com",
+        },
+        viewer,
+    )
+    assert masked["display_name"] == "Learn App"
+    assert masked["owner"] == "[redacted]"
+
+
 @pytest.fixture()
 def control_plane_client(monkeypatch):
     monkeypatch.setenv("DBX_PLATFORM_CONTROL_PLANE_REPOSITORY", "memory")

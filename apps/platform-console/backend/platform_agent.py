@@ -274,6 +274,7 @@ class PlatformAgent:
             max_tokens=1200,
         )
         tools = [
+            shared_tools.get_application_cost,
             shared_tools.get_cost_report,
             shared_tools.get_top_jobs,
             shared_tools.get_cluster_utilization,

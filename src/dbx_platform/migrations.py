@@ -11,6 +11,7 @@ import json
 import sys
 from collections.abc import Sequence
 
+from dbx_platform.application_cost import application_table_grant_statements
 from dbx_platform.control_plane_procedures import (
     deployment_procedure_statements,
     estimate_procedure_statements,
@@ -27,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schema", default="dbx_platform")
     parser.add_argument("--team-tags", default="team,cost-center,environment")
     parser.add_argument("--app-service-principal", required=True)
+    parser.add_argument("--runtime-executor-service-principal", default="")
     parser.add_argument("--operator-group", default="dbx-platform-operators")
     parser.add_argument("--approver-group", default="dbx-platform-approvers")
     parser.add_argument("--workspace-name", required=True)
@@ -73,6 +75,7 @@ def run_migrations(
     team_tags: list[str],
     *,
     app_service_principal: str,
+    runtime_executor_service_principal: str = "",
     operator_group: str = "dbx-platform-operators",
     approver_group: str = "dbx-platform-approvers",
     actions_enabled: bool = False,
@@ -83,6 +86,14 @@ def run_migrations(
 
     completed: list[str] = []
     for description, sql in setup_statements(catalog, schema, team_tags):
+        spark.sql(sql)
+        completed.append(description)
+    for description, sql in application_table_grant_statements(
+        catalog,
+        schema,
+        app_service_principal=app_service_principal,
+        runtime_executor_service_principal=runtime_executor_service_principal,
+    ):
         spark.sql(sql)
         completed.append(description)
     completed.extend(migrate_ledger_with_spark(spark, catalog, schema))
@@ -143,6 +154,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.schema,
             [value.strip() for value in args.team_tags.split(",") if value.strip()],
             app_service_principal=args.app_service_principal,
+            runtime_executor_service_principal=(
+                args.runtime_executor_service_principal
+            ),
             operator_group=args.operator_group,
             approver_group=args.approver_group,
             actions_enabled=args.actions_enabled == "true",

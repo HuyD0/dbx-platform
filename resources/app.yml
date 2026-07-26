@@ -48,6 +48,7 @@ resources:
             value: >-
               ${resources.jobs.ai_catalog_sync.id},
               ${resources.jobs.ai_monitor_rollup.id},
+              ${resources.jobs.application_evidence_sync.id},
               ${resources.jobs.azure_cost_pull.id},
               ${resources.jobs.cost_forecast_daily.id},
               ${resources.jobs.cost_usage_report.id},
@@ -87,6 +88,8 @@ resources:
             value: ${bundle.target}
           - name: DBX_PLATFORM_AZURE_COST_RESOURCE_GROUPS
             value: ${var.azure_cost_resource_groups}
+          - name: DBX_PLATFORM_APPLICATION_TAG_KEYS
+            value: ${var.application_tag_keys}
           - name: DBX_PLATFORM_WORKSPACE_DISPLAY_NAME
             value: ${var.workspace_display_name}
           - name: DBX_PLATFORM_APPROVER_GROUP
@@ -128,6 +131,13 @@ resources:
             action and the dedicated executor.
           job:
             id: ${resources.jobs.azure_cost_pull.id}
+            permission: CAN_VIEW
+        - name: application-evidence-sync
+          description: >
+            Read the exact paused application evidence collector definition
+            and run history. Manual launch still requires an approved run-job.
+          job:
+            id: ${resources.jobs.application_evidence_sync.id}
             permission: CAN_VIEW
         - name: governed-forecast-training
           description: >

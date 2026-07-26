@@ -90,6 +90,8 @@ resources:
               - --governed-job-id
               - ${resources.jobs.ai_monitor_rollup.id}
               - --governed-job-id
+              - ${resources.jobs.application_evidence_sync.id}
+              - --governed-job-id
               - ${resources.jobs.estimator_prices_pull.id}
               - --governed-job-id
               - ${resources.jobs.estimator_drift_check.id}

@@ -28,7 +28,7 @@ from dbx_platform.system_tables import load_query, run_query
 
 _ARM_SCOPE = "https://management.azure.com/.default"
 _API_VERSION = "2023-11-01"
-_MAX_RETRIES = 5
+_MAX_RETRIES = 3
 _MAX_QUERY_DAYS = 31
 _MAX_SQL_PARAMETER_BYTES = 900_000
 _CLIENT_TYPE = "GitHubCopilotForAzure"
@@ -197,6 +197,62 @@ def build_detail_query_body(
     }
 
 
+def build_resource_query_body(
+    start: str,
+    end: str,
+) -> dict:
+    """Subscription-scoped daily ActualCost baseline by ResourceId."""
+
+    _validate_query_window(start, end)
+    return {
+        "type": "ActualCost",
+        "timeframe": "Custom",
+        "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
+        "dataset": {
+            "granularity": "Daily",
+            "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+            "grouping": [{"type": "Dimension", "name": "ResourceId"}],
+        },
+    }
+
+
+def build_tag_query_body(
+    start: str,
+    end: str,
+    *,
+    resource_groups: str | Sequence[str] | None = None,
+    tag_key: str,
+) -> dict:
+    """Daily resource cost grouped by one billing tag.
+
+    Azure Cost Management allows at most two groupings, so callers issue one
+    ResourceId + TagKey query per configured application tag. The results are
+    append-only observations; application resolution deduplicates resource/day
+    cost after applying configured tag precedence.
+    """
+
+    _validate_query_window(start, end)
+    normalized_key = str(tag_key).strip()
+    if not normalized_key:
+        raise ValueError("tag_key is required")
+    dataset = {
+        "granularity": "Daily",
+        "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}},
+        "grouping": [
+            {"type": "Dimension", "name": "ResourceId"},
+            {"type": "TagKey", "name": normalized_key},
+        ],
+    }
+    if resource_groups is not None:
+        dataset["filter"] = _resource_group_filter(resource_groups)
+    return {
+        "type": "ActualCost",
+        "timeframe": "Custom",
+        "timePeriod": {"from": f"{start}T00:00:00+00:00", "to": f"{end}T23:59:59+00:00"},
+        "dataset": dataset,
+    }
+
+
 def fetch_cost_query(
     credential,
     subscription_id: str,
@@ -339,6 +395,136 @@ def parse_detail_query_result(pages: list[dict]) -> list[dict]:
                     "service_bucket": service_bucket(f"{resource_type} {meter}"),
                     "cost": float(col("cost", col("pretaxcost", 0)) or 0),
                     "currency": str(col("currency", "") or ""),
+                }
+            )
+    return rows
+
+
+def parse_tag_query_result(pages: list[dict], tag_key: str) -> list[dict]:
+    """Flatten ResourceId + TagKey pages into historical tag observations."""
+
+    normalized_key = str(tag_key).strip()
+    if not normalized_key:
+        raise ValueError("tag_key is required")
+    rows: list[dict] = []
+    for page in pages:
+        props = page.get("properties") or {}
+        cols = [c.get("name", "") for c in props.get("columns") or []]
+        idx = {str(column).casefold(): index for index, column in enumerate(cols)}
+        for raw in props.get("rows") or []:
+            def col(name: str, default=None, raw=raw, idx=idx):
+                index = idx.get(name.casefold())
+                return raw[index] if index is not None and index < len(raw) else default
+
+            usage = str(col("UsageDate", ""))
+            if len(usage) == 8 and usage.isdigit():
+                usage = f"{usage[0:4]}-{usage[4:6]}-{usage[6:8]}"
+            resource_id = str(col("ResourceId", "") or "")
+            tag_value = col(normalized_key, col("TagValue", col("Tag", "")))
+            tag_value = str(tag_value or "").strip()
+            # Some API versions serialize a tag grouping as ``key:value`` or
+            # ``key$value`` even though the column name is generic.
+            for separator in (":", "$"):
+                prefix = f"{normalized_key}{separator}"
+                if tag_value.casefold().startswith(prefix.casefold()):
+                    tag_value = tag_value[len(prefix) :].strip()
+                    break
+            if tag_value.casefold() in {
+                "untagged",
+                "(untagged)",
+                "[untagged]",
+                "not tagged",
+            }:
+                tag_value = ""
+            rows.append(
+                {
+                    "usage_date": usage,
+                    "resource_id": resource_id,
+                    "resource_group": _resource_group(resource_id),
+                    "tag_key": normalized_key,
+                    "tag_value": tag_value,
+                    "observed_cost": float(
+                        col("Cost", col("PreTaxCost", 0)) or 0
+                    ),
+                    "currency": str(col("Currency", "") or ""),
+                }
+            )
+    return rows
+
+
+def azure_resource_identity(resource_id: str) -> dict[str, str]:
+    """Derive stable display fields from an ARM ResourceId without guessing ownership."""
+
+    raw = str(resource_id or "").strip()
+    if not raw:
+        return {
+            "resource_group": "",
+            "resource_name": "Unidentified Azure charge",
+            "resource_type": "unidentified",
+            "service": "Azure",
+        }
+    parts = [part for part in raw.split("/") if part]
+    lower = [part.casefold() for part in parts]
+    resource_group = ""
+    if "resourcegroups" in lower:
+        index = lower.index("resourcegroups")
+        if index + 1 < len(parts):
+            resource_group = parts[index + 1]
+    provider = ""
+    resource_type = "azure_resource"
+    resource_name = parts[-1]
+    if "providers" in lower:
+        index = lower.index("providers")
+        provider_parts = parts[index + 1 :]
+        if provider_parts:
+            provider = provider_parts[0]
+            type_parts = [
+                provider_parts[position]
+                for position in range(1, len(provider_parts), 2)
+            ]
+            resource_type = "/".join([provider, *type_parts])
+    service = {
+        "microsoft.cognitiveservices": "Azure AI Services",
+        "microsoft.machinelearningservices": "Azure Machine Learning",
+        "microsoft.search": "Azure AI Search",
+        "microsoft.app": "Azure Container Apps",
+        "microsoft.web": "Azure App Service",
+        "microsoft.keyvault": "Azure Key Vault",
+        "microsoft.storage": "Azure Storage",
+        "microsoft.databricks": "Azure Databricks",
+    }.get(provider.casefold(), provider or "Azure")
+    return {
+        "resource_group": resource_group,
+        "resource_name": resource_name,
+        "resource_type": resource_type,
+        "service": service,
+    }
+
+
+def parse_resource_query_result(pages: list[dict]) -> list[dict]:
+    """Flatten the one-and-only subscription Azure ActualCost baseline."""
+
+    rows: list[dict] = []
+    for page in pages:
+        props = page.get("properties") or {}
+        cols = [c.get("name", "") for c in props.get("columns") or []]
+        idx = {str(column).casefold(): index for index, column in enumerate(cols)}
+        for raw in props.get("rows") or []:
+            def col(name: str, default=None, raw=raw, idx=idx):
+                index = idx.get(name.casefold())
+                return raw[index] if index is not None and index < len(raw) else default
+
+            usage = str(col("UsageDate", ""))
+            if len(usage) == 8 and usage.isdigit():
+                usage = f"{usage[0:4]}-{usage[4:6]}-{usage[6:8]}"
+            resource_id = str(col("ResourceId", "") or "")
+            rows.append(
+                {
+                    "usage_date": usage,
+                    "resource_id": resource_id,
+                    **azure_resource_identity(resource_id),
+                    "cost": float(col("Cost", col("PreTaxCost", 0)) or 0),
+                    "currency": str(col("Currency", "") or ""),
                 }
             )
     return rows
