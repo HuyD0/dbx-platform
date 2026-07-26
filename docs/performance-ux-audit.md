@@ -217,7 +217,15 @@ requests, `integrations/lakemeter/frontend/src/entry.tsx:63`) pays it 30–50
 times.
 
 **Fix.** TTL-cache the verified `Actor` keyed by a hash of the forwarded token
-(~60 s, invalidate on downstream 401) inside `IdentityVerifier`, and reuse one
+(~60 s, invalidate on downstream 401) inside `IdentityVerifier` — **for
+read-only requests only**. Governed mutations (plan, approve, reject, confirm,
+execute) must keep doing a fresh SCIM verification: the cached `Actor` carries
+approver/proposer roles, and a user removed from `dbx-platform-approvers`
+mid-TTL would otherwise still pass authorization (group removal does not revoke
+the token, so a downstream 401 never fires). The safety model requires *current*
+approver membership at approval time, so scope the cache by method/route
+(e.g. cache GETs, bypass for the control-plane mutation paths that call
+`verify(require_approver=True)` / `require_proposer`). Independently, reuse one
 resolved host/`ApiClient` config instead of a new `WorkspaceClient` per request.
 
 ### B4 (M) — `control_plane_scope()` makes a live `get_workspace_id()` call per request
@@ -402,8 +410,9 @@ skeleton until `mountLakeMeter` resolves; start
 1. `retry: false` QueryClient default (C7) — deletes the 3-minute silent spinner.
 2. Static shell in `index.html` (C5) + `GZipMiddleware` + immutable
    `Cache-Control` on `/assets` (C4).
-3. TTL-cache identity verification per token (B3) and memoize the workspace id
-   (B4) — removes 1–2 network round trips from *every* API call.
+3. TTL-cache identity verification per token for read-only requests, keeping
+   fresh SCIM verification on governed mutations (B3), and memoize the
+   workspace id (B4) — removes 1–2 network round trips from *every* read call.
 4. `isPending`/`isError` branches in `EstimateLibrary`/`DeploymentsPanel` (A7);
    debounce the rigor slider (C11).
 
