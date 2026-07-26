@@ -61,6 +61,7 @@ jobs:
       BUNDLE_VAR_runtime_executor_service_principal_name: ${{ vars.DBX_PLATFORM_RUNTIME_EXECUTOR_SP }}
       BUNDLE_VAR_action_executor_service_principal_name: ${{ vars.DBX_PLATFORM_ACTION_EXECUTOR_SP }}
       BUNDLE_VAR_lakemeter_migration_executor_service_principal_name: ${{ vars.DBX_PLATFORM_LAKEMETER_MIGRATION_EXECUTOR_SP }}
+      BUNDLE_VAR_lakemeter_project_id: ${{ vars.DBX_PLATFORM_LAKEMETER_PROJECT_ID || 'learn-app-sync-dev-1' }}
       BUNDLE_VAR_approver_group_id: ${{ vars.DBX_PLATFORM_APPROVER_GROUP_ID }}
       DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP: ${{ vars.DBX_PLATFORM_ALLOW_SHARED_EXECUTOR_SP }}
       SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -102,6 +103,13 @@ jobs:
         run: databricks current-user me
       - name: Verify executor identity policy
         run: bash scripts/verify_executor_identity.sh
+      - name: Verify the governed LakeMeter database exists
+        # The App binding below is deliberately attachment-only. Fail before
+        # uploading or changing any App/job resource if the separately
+        # approved companion database has not been provisioned.
+        run: >-
+          databricks postgres get-database
+          "projects/${BUNDLE_VAR_lakemeter_project_id}/branches/production/databases/lakemeter"
       - name: Stage the wheel for the Platform Console app
         # Refresh the uv lock after staging the current wheel. Its wheel hash
         # changes on every build, invalidating the Databricks Apps environment

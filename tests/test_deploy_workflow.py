@@ -101,28 +101,79 @@ def test_production_deploy_selects_every_normal_application_resource() -> None:
     assert selected == expected
 
 
-def test_normal_deploy_never_provisions_or_alters_lakebase() -> None:
+def test_normal_deploy_attaches_but_never_provisions_or_alters_lakebase() -> None:
     command = _deploy_command()
     app = yaml.safe_load((ROOT / "resources" / "app.yml").read_text())[
         "resources"
     ]["apps"]["platform_console"]
+    lakebase = next(
+        resource
+        for resource in app["resources"]
+        if resource["name"] == "lakemeter-database"
+    )
 
     assert "--select jobs.lakemeter_schema_migrations" in command
     assert "--select postgres_" not in command
     assert "bundle run lakemeter_schema_migrations" not in DEPLOY_WORKFLOW.read_text()
+    assert lakebase["postgres"] == {
+        "branch": "projects/${var.lakemeter_project_id}/branches/production",
+        "database": (
+            "projects/${var.lakemeter_project_id}/branches/production/"
+            "databases/lakemeter"
+        ),
+        "permission": "CAN_CONNECT_AND_CREATE",
+    }
+    assert {
+        item["name"]: item.get("value_from")
+        for item in app["config"]["env"]
+        if item["name"] in {"PGHOST", "PGDATABASE", "PGUSER"}
+    } == {}
     assert all(
-        resource["name"] != "lakemeter-database"
+        name in lakebase["description"]
+        for name in ("PGHOST", "PGDATABASE", "PGUSER")
+    )
+
+
+def test_lakemeter_database_binding_matches_companion_database() -> None:
+    app = yaml.safe_load((ROOT / "resources" / "app.yml").read_text())[
+        "resources"
+    ]["apps"]["platform_console"]
+    companion = yaml.safe_load(
+        (ROOT / "resources" / "lakemeter.yml").read_text()
+    )["resources"]["postgres_databases"]["lakemeter_database"]
+    binding = next(
+        resource["postgres"]
         for resource in app["resources"]
+        if resource["name"] == "lakemeter-database"
+    )
+
+    assert binding["branch"] == companion["parent"]
+    assert binding["database"] == (
+        f"{companion['parent']}/databases/{companion['database_id']}"
     )
 
 
 def test_lakemeter_companion_reuses_existing_project_without_managing_it() -> None:
+    workflow = yaml.safe_load(DEPLOY_WORKFLOW.read_text())
     bundle = yaml.safe_load((ROOT / "databricks.yml").read_text())
     document = yaml.safe_load((ROOT / "resources" / "lakemeter.yml").read_text())
     resources = document["resources"]
     expected_parent = "projects/${var.lakemeter_project_id}/branches/production"
+    deploy_job = workflow["jobs"]["deploy"]
+    prerequisite = next(
+        step
+        for step in deploy_job["steps"]
+        if step.get("name") == "Verify the governed LakeMeter database exists"
+    )
 
     assert bundle["variables"]["lakemeter_project_id"]["default"] == "learn-app-sync-dev-1"
+    assert deploy_job["env"]["BUNDLE_VAR_lakemeter_project_id"] == (
+        "${{ vars.DBX_PLATFORM_LAKEMETER_PROJECT_ID || 'learn-app-sync-dev-1' }}"
+    )
+    assert (
+        '"projects/${BUNDLE_VAR_lakemeter_project_id}/branches/production/'
+        'databases/lakemeter"'
+    ) in prerequisite["run"]
     assert "postgres_projects" not in resources
     assert "postgres_branches" not in resources
     assert "postgres_endpoints" not in resources
