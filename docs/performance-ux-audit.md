@@ -38,8 +38,10 @@ feedback in common flows · **L** = polish.
    error paths prescribe running the wrong job (C7, A4, A5).
 
 What is **not** broken (verified): the 45 s interactive statement cap is
-deployed in prod (`resources/app.yml:84-85`) so single-statement endpoints fail
-fast with a typed 504; `FindingsSection` has a complete
+deployed in prod (`resources/app.yml:84-85`) so single-statement endpoints
+return a typed 504 in bounded time (~75 s worst case — the budget clock starts
+after the server-side wait, see A3 — rather than the 45 s intended, but bounded
+and typed); `FindingsSection` has a complete
 skeleton → error → capability-gap → empty → data state machine with an always-on
 `AsOf` freshness stamp and `?refresh=true` bypass; 85 of 86 route handlers are
 sync `def`, so SDK/warehouse calls run in the thread pool rather than on the
@@ -88,16 +90,23 @@ endpoints run several sequentially, each with a fresh budget:
 `/api/mission-control` = findings loader + four `list_actions` calls
 (`backend/routers/control_plane.py:756-808`), worst case 90 s+; `/api/overview`
 three sections (`overview.py:55-81`), worst case ~135 s; `/api/cost/overview`
-three reads + three source cards (`cost.py:316-439`). On a cold warehouse these
-hold the connection until the Databricks Apps gateway aborts with an opaque
-502 — the typed `query_timeout` contract never reaches the browser exactly where
-it matters most.
+three reads + three source cards (`cost.py:316-439`). Worse, the budget clock
+starts late: `run_query` first blocks in `execute_statement`'s server-side wait
+(up to 30 s, `system_tables.py:96-103`) and only **then** sets
+`deadline = time.monotonic() + budget` (`system_tables.py:105`), so one "45 s"
+statement can occupy ~75 s and the compound worst cases above are correspondingly
+longer. On a cold warehouse these hold the connection until the Databricks Apps
+gateway aborts with an opaque 502 — the typed `query_timeout` contract never
+reaches the browser exactly where it matters most.
 
-**Fix.** Share one deadline per HTTP request: pass remaining budget as
+**Fix.** Two parts. (1) In `run_query`, establish the deadline **before**
+`execute_statement` and count the server-side wait against it (subtract elapsed
+time from the polling budget), so `timeout_seconds` is an actual bound on wall
+time. (2) Share one deadline per HTTP request: pass remaining budget as
 `timeout_seconds` into each `run_query` (it already accepts it,
-`src/dbx_platform/system_tables.py:65`), or short-circuit remaining sections
-after the first `TimeoutError` (if one statement timed out on a starting
-warehouse, the rest will too).
+`system_tables.py:65`), or short-circuit remaining sections after the first
+`TimeoutError` (if one statement timed out on a starting warehouse, the rest
+will too).
 
 ### A4 (M) — Cold-start timeouts swallowed into misleading error codes
 Several routes catch `Exception` broadly and map a `TimeoutError` (warehouse
@@ -362,8 +371,13 @@ open — the prod warehouse can never reach its 5-minute auto-stop (standing
 cost), and each poll competes for locks/threads with real user loads. The AsOf
 spinner also spins on every background poll, reading as constant activity.
 
-**Fix.** Lengthen to 120–300 s aligned with meaningful TTLs, or drop polling for
-manual refresh + refetch-on-navigation; key the spinner on manual refresh only.
+**Fix.** Prefer dropping polling entirely (manual refresh +
+refetch-on-navigation). If polling is kept, the interval must **safely exceed
+the warehouse auto-stop window** (e.g. ≥ 10 min): anything shorter — including
+120–300 s — still lands a fresh warehouse statement before 5 idle minutes ever
+accumulate, so the warehouse never auto-stops and the standing cost remains;
+sub-window intervals only reduce load, not cost. Key the AsOf spinner on manual
+refresh only.
 
 ### C9 (M) — Window/param changes drop populated pages back to skeletons
 No `placeholderData: keepPreviousData` anywhere: switching the 7/30/90-day
@@ -377,11 +391,17 @@ a subtle `isFetching` indicator instead of unmounting content.
 ### C10 (M) — Fetch layer ignores `AbortSignal` and has no timeout
 `api.ts:3-21` never threads TanStack Query's signal into `fetch`, so abandoned
 navigations/window-switches leave zombie requests holding browser connections
-(6-per-origin on HTTP/1.1) and backend threads; a hung upstream pends ~5 min
-silently.
+(6-per-origin on HTTP/1.1); a hung upstream pends ~5 min silently.
 
 **Fix.** `apiGet(path, params, signal)` from the queryFn context, plus a
-generous `AbortSignal.timeout` mapped to the transient error class.
+generous `AbortSignal.timeout` mapped to the transient error class. Scope note:
+this relieves the **browser side only** — the sync FastAPI handler and its
+`run_query` polling loop never observe the disconnect, so the backend thread
+and warehouse statement run to completion regardless. Freeing those too would
+require server-side disconnect handling (async wrappers checking
+`request.is_disconnected()` and cancelling the statement) — a much larger
+change; B1's thread-pool fixes are the practical mitigation for the server
+side.
 
 ### C11 (M) — Estimator interaction costs
 - The rigor slider is the one control that escaped debouncing: every drag tick
