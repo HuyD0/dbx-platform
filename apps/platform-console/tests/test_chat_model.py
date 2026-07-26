@@ -110,6 +110,26 @@ class DatabricksChatModelTests(unittest.TestCase):
         set_experiment.assert_called_once_with(experiment_id="experiment-123")
         autolog.assert_called_once_with(log_traces=True, silent=True)
 
+    def test_tracing_failure_does_not_block_the_agent(self) -> None:
+        with (
+            patch("mlflow.set_tracking_uri"),
+            patch("mlflow.set_experiment"),
+            patch(
+                "mlflow.langchain.autolog",
+                side_effect=ModuleNotFoundError("No module named 'langchain'"),
+            ),
+            self.assertLogs(
+                "backend.agent_runtime.tracing",
+                level="WARNING",
+            ) as captured,
+        ):
+            configure_mlflow_tracing("experiment-123")
+
+        self.assertIn(
+            "continuing without autologging",
+            "\n".join(captured.output),
+        )
+
     def test_platform_agent_still_builds_without_trace_experiment(self) -> None:
         agent = PlatformAgent(
             endpoint="model",
