@@ -92,7 +92,7 @@ function AgentExecutionFlamegraph({ trace }: { trace?: AgentExecutionTrace }) {
   const selectedStage = stages.find((stage) => stage.id === selectedStageId);
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-grid bg-white">
+    <div className="mt-3 overflow-hidden rounded-xl border border-grid bg-surface">
       <button
         type="button"
         aria-expanded={expanded}
@@ -186,10 +186,10 @@ function AgentExecutionFlamegraph({ trace }: { trace?: AgentExecutionTrace }) {
                               current === stage.id ? null : stage.id,
                             )
                           }
-                          className={`absolute inset-y-0 overflow-hidden rounded-md px-2 text-left text-[10px] font-semibold shadow-sm ring-offset-1 ring-offset-white focus-visible:ring-2 focus-visible:ring-[#F00037] ${
+                          className={`absolute inset-y-0 overflow-hidden rounded-md px-2 text-left text-[10px] font-semibold shadow-sm ring-offset-1 ring-offset-surface focus-visible:ring-2 focus-visible:ring-[#F00037] ${
                             durationObserved
                               ? category.bar
-                              : "border border-dashed border-muted bg-white text-ink-2"
+                              : "border border-dashed border-muted bg-surface text-ink-2"
                           }`}
                           style={{ left: `${durationObserved ? left : 0}%`, width: `${width}%` }}
                         >

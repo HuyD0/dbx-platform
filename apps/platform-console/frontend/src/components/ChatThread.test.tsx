@@ -120,12 +120,18 @@ test("sends focused action context and preserves structured citations after focu
     "text-ink",
   );
 
-  await user.click(screen.getByRole("button", { name: /Agent execution flamegraph/ }));
+  const flamegraphToggle = screen.getByRole("button", {
+    name: /Agent execution flamegraph/,
+  });
+  expect(flamegraphToggle.parentElement).toHaveClass("bg-surface");
+  expect(flamegraphToggle.parentElement).not.toHaveClass("bg-white");
+  await user.click(flamegraphToggle);
   expect(screen.getByText("820 ms")).toBeInTheDocument();
   expect(screen.getByText("18.4 ms/token")).toBeInTheDocument();
   const retrievalStage = screen.getByRole("button", {
     name: "Retrieve canonical findings, Databricks retrieval, 500 ms",
   });
+  expect(retrievalStage).toHaveClass("ring-offset-surface");
   await user.click(retrievalStage);
   expect(
     screen.getByText("Databricks returned current canonical workspace findings."),
