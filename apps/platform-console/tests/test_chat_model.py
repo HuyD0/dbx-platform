@@ -9,7 +9,10 @@ APP_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP_DIR))
 
 from backend.agent_runtime.chat_model import DatabricksChatModel  # noqa: E402
-from backend.agent_runtime.tracing import configure_mlflow_tracing  # noqa: E402
+from backend.agent_runtime.tracing import (  # noqa: E402
+    configure_mlflow_tracing,
+    mlflow_span,
+)
 from backend.platform_agent import PlatformAgent  # noqa: E402
 from langchain_core.messages import (  # noqa: E402
     AIMessage,
@@ -98,37 +101,72 @@ class DatabricksChatModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no chat choices"):
             model._generate([HumanMessage(content="hello")])
 
-    def test_configures_langgraph_tracing_for_bound_experiment(self) -> None:
+    def test_configures_native_tracing_for_bound_experiment(self) -> None:
         with (
             patch("mlflow.set_tracking_uri") as set_tracking_uri,
-            patch("mlflow.set_experiment") as set_experiment,
-            patch("mlflow.langchain.autolog") as autolog,
+            patch("mlflow.tracing.set_destination") as set_destination,
         ):
-            configure_mlflow_tracing("experiment-123")
+            enabled = configure_mlflow_tracing("experiment-123")
 
+        self.assertTrue(enabled)
         set_tracking_uri.assert_called_once_with("databricks")
-        set_experiment.assert_called_once_with(experiment_id="experiment-123")
-        autolog.assert_called_once_with(log_traces=True, silent=True)
+        destination = set_destination.call_args.args[0]
+        self.assertEqual(destination.experiment_id, "experiment-123")
 
     def test_tracing_failure_does_not_block_the_agent(self) -> None:
         with (
             patch("mlflow.set_tracking_uri"),
-            patch("mlflow.set_experiment"),
             patch(
-                "mlflow.langchain.autolog",
-                side_effect=ModuleNotFoundError("No module named 'langchain'"),
+                "mlflow.tracing.set_destination",
+                side_effect=RuntimeError("trace service unavailable"),
             ),
             self.assertLogs(
                 "backend.agent_runtime.tracing",
                 level="WARNING",
             ) as captured,
         ):
-            configure_mlflow_tracing("experiment-123")
+            enabled = configure_mlflow_tracing("experiment-123")
 
+        self.assertFalse(enabled)
         self.assertIn(
-            "continuing without autologging",
+            "continuing without tracing",
             "\n".join(captured.output),
         )
+
+    def test_native_span_records_inputs_and_finalizes(self) -> None:
+        manager = MagicMock()
+        span = manager.__enter__.return_value
+        with patch("mlflow.start_span", return_value=manager) as start_span:
+            with mlflow_span(
+                "platform_agent.invoke",
+                span_type="AGENT",
+                inputs={"messages": [{"role": "user", "content": "hello"}]},
+                enabled=True,
+            ) as active_span:
+                self.assertIs(active_span, span)
+
+        start_span.assert_called_once_with(
+            name="platform_agent.invoke",
+            span_type="AGENT",
+        )
+        span.set_inputs.assert_called_once()
+        manager.__exit__.assert_called_once_with(None, None, None)
+
+    def test_native_span_start_failure_is_fail_open(self) -> None:
+        with (
+            patch("mlflow.start_span", side_effect=RuntimeError("trace service unavailable")),
+            self.assertLogs(
+                "backend.agent_runtime.tracing",
+                level="WARNING",
+            ),
+        ):
+            with mlflow_span(
+                "platform_agent.invoke",
+                span_type="AGENT",
+                inputs={},
+                enabled=True,
+            ) as span:
+                self.assertIsNone(span)
 
     def test_platform_agent_still_builds_without_trace_experiment(self) -> None:
         agent = PlatformAgent(
@@ -160,14 +198,37 @@ class DatabricksChatModelTests(unittest.TestCase):
             repository_factory=MagicMock(),
         )
         agent.__dict__["graph"] = graph
+        agent._mlflow_tracing_enabled = True
+        span = MagicMock()
+        span_context = MagicMock()
+        span_context.__enter__.return_value = span
 
-        text, trace = agent.invoke_with_trace([{"role": "user", "content": "hello"}])
+        with (
+            patch(
+                "backend.platform_agent.mlflow_span",
+                return_value=span_context,
+            ) as traced,
+            patch(
+                "backend.platform_agent.set_mlflow_span_outputs",
+            ) as set_outputs,
+        ):
+            text, trace = agent.invoke_with_trace([{"role": "user", "content": "hello"}])
 
         self.assertEqual(text, "Evidence-backed answer.")
         self.assertEqual(trace["timing_source"], "server")
         self.assertIsNone(trace["ttft_ms"])
         self.assertIsNone(trace["tpot_ms"])
         self.assertEqual(trace["stages"][0]["category"], "llm_synthesis")
+        traced.assert_called_once_with(
+            "platform_agent.invoke",
+            span_type="AGENT",
+            inputs={
+                "messages": [{"role": "user", "content": "hello"}],
+                "endpoint": "model",
+            },
+            enabled=True,
+        )
+        set_outputs.assert_called_once_with(span, {"message": "Evidence-backed answer."})
         config = graph.invoke.call_args.kwargs["config"]
         self.assertEqual(config["recursion_limit"], 20)
         self.assertEqual(len(config["callbacks"]), 1)

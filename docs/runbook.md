@@ -136,7 +136,13 @@ evidence. It has no executor or target-mutation tool.
 If chat returns `agent_unavailable`, verify that the endpoint is `READY`, the
 App deployment includes the `chat-model` resource, and the active deployment
 contains `DBX_PLATFORM_CHAT_ENDPOINT`. Also verify the App environment
-installed `databricks-langchain` and `langgraph` from `requirements.txt`.
+installed the locked `langgraph` and `mlflow-tracing` dependencies.
+
+The App records each agent invocation as a native MLflow `AGENT` span in the
+bound `agent-traces` experiment. This uses the lightweight tracing SDK directly
+and does not require the optional `langchain` distribution. Trace destination,
+start, input/output, and finalization failures are warning-only so an
+observability outage cannot make chat unavailable.
 
 The optional MLflow-serving wrapper under `agents/platform_agent/` remains
 disabled; the App does not need it. Its deployment helper intentionally exits
