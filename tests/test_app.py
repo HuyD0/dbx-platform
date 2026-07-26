@@ -176,6 +176,18 @@ def test_chat_model_is_bound_to_the_app_with_query_only_access():
     }
 
 
+def test_core_app_deploy_does_not_require_unprovisioned_lakemeter_database():
+    root = APP_DIR.parent.parent
+    resource = yaml.safe_load(
+        (root / "resources" / "app.yml").read_text()
+    )["resources"]["apps"]["platform_console"]
+
+    assert all(
+        item["name"] != "lakemeter-database"
+        for item in resource["resources"]
+    )
+
+
 # --- TestClient behavior ----------------------------------------------------
 
 @pytest.fixture()
@@ -297,6 +309,13 @@ def test_authenticated_context_uses_friendly_workspace_name(client, monkeypatch)
         "roles": ["authenticated", "operator", "proposer", "viewer"],
         "actions_enabled": False,
     }
+
+
+def test_deployed_workspace_name_falls_back_when_unset(monkeypatch):
+    monkeypatch.delenv("DBX_PLATFORM_WORKSPACE_DISPLAY_NAME", raising=False)
+    monkeypatch.setattr(deps, "is_local_or_test", lambda: False)
+
+    assert deps.workspace_display_name() == "Databricks workspace"
 
 
 def test_cost_overview_keeps_sources_separate_and_actionable(

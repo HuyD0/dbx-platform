@@ -103,10 +103,17 @@ def test_production_deploy_selects_every_normal_application_resource() -> None:
 
 def test_normal_deploy_never_provisions_or_alters_lakebase() -> None:
     command = _deploy_command()
+    app = yaml.safe_load((ROOT / "resources" / "app.yml").read_text())[
+        "resources"
+    ]["apps"]["platform_console"]
 
     assert "--select jobs.lakemeter_schema_migrations" in command
     assert "--select postgres_" not in command
     assert "bundle run lakemeter_schema_migrations" not in DEPLOY_WORKFLOW.read_text()
+    assert all(
+        resource["name"] != "lakemeter-database"
+        for resource in app["resources"]
+    )
 
 
 def test_lakemeter_companion_reuses_existing_project_without_managing_it() -> None:
