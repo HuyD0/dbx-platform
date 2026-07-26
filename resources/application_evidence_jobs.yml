@@ -1,0 +1,61 @@
+# Daily application attribution evidence. Production intentionally keeps this
+# schedule PAUSED; it can be enabled only through the approved schedule
+# reconciliation, and manual runs require an exact approved run-job action.
+resources:
+  jobs:
+    application_evidence_sync:
+      name: "[dbx-platform] application-evidence-sync"
+      description: >
+        Appends subscription-scoped Azure ActualCost tag observations,
+        complete Databricks App resource-binding snapshots, and source health.
+        The rolling three-day window captures late billing restatements; use a
+        separately approved 90-day run for the initial backfill.
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+      tags:
+        team: platform
+        project: dbx-platform
+        evidence: application-cost
+      queue:
+        enabled: true
+      permissions:
+        - service_principal_name: ${var.runtime_executor_service_principal_name}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.action_executor_service_principal_name}
+          level: CAN_MANAGE_RUN
+        - service_principal_name: ${resources.apps.platform_console.service_principal_client_id}
+          level: CAN_VIEW
+      parameters:
+        - name: days
+          default: "3"
+        - name: approved_action_id
+          default: ""
+        - name: approved_plan_hash
+          default: ""
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ../dist/*.whl
+      tasks:
+        - task_key: sync_application_evidence
+          environment_key: default
+          python_wheel_task:
+            package_name: dbx_platform
+            entry_point: dbx-platform
+            parameters:
+              ["applications", "sync", "--days", "{{job.parameters.days}}",
+               "--subscription-id", "${var.azure_subscription_id}",
+               "--tag-keys", "${var.application_tag_keys}",
+               "--service-credential", "${var.azure_service_credential}",
+               "--warehouse-id", "${resources.sql_warehouses.platform_console_warehouse.id}",
+               "--approved-action-id", "{{job.parameters.approved_action_id}}",
+               "--approved-plan-hash", "{{job.parameters.approved_plan_hash}}",
+               "--approved-job-id", "{{job.id}}",
+               "--approved-run-id", "{{job.run_id}}",
+               "--trigger-type", "{{job.trigger.type}}",
+               "--environment", "${bundle.target}"]

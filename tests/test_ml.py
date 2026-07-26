@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 from conftest import days_ago, hours_ago
 
 from dbx_platform.ml import (
     classify_gpu_clusters,
     classify_models,
     classify_serving_endpoints,
+    fetch_registered_models,
     find_stale_endpoints,
     find_vector_search_findings,
     served_entity_names,
@@ -175,6 +179,34 @@ SERVED = {"main.prod.churn"}
 
 def _actions(findings: list[dict]) -> list[str]:
     return sorted(f["action"] for f in findings)
+
+
+def test_registered_model_cap_prioritizes_customer_models_over_system_catalog():
+    workspace = MagicMock()
+    workspace.registered_models.list.return_value = [
+        SimpleNamespace(full_name="system.ai.bge_base"),
+        SimpleNamespace(full_name="system.ai.llama"),
+        SimpleNamespace(full_name="prod.ml.churn"),
+    ]
+    workspace.registered_models.get.return_value = SimpleNamespace(
+        owner="ml@example.com",
+        created_at=1,
+        updated_at=2,
+        aliases=[],
+    )
+    workspace.model_versions.list.return_value = []
+
+    rows, truncated = fetch_registered_models(workspace, None, None, 2)
+
+    assert [row["full_name"] for row in rows] == [
+        "prod.ml.churn",
+        "system.ai.bge_base",
+    ]
+    assert truncated is True
+    workspace.registered_models.get.assert_any_call(
+        "prod.ml.churn",
+        include_aliases=True,
+    )
 
 
 def test_healthy_served_model_has_no_findings(now_ms):

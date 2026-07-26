@@ -7,6 +7,8 @@ from dbx_platform import azure_cost
 from dbx_platform.azure_cost import (
     build_detail_query_body,
     build_query_body,
+    build_resource_query_body,
+    build_tag_query_body,
     classify_azure_spend,
     classify_reconciliation_rows,
     count_costs_sql,
@@ -21,6 +23,8 @@ from dbx_platform.azure_cost import (
     parse_detail_query_result,
     parse_query_result,
     parse_resource_groups,
+    parse_resource_query_result,
+    parse_tag_query_result,
     reconciliation_sql,
     report_sql,
     resource_group_scope_filter,
@@ -160,6 +164,126 @@ def test_detail_query_uses_resource_and_meter_dimensions():
     assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
     names = [g["name"] for g in body["dataset"]["grouping"]]
     assert names == ["ResourceId", "Meter"]
+
+
+def test_tag_query_uses_resource_and_one_tag_key():
+    body = build_tag_query_body(
+        "2026-07-01",
+        "2026-07-03",
+        resource_groups="rg-workspace,rg-shared",
+        tag_key="application",
+    )
+    assert body["dataset"]["grouping"] == [
+        {"type": "Dimension", "name": "ResourceId"},
+        {"type": "TagKey", "name": "application"},
+    ]
+    assert body["dataset"]["filter"]["dimensions"]["values"] == [
+        "rg-workspace",
+        "rg-shared",
+    ]
+    subscription_body = build_tag_query_body(
+        "2026-07-01",
+        "2026-07-03",
+        tag_key="application",
+    )
+    assert "filter" not in subscription_body["dataset"]
+
+
+def test_resource_baseline_query_has_one_money_dimension():
+    body = build_resource_query_body("2026-07-01", "2026-07-03")
+    assert body["type"] == "ActualCost"
+    assert body["dataset"]["aggregation"]["totalCost"]["name"] == "PreTaxCost"
+    assert body["dataset"]["grouping"] == [
+        {"type": "Dimension", "name": "ResourceId"}
+    ]
+    assert "filter" not in body["dataset"]
+
+
+def test_tag_query_rejects_unsplit_window_and_empty_key():
+    with pytest.raises(ValueError, match="at most 31 days"):
+        build_tag_query_body(
+            "2026-01-01",
+            "2026-02-01",
+            resource_groups="rg",
+            tag_key="application",
+        )
+    with pytest.raises(ValueError, match="tag_key"):
+        build_tag_query_body(
+            "2026-01-01",
+            "2026-01-02",
+            resource_groups="rg",
+            tag_key=" ",
+        )
+
+
+def test_parse_tag_query_handles_named_and_generic_tag_columns():
+    resource = "/subscriptions/sub/resourceGroups/shared/providers/Microsoft.Web/sites/a"
+    pages = [
+        _page(
+            [[2.5, 20260701, resource, "Learn App", "CAD"]],
+            ["PreTaxCost", "UsageDate", "ResourceId", "application", "Currency"],
+        ),
+        _page(
+            [[1.5, 20260702, resource, "application$Learn App", "CAD"]],
+            ["Cost", "UsageDate", "ResourceId", "Tag", "Currency"],
+        ),
+    ]
+    assert parse_tag_query_result(pages, "application") == [
+        {
+            "usage_date": "2026-07-01",
+            "resource_id": resource,
+            "resource_group": "shared",
+            "tag_key": "application",
+            "tag_value": "Learn App",
+            "observed_cost": 2.5,
+            "currency": "CAD",
+        },
+        {
+            "usage_date": "2026-07-02",
+            "resource_id": resource,
+            "resource_group": "shared",
+            "tag_key": "application",
+            "tag_value": "Learn App",
+            "observed_cost": 1.5,
+            "currency": "CAD",
+        },
+    ]
+
+
+def test_parse_tag_query_treats_azure_untagged_sentinels_as_missing():
+    resource = "/subscriptions/sub/resourceGroups/shared/providers/x/a"
+    page = _page(
+        [
+            [4.0, 20260701, resource, "Untagged", "CAD"],
+            [6.0, 20260702, resource, "(untagged)", "CAD"],
+        ],
+        ["Cost", "UsageDate", "ResourceId", "Tag", "Currency"],
+    )
+    rows = parse_tag_query_result([page], "application")
+    assert [row["tag_value"] for row in rows] == ["", ""]
+
+
+def test_parse_resource_baseline_derives_resource_identity():
+    resource = (
+        "/subscriptions/sub/resourceGroups/rg-ai/providers/"
+        "Microsoft.CognitiveServices/accounts/aoai"
+    )
+    page = _page(
+        [[5.5, 20260701, resource, "CAD"]],
+        ["PreTaxCost", "UsageDate", "ResourceId", "Currency"],
+    )
+    assert parse_resource_query_result([page]) == [
+        {
+            "usage_date": "2026-07-01",
+            "resource_id": resource,
+            "resource_group": "rg-ai",
+            "resource_name": "aoai",
+            "resource_type": "Microsoft.CognitiveServices/accounts",
+            "service": "Azure AI Services",
+            "cost": 5.5,
+            "currency": "CAD",
+        }
+    ]
 
 
 def test_resource_scope_fails_closed_and_normalizes_duplicates():

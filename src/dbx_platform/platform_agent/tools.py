@@ -21,6 +21,7 @@ from importlib import resources
 from langchain_core.tools import tool
 
 from dbx_platform import (
+    application_cost,
     cost,
     estimator,
     estimator_pricing,
@@ -78,8 +79,19 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _render(rows: list[dict], tool_name: str, source: str) -> str:
-    return rows_to_text(rows, tool_name=tool_name, source=source)
+def _render(
+    rows: list[dict],
+    tool_name: str,
+    source: str,
+    *,
+    observed_at: str | None = None,
+) -> str:
+    return rows_to_text(
+        rows,
+        tool_name=tool_name,
+        source=source,
+        observed_at=observed_at,
+    )
 
 
 @tool
@@ -90,6 +102,121 @@ def get_cost_report(days: int = 30) -> str:
         cost.usage_report(_client(), s.warehouse_id, days),
         "get_cost_report",
         "system.billing.usage + system.billing.list_prices",
+    )
+
+
+@tool
+def get_application_cost(application_key: str, days: int = 30) -> str:
+    """Exact application cost ledgers and attribution health for 1-90 days.
+
+    Azure Actual and Databricks List amounts are returned as independent
+    currency/basis records and must never be added together.
+    """
+
+    s = _settings()
+    w = _client()
+    workspace_id = str(w.get_workspace_id())
+    bounded_days = max(1, min(int(days), 90))
+    evidence, health = application_cost.read_application_evidence(
+        w,
+        s.warehouse_id,
+        s.dashboard_catalog,
+        s.dashboard_schema,
+        workspace_id=workspace_id,
+        environment=s.environment,
+        subscription_id=s.azure_subscription_id,
+        days=bounded_days,
+        tag_keys=s.application_tag_key_list(),
+    )
+    profile = application_cost.build_profile(
+        application_key,
+        evidence,
+        source_health=health,
+        days=bounded_days,
+    )
+    source = (
+        "application_cost attribution over system.billing.usage/list_prices + "
+        "azure_cost_resource_evidence + azure_cost_tag_evidence + "
+        "application_resource_bindings"
+    )
+    if profile is None:
+        return _render([], "get_application_cost", source)
+
+    rows = [
+        {
+            "record_type": "exact_ledger",
+            "application_key": profile["application"]["application_key"],
+            "source": ledger["source"],
+            "amount": ledger["amount"],
+            "currency": ledger["currency"],
+            "pricing_basis": ledger["pricing_basis"],
+            "coverage_start": ledger.get("coverage_start"),
+            "coverage_end": ledger.get("coverage_end"),
+            "freshness": ledger.get("freshness"),
+        }
+        for ledger in profile["ledgers"]
+    ]
+    rows.extend(
+        {
+            "record_type": "outside_exact_total",
+            "application_key": profile["application"]["application_key"],
+            "source": pool["source"],
+            "reason": pool["reason"],
+            "amount": pool["cost"],
+            "currency": pool["currency"],
+            "pricing_basis": pool["pricing_basis"],
+            "row_count": pool["row_count"],
+        }
+        for pool in profile["unallocated"]
+    )
+    alignment_counts = {
+        status: sum(
+            item.get("status") == status for item in profile["tag_alignment"]
+        )
+        for status in ("matched", "missing", "conflict")
+    }
+    rows.append(
+        {
+            "record_type": "tag_alignment",
+            "application_key": profile["application"]["application_key"],
+            **alignment_counts,
+        }
+    )
+    rows.extend(
+        {
+            "record_type": "source_health",
+            "application_key": profile["application"]["application_key"],
+            "source": item.get("source"),
+            "status": item.get("status"),
+            "coverage_start": item.get("coverage_start"),
+            "coverage_end": item.get("coverage_end"),
+            "last_success_at": item.get("last_success_at"),
+            "notes": item.get("notes"),
+        }
+        for item in profile["source_health"]
+    )
+    observed_at = max(
+        (
+            str(value)
+            for value in (
+                *(
+                    ledger.get("freshness")
+                    for ledger in profile["ledgers"]
+                ),
+                *(
+                    item.get("last_success_at")
+                    for item in profile["source_health"]
+                ),
+            )
+            if value
+        ),
+        default=None,
+    )
+    return _render(
+        rows,
+        "get_application_cost",
+        source,
+        observed_at=observed_at,
     )
 
 
@@ -562,6 +689,7 @@ def estimate_solution_cost(requirements_json: str, rigor_pct: int = 10) -> str:
 
 
 ALL_TOOLS = [
+    get_application_cost,
     get_cost_report,
     list_solution_patterns,
     estimate_solution_cost,

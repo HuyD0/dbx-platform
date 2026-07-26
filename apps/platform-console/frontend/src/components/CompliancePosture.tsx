@@ -215,7 +215,7 @@ export function ComplianceRadarCard() {
 
 function UnverifiedZdrNotice({ count }: { count: number }) {
   return (
-    <div className="rounded-2xl border border-gold-accent bg-light-gold p-4" role="status">
+    <div className="rounded-2xl border border-gold-accent bg-warning-surface p-4" role="status">
       <div className="flex items-start gap-3">
         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
         <div>
@@ -248,7 +248,7 @@ export function ZdrEnforcer() {
   const posture = query.data.data;
   if (posture.evaluated_resources === 0) {
     return (
-      <div className="rounded-2xl border border-gold-accent bg-light-gold p-4" role="status">
+      <div className="rounded-2xl border border-gold-accent bg-warning-surface p-4" role="status">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-status-warning" />
           <div>

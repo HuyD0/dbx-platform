@@ -48,6 +48,7 @@ jobs:
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/serving_cost.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/ai_endpoint_usage_daily.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/queries/ai_gateway_usage_daily.sql"
+          unzip -l dist/*.whl | grep -q "dbx_platform/queries/application_cost_databricks.sql"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/autotermination_required.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/policies/gpu_training.json"
           unzip -l dist/*.whl | grep -q "dbx_platform/estimator_data/rate_card.json"

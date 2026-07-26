@@ -146,6 +146,12 @@ variables:
       groups intentionally allocated to this workspace.
     default: "rg-databricks-dbx-dev,databricks-rg-rg-databricks-dbx-dev"
 
+  application_tag_keys:
+    description: >
+      Comma-separated, precedence-ordered billing tag keys that identify an
+      application across Azure and Databricks. Conflicting values fail closed.
+    default: "application,app,project"
+
   azure_service_credential:
     description: >
       Unity Catalog service credential name used for keyless Azure auth from
@@ -179,6 +185,8 @@ targets:
         ai_monitor_rollup:
           performance_target: STANDARD
         ai_catalog_sync:
+          performance_target: STANDARD
+        application_evidence_sync:
           performance_target: STANDARD
         ml_serving_report:
           performance_target: STANDARD
@@ -227,6 +235,8 @@ targets:
         ai_monitor_rollup:
           performance_target: STANDARD
         ai_catalog_sync:
+          performance_target: STANDARD
+        application_evidence_sync:
           performance_target: STANDARD
         ml_serving_report:
           performance_target: STANDARD

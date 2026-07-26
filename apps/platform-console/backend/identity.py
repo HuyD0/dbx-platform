@@ -204,7 +204,13 @@ def mask_for_viewer(value, actor: Actor):
         token_finding = _is_token_finding(value)
         for key, item in value.items():
             normalized = str(key).lower()
-            if any(part in normalized for part in _SENSITIVE_KEY_PARTS):
+            application_display_name = (
+                normalized == "display_name" and "application_key" in value
+            )
+            if (
+                any(part in normalized for part in _SENSITIVE_KEY_PARTS)
+                and not application_display_name
+            ):
                 masked[key] = "[redacted]"
             elif token_finding and normalized == "resource":
                 masked[key] = "[redacted]"

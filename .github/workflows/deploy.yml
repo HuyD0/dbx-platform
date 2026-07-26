@@ -174,6 +174,7 @@ jobs:
             --select jobs.action_executor \
             --select jobs.ai_catalog_sync \
             --select jobs.ai_monitor_rollup \
+            --select jobs.application_evidence_sync \
             --select jobs.azure_cost_pull \
             --select jobs.cost_forecast_daily \
             --select jobs.cost_forecast_train \

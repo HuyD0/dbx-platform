@@ -763,6 +763,306 @@ def cmd_azure_cost_pull(args) -> int:
     return 0
 
 
+def cmd_applications_sync(args) -> int:
+    """Append application tags, resource bindings, and source health."""
+
+    from datetime import UTC, date, datetime
+
+    from dbx_platform import application_cost, azure_cost, digest, secrets
+
+    settings = Settings.from_env()
+    workspace = get_client(args.profile)
+    if not _verify_governed_write(args, workspace, settings):
+        return 2
+    warehouse = _warehouse_id(args, settings)
+    workspace_id = str(workspace.get_workspace_id())
+    environment = getattr(args, "environment", settings.environment)
+    subscription_id = args.subscription_id or settings.azure_subscription_id
+    tag_keys = application_cost.parse_application_tag_keys(
+        args.tag_keys or settings.application_tag_keys
+    )
+    days = args.days if args.days is not None else 3
+    end = date.today()
+    start, end = azure_cost.inclusive_date_window(end, days)
+    observed_at = datetime.now(UTC).isoformat()
+    job_context = {
+        "job_id": str(getattr(args, "approved_job_id", "") or ""),
+        "run_id": str(getattr(args, "approved_run_id", "") or ""),
+        "trigger_type": str(getattr(args, "trigger_type", "") or ""),
+    }
+
+    failures: list[str] = []
+    health_rows: list[dict] = []
+    azure_snapshot_rows: list[dict] = []
+    azure_resource_rows: list[dict] = []
+    tag_rows: list[dict] = []
+    binding_rows: list[dict] = []
+    binding_snapshots: list[dict] = []
+    binding_diagnostics: list[str] = []
+    try:
+        binding_rows = application_cost.fetch_application_bindings(
+            workspace,
+            workspace_id=workspace_id,
+            environment=environment,
+            observed_at=observed_at,
+            diagnostics=binding_diagnostics,
+        )
+        binding_snapshots = [
+            application_cost.prepare_binding_snapshot(
+                binding_rows,
+                workspace_id=workspace_id,
+                environment=environment,
+                observed_at=observed_at,
+                **job_context,
+            )
+        ]
+        health_rows.append(
+            application_cost.prepare_source_health(
+                workspace_id=workspace_id,
+                environment=environment,
+                source="databricks_app_bindings",
+                status="partial",
+                notes=(
+                    f"Observed {len(binding_rows)} bindings in one complete "
+                    "snapshot for Apps visible to the runtime identity. "
+                    "Individual observed bindings are durable, but workspace-wide "
+                    "Apps visibility is not assumed complete."
+                    + (
+                        " Stable billing aliases were unavailable for: "
+                        + ", ".join(binding_diagnostics)
+                        if binding_diagnostics
+                        else ""
+                    )
+                ),
+                last_success_at=observed_at,
+                scope_filter=f"workspace:{workspace_id}",
+                **job_context,
+                observed_at=observed_at,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - persist independent source health
+        failures.append(f"Databricks App bindings: {type(exc).__name__}: {exc}")
+        health_rows.append(
+            application_cost.prepare_source_health(
+                workspace_id=workspace_id,
+                environment=environment,
+                source="databricks_app_bindings",
+                status="unavailable",
+                notes=f"Databricks Apps snapshot failed ({type(exc).__name__}).",
+                scope_filter=f"workspace:{workspace_id}",
+                **job_context,
+                observed_at=observed_at,
+            )
+        )
+
+    if not subscription_id:
+        failures.append("Azure subscription is not configured")
+        for source in ("azure_cost_resources", "azure_cost_tags"):
+            health_rows.append(application_cost.prepare_source_health(
+                workspace_id=workspace_id,
+                environment=environment,
+                source=source,
+                status="not_configured",
+                notes="Azure subscription ID is required for application cost evidence.",
+                scope_filter="subscription",
+                **job_context,
+                observed_at=observed_at,
+            ))
+    else:
+        baseline_failures = 0
+        tag_failures = 0
+        try:
+            credential = secrets.get_credential(args.service_credential or None)
+            for window_start, window_end in azure_cost.split_date_windows(
+                start.isoformat(), end.isoformat()
+            ):
+                observation_id = (
+                    f"job:{job_context['job_id']}:run:{job_context['run_id']}:"
+                    f"observed:{observed_at}"
+                    if job_context["job_id"] and job_context["run_id"]
+                    else observed_at
+                )
+                snapshot_id = application_cost.azure_evidence_snapshot_id(
+                    workspace_id=workspace_id,
+                    environment=environment,
+                    subscription_id=subscription_id,
+                    query_start=window_start,
+                    query_end=window_end,
+                    observation_id=observation_id,
+                )
+                # Sequential by design: Cost Management is limited to four
+                # requests/minute per scope and fetch_cost_query honors the
+                # longest 429 retry-after header before the next request.
+                try:
+                    resource_pages = azure_cost.fetch_cost_query(
+                        credential,
+                        subscription_id,
+                        window_start,
+                        window_end,
+                        body=azure_cost.build_resource_query_body(
+                            window_start,
+                            window_end,
+                        ),
+                    )
+                    parsed_resources = azure_cost.parse_resource_query_result(
+                        resource_pages
+                    )
+                    window_resources = (
+                        application_cost.prepare_azure_resource_evidence(
+                            parsed_resources,
+                            workspace_id=workspace_id,
+                            environment=environment,
+                            subscription_id=subscription_id,
+                            query_start=window_start,
+                            query_end=window_end,
+                            snapshot_id=snapshot_id,
+                            observed_at=observed_at,
+                        )
+                    )
+                    azure_resource_rows.extend(window_resources)
+                except Exception as exc:  # noqa: BLE001 - record failed window
+                    baseline_failures += 1
+                    failures.append(
+                        f"Azure resource baseline {window_start}..{window_end}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    continue
+
+                window_tags: list[dict] = []
+                tag_complete = True
+                for tag_key in tag_keys:
+                    try:
+                        pages = azure_cost.fetch_cost_query(
+                            credential,
+                            subscription_id,
+                            window_start,
+                            window_end,
+                            body=azure_cost.build_tag_query_body(
+                                window_start,
+                                window_end,
+                                tag_key=tag_key,
+                            ),
+                        )
+                        parsed = azure_cost.parse_tag_query_result(pages, tag_key)
+                        window_tags.extend(
+                            application_cost.prepare_tag_evidence(
+                                parsed,
+                                workspace_id=workspace_id,
+                                environment=environment,
+                                subscription_id=subscription_id,
+                                query_start=window_start,
+                                query_end=window_end,
+                                snapshot_id=snapshot_id,
+                                observed_at=observed_at,
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001 - fail closed identity
+                        tag_complete = False
+                        tag_failures += 1
+                        failures.append(
+                            f"Azure tag {tag_key} {window_start}..{window_end}: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        break
+                if tag_complete:
+                    tag_rows.extend(window_tags)
+                azure_snapshot_rows.append(
+                    application_cost.prepare_azure_evidence_snapshot(
+                        snapshot_id=snapshot_id,
+                        workspace_id=workspace_id,
+                        environment=environment,
+                        subscription_id=subscription_id,
+                        query_start=window_start,
+                        query_end=window_end,
+                        baseline_status="complete",
+                        tag_status="complete" if tag_complete else "partial",
+                        tag_keys=tag_keys,
+                        row_count=len(window_resources),
+                        observed_at=observed_at,
+                        **job_context,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - credential/source unavailable
+            baseline_failures += 1
+            tag_failures += 1
+            failures.append(f"Azure Cost Management: {type(exc).__name__}: {exc}")
+
+        for source, failed_count, row_count in (
+            ("azure_cost_resources", baseline_failures, len(azure_resource_rows)),
+            ("azure_cost_tags", tag_failures, len(tag_rows)),
+        ):
+            health_rows.append(
+                application_cost.prepare_source_health(
+                    workspace_id=workspace_id,
+                    environment=environment,
+                    subscription_id=subscription_id,
+                    scope_filter="subscription",
+                    source=source,
+                    status="partial" if failed_count else "healthy",
+                    notes=(
+                        f"Observed {row_count} subscription-scoped rows; metric is "
+                        "ActualCost aggregated from PreTaxCost. "
+                        f"Configured tag keys: {','.join(tag_keys)}."
+                    ),
+                    coverage_start=start.isoformat(),
+                    coverage_end=end.isoformat(),
+                    last_success_at=observed_at if not failed_count else None,
+                    **job_context,
+                    observed_at=observed_at,
+                )
+            )
+
+    counts = application_cost.append_application_evidence(
+        workspace,
+        warehouse,
+        settings.dashboard_catalog,
+        settings.dashboard_schema,
+        azure_snapshot_rows=azure_snapshot_rows,
+        azure_resource_rows=azure_resource_rows,
+        tag_rows=tag_rows,
+        binding_rows=binding_rows,
+        binding_snapshot_rows=binding_snapshots,
+        health_rows=health_rows,
+    )
+    resolved_evidence, resolved_health = application_cost.read_application_evidence(
+        workspace,
+        warehouse,
+        settings.dashboard_catalog,
+        settings.dashboard_schema,
+        workspace_id=workspace_id,
+        environment=environment,
+        subscription_id=subscription_id,
+        days=days,
+        tag_keys=tag_keys,
+    )
+    counts["platform_findings"] = digest.store_findings(
+        workspace,
+        warehouse,
+        settings.dashboard_catalog,
+        settings.dashboard_schema,
+        application_cost.classify_application_findings(
+            resolved_evidence,
+            resolved_health,
+        ),
+        workspace_id=workspace_id,
+        environment=environment,
+    )
+    emit(
+        args,
+        f"Application evidence sync {start}..{end}",
+        [counts],
+        [
+            "Azure resource evidence is subscription-scoped ActualCost/PreTaxCost; "
+            "tags are identity metadata only; "
+            "currencies and Databricks List cost remain separate.",
+            *failures,
+        ],
+    )
+    if failures:
+        raise RuntimeError("Application evidence sync was partial: " + "; ".join(failures))
+    return 0
+
+
 def cmd_azure_cost_report(args) -> int:
     from dbx_platform import azure_cost
 
@@ -2428,6 +2728,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict to one allocation bucket (e.g. foundry_ai)",
     )
     x.set_defaults(func=cmd_azure_cost_detail)
+
+    # applications
+    applications = sub.add_parser(
+        "applications",
+        help="Application identity, cost attribution, and evidence",
+    ).add_subparsers(dest="command")
+    x = applications.add_parser(
+        "sync",
+        parents=[common, governed_write],
+        help="Append Azure billing tags and Databricks App resource bindings",
+    )
+    x.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Observation window, default 3; use 90 for the initial backfill",
+    )
+    x.add_argument(
+        "--subscription-id",
+        default=None,
+        help="Azure subscription (default: DBX_PLATFORM_AZURE_SUBSCRIPTION_ID)",
+    )
+    x.add_argument(
+        "--tag-keys",
+        default=None,
+        help="Precedence-ordered identity tags (default application,app,project)",
+    )
+    x.add_argument(
+        "--service-credential",
+        default=None,
+        help="UC service credential name for keyless Azure auth",
+    )
+    x.set_defaults(func=cmd_applications_sync)
 
     # estimator
     pe = sub.add_parser(

@@ -174,13 +174,32 @@ def fetch_registered_models(
     w: WorkspaceClient, catalog: str | None, schema: str | None, max_models: int
 ) -> tuple[list[dict], bool]:
     """UC registered models with versions and aliases. Returns (models,
-    truncated) — truncated is True when max_models capped the listing."""
+    truncated) — truncated is True when max_models capped the listing.
+
+    The inexpensive list call is consumed before fetching per-model details so
+    customer-managed models are selected ahead of ``system.ai`` entries.  A
+    system-heavy catalog must never consume the detail budget and hide the
+    models an operator actually owns.
+    """
+    if max_models < 1:
+        raise ValueError("max_models must be positive")
+    customer = []
+    system = []
+    listed_count = 0
+    for model in w.registered_models.list(catalog_name=catalog, schema_name=schema):
+        listed_count += 1
+        destination = (
+            system
+            if str(model.full_name or "").casefold().startswith("system.ai.")
+            else customer
+        )
+        # The iterator must still be consumed so customer models appearing
+        # after a long system catalog are discovered, but memory stays bounded.
+        if len(destination) < max_models:
+            destination.append(model)
+    selected = [*customer, *system][:max_models]
     models = []
-    truncated = False
-    for m in w.registered_models.list(catalog_name=catalog, schema_name=schema):
-        if len(models) >= max_models:
-            truncated = True
-            break
+    for m in selected:
         detail = w.registered_models.get(m.full_name, include_aliases=True)
         versions = [
             {"version": v.version, "created_ms": v.created_at or 0}
@@ -196,7 +215,7 @@ def fetch_registered_models(
                 "versions": versions,
             }
         )
-    return models, truncated
+    return models, listed_count > max_models
 
 
 def classify_models(

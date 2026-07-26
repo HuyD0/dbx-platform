@@ -110,6 +110,18 @@ GRANT SELECT ON TABLE main.dbx_platform.llm_budgets TO `dbx-platform-app`;
 GRANT SELECT ON TABLE main.dbx_platform.ai_model_catalog TO `dbx-platform-app`;
 GRANT SELECT ON TABLE main.dbx_platform.ai_model_access TO `dbx-platform-app`;
 GRANT SELECT ON TABLE main.dbx_platform.ai_app_monitoring TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.azure_cost_evidence_snapshots
+  TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.azure_cost_resource_evidence
+  TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.azure_cost_tag_evidence
+  TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.application_binding_snapshots
+  TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.application_resource_bindings
+  TO `dbx-platform-app`;
+GRANT SELECT ON TABLE main.dbx_platform.application_source_health
+  TO `dbx-platform-app`;
 ```
 
 Apply the same table-level `SELECT` set to `dbx-platform-viewers`,
@@ -214,6 +226,18 @@ GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_model_catalog
 GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_model_access
   TO `dbx-platform-reporters`;
 GRANT SELECT, MODIFY ON TABLE main.dbx_platform.ai_app_monitoring
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.azure_cost_evidence_snapshots
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.azure_cost_resource_evidence
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.azure_cost_tag_evidence
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.application_binding_snapshots
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.application_resource_bindings
+  TO `dbx-platform-reporters`;
+GRANT SELECT, MODIFY ON TABLE main.dbx_platform.application_source_health
   TO `dbx-platform-reporters`;
 ```
 

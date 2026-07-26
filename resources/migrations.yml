@@ -31,6 +31,8 @@ resources:
               - ${var.control_plane_schema}
               - --app-service-principal
               - ${resources.apps.platform_console.service_principal_client_id}
+              - --runtime-executor-service-principal
+              - ${var.runtime_executor_service_principal_name}
               - --operator-group
               - ${var.operator_group}
               - --approver-group
