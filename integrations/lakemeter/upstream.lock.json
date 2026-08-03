@@ -1,6 +1,6 @@
 {
-  "archive_sha256": "8c7efabe14d27000fb6b672d05a5607b4282f2ddd3bd1b43d718c390907ac025",
-  "commit": "4454229a3371ba05b9aa8555df0ebba47aff4387",
+  "archive_sha256": "617706d0b357b80dc5a0122d09033d651600714b89b9e63958d23b57e035991a",
+  "commit": "c50491995f38fd175d042a53f0fd473cd42a06a5",
   "included_paths": [
     "LICENSE.md",
     "NOTICE.md",
@@ -22,6 +22,6 @@
   "pricing_version": "2026-04-10T09:20:30.571090",
   "repository": "databrickslabs/lakemeter-oss",
   "schema_version": 1,
-  "tag": "v0.1.0",
-  "vendored_tree_sha256": "12825405665222d37b9274408518b0c0f77d3ca771aa8e2cc79693459225ab26"
+  "tag": "v0.1.1",
+  "vendored_tree_sha256": "651b6fc67be3361279933d822455d5a9329f1ddc5a527939887a8422c6779237"
 }
